@@ -11,16 +11,15 @@ self-coding-agent/
   configs/
   docs/
   src/
-    self_coding_agent/
-      cli/
-      core/
-      models/
-      tools/
-      context/
-      memory/
-      trace/
-      eval/
-      reports/
+     cli/
+     core/
+     models/
+     tools/
+     context/
+     memory/
+     trace/
+     eval/
+     reports/
   eval_tasks/
   runs/
   tests/
@@ -92,7 +91,7 @@ configs/
 - 调整 step/tool budget。
 - 指定模型 provider。
 
-## `src/self_coding_agent/`
+## `src/`
 
 这是主包目录，项目核心代码都放在这里。
 

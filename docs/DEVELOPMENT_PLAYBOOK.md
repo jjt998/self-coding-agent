@@ -1,44 +1,44 @@
-# Development Playbook
+# 开发执行手册
 
-## 1. Purpose
+## 1. 目的
 
-This document is the execution guide for building the first MVP of the self-coding-agent project.
+本文档用于指导 `self-coding-agent` 项目第一版 MVP 的实际开发执行。
 
-It is designed to support:
+它服务于以下目标：
 
-- Iterative development.
-- Session recovery after context compression.
-- Handoff to a new AI session.
-- Clear implementation order.
-- Stable evaluation of progress.
+- 支持迭代式开发。
+- 支持上下文压缩后的恢复。
+- 支持新 AI 会话接手。
+- 固定清晰的实现顺序。
+- 提供稳定的进度判断标准。
 
-If a future session needs to resume work, this file should be treated as the primary execution reference, together with:
+未来如果需要在新会话中继续推进本项目，应优先把本文件与以下文档一起作为当前事实来源：
 
 - `docs/PRD.md`
 - `docs/ARCHITECTURE.md`
 - `docs/MONTH_PLAN.md`
 
-## 2. Project Intent
+## 2. 项目意图
 
-The project is not a one-off coding agent demo.
+这个项目不是一次性的 coding agent demo。
 
-The project is a research-oriented local coding agent harness whose core value is:
+这个项目是一个面向本地代码仓的研究型 coding agent harness，核心价值在于：
 
-- comparability,
-- observability,
-- replayability,
-- diagnosability,
-- strategy iteration.
+- 可比较
+- 可观测
+- 可回放
+- 可诊断
+- 可迭代实验
 
-The first MVP should prioritize harness quality over raw bug-fixing strength.
+第一版 MVP 应优先保证 harness 质量，而不是单纯追求 bug 修复成功率。
 
-## 3. Non-Negotiable MVP Decisions
+## 3. 已确定且早期不应重开的 MVP 决策
 
-These decisions are already made and should not be re-opened during early implementation unless a strong reason appears.
+以下决策已经确认，除非实现过程中出现强阻塞，否则早期开发不再重开讨论。
 
-### 3.1 Loop Baseline
+### 3.1 Loop 基线
 
-Use an explicit state-machine loop:
+采用显式状态机 loop：
 
 - `ingest`
 - `analyze`
@@ -49,127 +49,127 @@ Use an explicit state-machine loop:
 - `verify`
 - `finalize`
 
-Rules:
+规则：
 
-- The first `act` must come after `plan`.
-- `reflect` is conditional, not per-step.
-- `verify` is required before `finalize`.
-- Failures are represented by structured status and stop reason, not a dedicated `fail` state.
+- 第一次 `act` 必须发生在 `plan` 之后。
+- `reflect` 是条件触发，不是每步固定执行。
+- `verify` 是 `finalize` 前的必要条件。
+- 失败通过结构化 `status` 和 `stop reason` 表示，不单独建 `fail` 状态。
 
-### 3.2 Context Baseline
+### 3.2 Context 基线
 
-Use four context layers:
+采用四层上下文：
 
 - `task_context`
 - `repo_context`
 - `runtime_context`
 - `memory_context`
 
-Use file-level recall first. Do not build a heavy symbol system in MVP.
+第一版优先采用文件级召回，不做重型符号系统。
 
-### 3.3 Memory Baseline
+### 3.3 Memory 基线
 
-Use:
+采用：
 
-- runtime memory
-- structured long-term memory
+- 运行时记忆
+- 结构化长期记忆
 
-Do not use vector memory or embedding retrieval in MVP.
+第一版不使用向量记忆或 embedding 检索。
 
-Write long-term memory only after success plus verification pass.
+长期记忆只在任务成功且验证通过后写入。
 
-### 3.4 Eval Baseline
+### 3.4 Eval 基线
 
-Eval starts in the first implementation stage.
+Eval 从第一阶段就开始进入设计与实现。
 
-Target task types:
+目标任务类型：
 
 - `code_understanding`
 - `bug_fix`
 - `test_generation`
 - `refactor`
 
-### 3.5 Memory Pollution Scope
+### 3.5 Memory 污染范围
 
-MVP must include:
+MVP 必须包含：
 
-- `memory_pollution` diagnosis label
-- `memory_conflict` evidence recording
-- schema fields that allow future anti-pollution strategies
+- `memory_pollution` 诊断标签
+- `memory_conflict` 证据记录
+- 为后续抗污染策略预留的 schema 字段
 
-MVP does not include a dedicated memory-pollution experiment track.
+MVP 不包含专门的 memory 污染对比实验。
 
-## 4. Execution Order
+## 4. 实现顺序
 
-Do not implement in feature popularity order. Implement in control-surface order.
+不要按“哪个功能看起来更智能”来实现，而要按“哪个控制面先落地”来实现。
 
-Recommended order:
+推荐顺序：
 
-1. Project scaffold.
-2. Runtime models and config models.
-3. Trace writer and run directory structure.
-4. CLI entrypoint.
-5. Tool registry and five core tools.
-6. Baseline state-machine loop.
-7. Verification flow.
-8. Context builder and file recall.
-9. Runtime memory.
-10. Long-term memory store and retrieval.
-11. Eval task schema and batch runner.
-12. Markdown reports.
-13. Strategy toggles and comparison runs.
+1. 项目脚手架。
+2. 运行时数据模型与配置模型。
+3. Trace writer 与 run 目录结构。
+4. CLI 入口。
+5. 工具注册表与五个核心工具。
+6. 基线状态机 loop。
+7. 验证流程。
+8. Context builder 与文件级召回。
+9. 运行时记忆。
+10. 长期记忆存储与检索。
+11. Eval task schema 与 batch runner。
+12. Markdown 报告。
+13. 策略开关与对比实验。
 
-## 5. Phase Breakdown
+## 5. 阶段拆分
 
-### Phase 1: Scaffold and Control Plane
+### Phase 1：脚手架与控制面
 
-Goal:
+目标：
 
-- Make the repository runnable and structurally stable.
+- 让仓库具备可运行、可扩展、结构稳定的基础。
 
-Deliver:
+交付：
 
 - `pyproject.toml`
-- package layout under `src/self_coding_agent/`
+- `src/self_coding_agent/` 包结构
 - `tests/`
 - `configs/`
 - `eval_tasks/`
 - `runs/`
-- base settings model
+- 基础 settings model
 - trace event model
 - trace writer
 - CLI skeleton
 
-Definition of done:
+完成定义：
 
-- A command can start a run and emit a run directory with config snapshot and empty trace/report stubs.
+- 一条命令可以启动 run，并生成 run 目录、配置快照，以及空的 trace/report 占位文件。
 
-### Phase 2: Minimal Agent Loop
+### Phase 2：最小 Agent Loop
 
-Goal:
+目标：
 
-- Run a task through the fixed state-machine skeleton.
+- 让任务能沿着固定状态机骨架运行。
 
-Deliver:
+交付：
 
-- state enum
-- runtime state object
+- 状态枚举
+- 运行时状态对象
 - stop reason model
 - loop orchestrator
-- no-progress tracking
-- reflect trigger placeholders
+- 无进展跟踪
+- reflect 触发占位逻辑
 
-Definition of done:
+完成定义：
 
-- A single run can move through the loop and produce state transition events even if model behavior is still stubbed.
+- 即使模型行为仍是 stub，也可以完整跑出状态流，并生成状态迁移事件。
 
-### Phase 3: Core Tools
+### Phase 3：核心工具
 
-Goal:
+目标：
 
-- Support the minimum repo operations required for coding tasks.
+- 支撑最小本地代码任务闭环。
 
-Deliver:
+交付：
 
 - `search_text`
 - `read_file`
@@ -177,117 +177,118 @@ Deliver:
 - `run_command`
 - `git_diff`
 
-Definition of done:
+完成定义：
 
-- Every tool has structured input and output and is recorded in trace.
+- 每个工具都有结构化输入输出，并且工具调用会进入 trace。
 
-### Phase 4: Verification and Reports
+### Phase 4：验证与报告
 
-Goal:
+目标：
 
-- Make success and failure auditable.
+- 让成功与失败具备审计能力。
 
-Deliver:
+交付：
 
 - verification result schema
-- verify execution
-- Markdown single-run report
-- structured stop reasons
+- verify 执行流程
+- 单次 run 的 Markdown 报告
+- 结构化 stop reason
 
-Definition of done:
+完成定义：
 
-- A run can end with a report showing status, tools used, and verification result.
+- 一次 run 结束后，报告能展示状态、使用过的工具和验证结果。
 
-### Phase 5: Context and Recall
+### Phase 5：Context 与 Recall
 
-Goal:
+目标：
 
-- Make agent input controlled rather than ad hoc.
+- 让模型输入变成可控系统，而不是临时拼 prompt。
 
-Deliver:
+交付：
 
 - task/repo/runtime/memory context models
-- file-level recall
-- raw/summary/index-only selection logic
-- context trimming policy
+- 文件级召回
+- 原文/摘要/索引三种注入策略
+- 上下文裁剪规则
 
-Definition of done:
+完成定义：
 
-- Context snapshots are visible in trace, and candidate file recall is inspectable.
+- Trace 里能看到 context snapshot，候选文件召回过程可检查。
 
-### Phase 6: Memory
+### Phase 6：Memory
 
-Goal:
+目标：
 
-- Add reuse without overcomplicating retrieval.
+- 在不引入重型检索的前提下实现经验复用。
 
-Deliver:
+交付：
 
 - runtime memory manager
 - long-term memory store
-- structured memory entries
-- filtering by tags, task type, file path, keywords
+- 结构化 memory entry
+- 基于 tags、task type、file path、keywords 的过滤检索
 - conflict evidence tracking
 
-Definition of done:
+完成定义：
 
-- Successful verified runs can write memory entries, and later runs can retrieve them.
+- 成功且验证通过的 run 可以写入长期记忆，后续任务可以读取相关记忆。
 
-### Phase 7: Eval
+### Phase 7：Eval
 
-Goal:
+目标：
 
-- Compare runs instead of inspecting isolated behavior.
+- 从单次运行提升为可重复评测。
 
-Deliver:
+交付：
 
 - task spec schema
 - eval runner
 - result metrics
 - process metrics
 - diagnostic labels
-- batch summary report
+- 基于规则的初步诊断流程
+- batch Markdown summary
 
-Definition of done:
+完成定义：
 
-- A fixed task set can run in batch and produce summary metrics.
+- 固定任务集可以批量运行，并输出成功率、平均步数、平均工具调用数和失败分布。
 
-### Phase 8: Strategy Comparison
+### Phase 8：策略对比
 
-Goal:
+目标：
 
-- Use the harness for actual experimentation.
+- 让 harness 真正进入实验用途。
 
-Deliver:
+交付：
 
 - baseline strategy config
 - context strategy variants
-- memory on/off switch
+- memory on/off 开关
 - reflect trigger variants
 - comparison summary
 
-Definition of done:
+完成定义：
 
-- At least two strategies can be compared on the same task set with recorded deltas.
+- 同一任务集上至少两种策略可比较，并且能输出 delta。
 
-## 6. Engineering Rules During Implementation
+## 6. 实现过程中的工程规则
 
-### 6.1 Prefer Stable Models
+### 6.1 优先使用稳定结构模型
 
-Use structured Python models for:
+以下对象应尽量采用结构化 Python model：
 
 - config
 - runtime state
 - trace events
 - tool outputs
 - eval specs
-- reports where practical
+- 能结构化的 report 数据
 
-### 6.2 Keep Interfaces Small
+### 6.2 接口保持小而稳
 
-Do not over-abstract early.
+不要过早抽象。
 
-Interfaces that must exist early:
+但以下接口应尽早存在：
 
 - model adapter base
 - tool registry base
@@ -295,19 +296,19 @@ Interfaces that must exist early:
 - memory manager interface
 - context builder interface
 
-### 6.3 Avoid Premature Intelligence
+### 6.3 避免过早追求“智能”
 
-Do not spend early time on:
+早期不要把时间花在：
 
-- advanced prompt tuning
-- heavy planning frameworks
-- embedding retrieval
-- rich UI
-- autonomous multi-agent execution
+- 高级 prompt 调优
+- 重型 planning 框架
+- embedding 检索
+- 富 UI
+- 多 agent 自治执行
 
-### 6.4 Every Important Action Must Leave Evidence
+### 6.4 重要动作必须留证据
 
-At minimum, trace must record:
+Trace 最少应记录：
 
 - config snapshot
 - state transitions
@@ -318,15 +319,15 @@ At minimum, trace must record:
 - verify result
 - stop reason
 
-## 7. Suggested Repository Milestones
+## 7. 建议里程碑
 
 ### Milestone A
 
-Repo can run:
+仓库可以通过：
 
 - `python -m self_coding_agent.cli ...`
 
-and creates:
+启动，并生成：
 
 - run directory
 - config snapshot
@@ -335,92 +336,83 @@ and creates:
 
 ### Milestone B
 
-Repo can perform:
+仓库可以在一个受控 run 中完成：
 
-- search
-- file read
-- patch
-- command execution
-- diff collection
-
-inside one controlled run.
+- 搜索
+- 读文件
+- 打补丁
+- 执行命令
+- 收集 diff
 
 ### Milestone C
 
-Repo can execute:
+仓库可以完成：
 
-- one simple `code_understanding` task
-- one simple `bug_fix` task
+- 一个简单 `code_understanding` 任务
+- 一个简单 `bug_fix` 任务
 
-with trace and report.
+并生成 trace 与 report。
 
 ### Milestone D
 
-Repo can batch-run a small eval set and report:
+仓库可以批量运行小型 eval 集，并输出：
 
 - success rate
 - average steps
 - average tool calls
 - failure distribution
 
-## 8. First Experiments To Run
+## 8. 第一批应执行的实验
 
-After MVP infrastructure exists, compare:
+在 MVP 基础设施到位后，优先比较：
 
 ### Experiment 1
 
 `naive_recent_context` vs `file_recall_context`
 
-Question:
+问题：
 
-- Does file recall reduce `context_miss`?
+- 文件级召回是否降低 `context_miss`？
 
 ### Experiment 2
 
 `memory_off` vs `structured_memory_on`
 
-Question:
+问题：
 
-- Does memory reduce repeated exploration?
+- memory 是否减少重复探索？
 
 ### Experiment 3
 
 `verify_failure_only_reflect` vs `low_progress_plus_verify_reflect`
 
-Question:
+问题：
 
-- Does conditional reflect reduce repeated no-progress loops?
+- 条件 reflect 是否减少 repeated no-progress loops？
 
-## 9. What A New Session Should Do First
+## 9. 新会话应先做什么
 
-If a new AI session resumes this project, it should:
+如果未来要在新 AI 会话中继续本项目，建议先做：
 
-1. Read:
+1. 阅读：
    - `docs/DEVELOPMENT_PLAYBOOK.md`
+   - `docs/DEVELOPMENT_PLAYBOOK.zh-CN.md`
    - `docs/PRD.md`
    - `docs/ARCHITECTURE.md`
    - `docs/MONTH_PLAN.md`
-2. Inspect current repository structure.
-3. Identify the latest completed phase from this playbook.
-4. Continue from the next unfinished phase.
-5. Avoid reopening settled design decisions unless blocked by implementation reality.
+2. 检查当前仓库结构。
+3. 确认当前已完成到哪一个 phase。
+4. 从下一个未完成 phase 继续实现。
+5. 除非实现现实强迫改变，否则不要重开已经确定的 MVP 决策。
 
-## 10. Handoff Prompt For A New Session
+## 10. 当前推荐下一步
 
-Use the following prompt to resume in a new session:
+在本文件完成后，下一步应进入：
 
-```text
-Read docs/DEVELOPMENT_PLAYBOOK.md first, then docs/PRD.md, docs/ARCHITECTURE.md, and docs/MONTH_PLAN.md. Treat those files as the current source of truth. Inspect the repository, identify the latest completed phase from the playbook, and continue implementation from the next unfinished phase without re-opening already-settled MVP decisions unless implementation reality forces a change. Preserve the project as a research-oriented coding agent harness focused on loop, context, memory, tool use, trace, replay, and eval.
-```
+- Python 项目脚手架
+- 包目录结构
+- config models
+- trace event models 与 writer
+- CLI entrypoint
 
-## 11. Current Recommended Next Step
-
-The next implementation step after this document is:
-
-- scaffold the Python project
-- add package layout
-- add config models
-- add trace event models and writer
-- add CLI entrypoint
-
-Do not jump ahead to advanced agent logic before that control plane exists.
+在这些控制面到位前，不要先跳到高级 agent 行为实现。

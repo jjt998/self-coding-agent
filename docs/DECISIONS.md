@@ -1,47 +1,47 @@
-# Decisions
+# 关键决策记录
 
-## Purpose
+## 目的
 
-This document records key project decisions that have already been made for the MVP.
+本文档记录本项目第一版 MVP 已经拍板的重要决策。
 
-Future implementation sessions should treat these as settled unless implementation reality forces a change.
+未来实现阶段如无现实阻塞，不应反复重开这些问题。
 
-## D-001: Build A Research-Oriented Harness First
+## D-001：先做研究型 Harness，而不是先做终端产品
 
-Decision:
+决策：
 
-- Prioritize a research-oriented coding agent harness over a polished end-user product.
+- 第一优先级是研究型 coding agent harness，而不是打磨面向终端用户的产品形态。
 
-Reason:
+原因：
 
-- The project goal is to study loop, context, memory, tool use, trace, replay, and eval.
-- A usable agent matters, but comparability and iteration matter more in the first month.
+- 项目目标是研究 loop、context、memory、tool use、trace、replay 和 eval。
+- 第一阶段中，“可比较、可迭代”比“单次任务成功率更高”更重要。
 
-Impact:
+影响：
 
-- Infrastructure quality takes priority over raw task success rate.
+- 基础设施质量优先于纯粹的 bug 修复能力。
 
-## D-002: Local Repository CLI First
+## D-002：先做本地代码仓 CLI
 
-Decision:
+决策：
 
-- Support local repository CLI workflows first.
+- 第一版优先支持本地代码仓 CLI 工作流。
 
-Reason:
+原因：
 
-- It keeps the scope controlled.
-- It is enough to study the harness.
-- It avoids early complexity from remote sandboxes, IDE integrations, or browsers.
+- 这样范围更可控。
+- 已足够支撑 harness 研究。
+- 可以避免远程沙箱、IDE 集成、浏览器等早期复杂度。
 
-Impact:
+影响：
 
-- MVP excludes cloud execution, browser automation, and IDE plugin workflows.
+- MVP 不包含云端执行、浏览器自动化和 IDE 插件流程。
 
-## D-003: Use An Explicit State-Machine Loop
+## D-003：采用显式状态机 Loop
 
-Decision:
+决策：
 
-- Use an explicit state-machine loop with:
+- Loop 采用显式状态机：
   - `ingest`
   - `analyze`
   - `plan`
@@ -51,176 +51,176 @@ Decision:
   - `verify`
   - `finalize`
 
-Reason:
+原因：
 
-- It is easier to trace, replay, constrain, and compare than a fully free-form loop.
-- It makes evaluation and diagnostics clearer.
+- 相比自由形态 loop，更容易 trace、replay、加约束和做对比实验。
+- 有利于 eval 和诊断清晰化。
 
-Impact:
+影响：
 
-- The loop itself is initially treated as a stable baseline, not the first major experimental variable.
+- 第一阶段中，loop 被视为稳定 baseline，而不是最先被大规模实验的变量。
 
-## D-004: Reflect Is Conditional
+## D-004：Reflect 采用条件触发
 
-Decision:
+决策：
 
-- `reflect` is not executed on every step.
-- It is triggered by low progress, verification failure, conflicting evidence, or budget pressure.
+- `reflect` 不是每一步固定执行。
+- 它由低进展、验证失败、证据冲突或预算逼近触发。
 
-Reason:
+原因：
 
-- Per-step reflection is expensive and often low-value.
-- Conditional reflection better matches the project goal of studying useful control points.
+- 每步 reflect 成本高，而且常常收益低。
+- 条件触发更符合本项目想研究“哪些控制点真正有用”的目标。
 
-Impact:
+影响：
 
-- Reflection becomes an explicit experimental lever later.
+- 后续可以把 reflect 触发策略作为实验变量。
 
-## D-005: Require Verification Before Finalize
+## D-005：Finalize 前必须有 Verify
 
-Decision:
+决策：
 
-- `finalize` requires at least one verification attempt.
+- `finalize` 前至少要经过一次 `verify`。
 
-Reason:
+原因：
 
-- Model self-judgment is not enough for reliable success claims.
-- Verification is needed for fair evaluation and trustworthy reporting.
+- 不能只依赖模型自我判断成功。
+- 验证是 fair eval 和可信报告的必要条件。
 
-Impact:
+影响：
 
-- Success is a system judgment, not just a model claim.
+- “成功”是系统判断，不只是模型口头宣称。
 
-## D-006: Start With File-Level Recall
+## D-006：第一版先用文件级召回
 
-Decision:
+决策：
 
-- Use file-level recall plus lightweight keyword and symbol-oriented search.
+- 采用文件级召回，并辅以轻量关键词/符号搜索。
 
-Reason:
+原因：
 
-- It is simpler, fast to implement, and good enough for the MVP.
-- A heavy AST/LSP-based symbol graph would consume too much schedule and distract from harness work.
+- 实现简单，足够支撑 MVP。
+- 重型 AST/LSP 符号图会大量消耗工期，偏离 harness 主线。
 
-Impact:
+影响：
 
-- Context quality is improved through controlled recall, not through a full code intelligence platform.
+- Context 质量通过受控召回提升，而不是先造完整代码理解平台。
 
-## D-007: Use Four Context Layers
+## D-007：Context 采用四层结构
 
-Decision:
+决策：
 
-- Separate context into:
+- Context 分为：
   - `task_context`
   - `repo_context`
   - `runtime_context`
   - `memory_context`
 
-Reason:
+原因：
 
-- These layers have different lifecycles and different experimental roles.
-- Mixing them makes diagnosis and replacement harder.
+- 这些信息层生命周期不同、实验角色不同。
+- 混在一起会让诊断和替换更困难。
 
-Impact:
+影响：
 
-- Context building is treated as a first-class system module.
+- Context builder 被视为一等模块。
 
-## D-008: Use Structured Long-Term Memory Without Embeddings In MVP
+## D-008：MVP 的长期记忆不用 Embedding
 
-Decision:
+决策：
 
-- Long-term memory uses structured entries, tag filtering, path filtering, task-type filtering, and keyword search.
-- Do not use vector retrieval or embeddings in the MVP.
+- 长期记忆采用结构化条目、标签过滤、路径过滤、任务类型过滤和关键词搜索。
+- MVP 不使用向量检索和 embedding。
 
-Reason:
+原因：
 
-- First-month memory volume will be small.
-- Structured retrieval is easier to debug and compare.
-- Embedding retrieval adds complexity before it is justified.
+- 第一个月长期记忆规模不会大。
+- 结构化检索更易调试、更易比较。
+- Embedding 检索会增加不必要复杂度。
 
-Impact:
+影响：
 
-- Memory architecture should leave room for a future retrieval backend, but not depend on one now.
+- 记忆架构需要为未来检索后端预留接口，但当前不能依赖它。
 
-## D-009: Write Long-Term Memory Conservatively
+## D-009：长期记忆写入要保守
 
-Decision:
+决策：
 
-- Write long-term memory only after task success and verification pass.
+- 长期记忆只在任务成功且验证通过后写入。
 
-Reason:
+原因：
 
-- Wrong memory is more harmful than missing memory.
-- Early memory systems are especially vulnerable to contamination.
+- 错记比不记更危险。
+- 早期记忆系统尤其容易被污染。
 
-Impact:
+影响：
 
-- Runtime memory can be broad.
-- Long-term memory must be conservative.
+- 运行时记忆可以宽松记录。
+- 长期记忆必须保守写入。
 
-## D-010: Detect Memory Pollution, But Do Not Make It A Core MVP Experiment
+## D-010：感知 Memory 污染，但不把它做成第一版核心实验
 
-Decision:
+决策：
 
-- Include `memory_pollution` diagnosis and `memory_conflict` evidence.
-- Do not run dedicated memory-pollution experiments in the MVP.
+- 第一版包含 `memory_pollution` 诊断标签和 `memory_conflict` 证据记录。
+- 第一版不做专门的 memory 污染实验。
 
-Reason:
+原因：
 
-- Pollution awareness is important.
-- A full experiment track would require more memory volume and more task history than the MVP will have.
+- 污染感知很重要。
+- 但完整实验需要更多记忆量和任务历史，不适合 MVP。
 
-Impact:
+影响：
 
-- The schema must support future anti-pollution strategies.
-- The first version only needs observability and basic safeguards.
+- Schema 必须支持未来抗污染策略。
+- 第一版只要求可观测和基本保护。
 
-## D-011: Eval Starts Early
+## D-011：Eval 提前进入
 
-Decision:
+决策：
 
-- Eval is part of the first implementation stage.
+- Eval 从第一阶段就进入实现。
 
-Reason:
+原因：
 
-- The project is about iteration and comparison.
-- Without early eval, later improvements will be hard to attribute.
+- 项目的核心是可迭代、可比较。
+- 如果没有早期 eval，后续改动很难归因。
 
-Impact:
+影响：
 
-- Even weak early agent runs should emit metrics and reports.
+- 即使早期 agent 很弱，也要能输出 metrics 和 report。
 
-## D-012: Focus On Four Task Types
+## D-012：先聚焦四类任务
 
-Decision:
+决策：
 
-- Support:
+- 第一版支持：
   - `code_understanding`
   - `bug_fix`
   - `test_generation`
   - `refactor`
 
-Reason:
+原因：
 
-- These task types cover the main learning targets while keeping the task set manageable.
+- 这四类任务覆盖主要学习目标，同时任务集仍可控。
 
-Impact:
+影响：
 
-- Eval and diagnostics should keep task-type distinctions explicit.
+- Eval 和诊断必须显式保留任务类型区分。
 
-## D-013: First-Core Experiments
+## D-013：第一批核心实验
 
-Decision:
+决策：
 
-- First strategy comparisons should focus on:
+- 第一批策略对比聚焦：
   - context strategy
   - memory on/off
   - reflect trigger strategy
 
-Reason:
+原因：
 
-- These are the strongest fit for the stated research goal.
+- 这三类变量与项目研究目标最一致。
 
-Impact:
+影响：
 
-- The initial code architecture must expose these as configurable strategies.
+- 代码架构需要从一开始就把这些能力暴露为可配置策略。

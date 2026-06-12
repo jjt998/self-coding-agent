@@ -1,0 +1,10 @@
+{
+  "model": {
+    "provider": "stub",
+    "name": "phase-1-placeholder"
+  },
+  "runtime": {
+    "max_steps": 1,
+    "trace_level": "standard"
+  }
+}

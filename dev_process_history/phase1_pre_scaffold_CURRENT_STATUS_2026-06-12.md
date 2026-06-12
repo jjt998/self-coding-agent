@@ -32,7 +32,7 @@
 
 - 创建 Python 项目骨架：
   - `pyproject.toml`
-  - `src/self_coding_agent/`
+  - `src/`
   - `tests/`
   - `configs/`
   - `eval_tasks/`
