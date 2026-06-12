@@ -82,6 +82,11 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert tool_results[4]["tool_output"]["changed_file_count"] == 1
     assert "agent_notes.md" in tool_results[4]["tool_output"]["diffs"][0]["path"]
 
+    verification_events = [event["payload"] for event in trace_events if event["event_type"] == "verification_result"]
+    assert len(verification_events) == 1
+    assert verification_events[0]["passed"] is True
+    assert verification_events[0]["checks"][0]["name"] == "工具调用顺序"
+
     notes_path = repo_root / "agent_notes.md"
     assert notes_path.exists()
     assert "当前情况：已记录到 Phase 3 工具闭环。" in notes_path.read_text(encoding="utf-8")
@@ -89,3 +94,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "`finalize`" in report_text
     assert "reflect：已触发" in report_text
+    assert "## 工具调用摘要" in report_text
+    assert "## 验证结果" in report_text
+    assert "验证状态：通过" in report_text
+    assert "`apply_patch`：成功" in report_text

@@ -3,7 +3,7 @@
 ## 总览
 
 - 最后更新时间：2026-06-12
-- 当前激活阶段：`Phase 5：Context 与 Recall`
+- 当前激活阶段：`Phase 4：验证与报告`
 
 ## Phase 1：脚手架与控制面
 
@@ -65,27 +65,24 @@
 
 ## Phase 4：验证与报告
 
-- 状态：`completed`
+- 状态：`in_progress`
 - 目标：让成功与失败具备可审计性。
 - 已完成：
   - 验证需求已在文档中明确。
   - Phase 3 已提供稳定的工具 trace，可作为验证与报告输入。
+- 剩余：
   - 实现 verification result schema
   - 实现 verify 执行流程
   - 实现单次 run 的 Markdown 报告增强
   - 在报告中写出结构化 stop reason
-  - 增加 `verification_result` trace 事件
-  - 扩充 CLI 测试，验证报告与验证结果
-- 剩余：
-  - 暂无
 - 验收：
-  - 已通过
+  - 一次完成的 run 能产出状态、验证结果和可读报告。
 - 备注：
   - 验证规则应保持保守。
 
 ## Phase 5：Context 与 Recall
 
-- 状态：`in_progress`
+- 状态：`not_started`
 - 目标：让模型输入变得可控、可检查。
 - 已完成：
   - Context 分层设计已记录。

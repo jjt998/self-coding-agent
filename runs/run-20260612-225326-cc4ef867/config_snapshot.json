@@ -1,0 +1,19 @@
+{
+  "task": "测试到阶段4为止的最小闭环产出",
+  "task_type": "ad_hoc",
+  "repo_root": "D:\\1technical_stack_study\\agent_study\\agent_projects\\self-coding-agent",
+  "output_root": "runs",
+  "config_name": "default",
+  "run_id": "run-20260612-225326-cc4ef867",
+  "created_at": "2026-06-12T14:53:26+00:00",
+  "config": {
+    "model": {
+      "provider": "stub",
+      "name": "phase-1-placeholder"
+    },
+    "runtime": {
+      "max_steps": 1,
+      "trace_level": "standard"
+    }
+  }
+}

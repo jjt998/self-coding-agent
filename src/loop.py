@@ -7,6 +7,7 @@ from typing import Any
 from config import RunSettings
 from trace import TraceEvent, TraceWriter
 from tools import CoreToolRunner, ToolExecution, build_phase_3_tool_sequence
+from verify import VerificationResult, build_phase_4_verification
 
 
 class AgentState(str, Enum):
@@ -56,6 +57,8 @@ class RuntimeState:
     step_count: int = 0
     no_progress_count: int = 0
     reflect_triggered: bool = False
+    tool_executions: list[ToolExecution] = field(default_factory=list)
+    verification_result: VerificationResult | None = None
     stop_reason: StopReason | None = None
 
     def mark_completed(self, state: AgentState) -> None:
@@ -123,6 +126,7 @@ class LoopOrchestrator:
             details={
                 "completed_states": runtime_state.completed_states,
                 "reflect_triggered": runtime_state.reflect_triggered,
+                "verification_passed": runtime_state.verification_result.passed if runtime_state.verification_result else False,
             },
         )
         self.trace_writer.write_event(
@@ -177,6 +181,7 @@ class LoopOrchestrator:
             }
         if state is AgentState.ACT:
             tool_calls = self._run_phase_3_tools(tool_runner=tool_runner, task=runtime_state.task)
+            runtime_state.tool_executions = tool_calls
             return {
                 "summary": "已执行一次最小核心工具闭环。",
                 "tool_calls": [tool_call.to_trace_payload() for tool_call in tool_calls],
@@ -192,9 +197,18 @@ class LoopOrchestrator:
                 "trigger": "no_progress_after_observe",
             }
         if state is AgentState.VERIFY:
+            verification_result = build_phase_4_verification(runtime_state.tool_executions)
+            runtime_state.verification_result = verification_result
+            self.trace_writer.write_event(
+                TraceEvent(
+                    event_type="verification_result",
+                    payload=verification_result.to_dict(),
+                )
+            )
             return {
-                "summary": "stub 链路验证通过。",
-                "verification_passed": True,
+                "summary": verification_result.summary,
+                "verification_passed": verification_result.passed,
+                "checks": [check.to_dict() for check in verification_result.checks],
                 "config_keys": sorted(config_data.keys()),
             }
         return {

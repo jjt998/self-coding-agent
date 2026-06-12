@@ -28,18 +28,35 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
         )
     )
     runtime_state = LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=config_data)
-    trace_writer.write_report(_build_phase_2_report(settings=settings, runtime_state=runtime_state))
+    trace_writer.write_report(_build_phase_4_report(settings=settings, runtime_state=runtime_state))
 
     return run_dir
 
 
-def _build_phase_2_report(settings: RunSettings, runtime_state: RuntimeState) -> str:
-    """根据 Phase 2 运行结果生成最小 Markdown 报告。"""
+def _build_phase_4_report(settings: RunSettings, runtime_state: RuntimeState) -> str:
+    """把状态流、工具摘要和验证结果整理成当前阶段可读报告。"""
     stop_reason = runtime_state.stop_reason
     stop_reason_text = stop_reason.message if stop_reason else "未设置"
     stop_reason_code = stop_reason.code.value if stop_reason else "unknown"
     completed_states = " -> ".join(runtime_state.completed_states)
     reflect_status = "已触发" if runtime_state.reflect_triggered else "未触发"
+    verification_result = runtime_state.verification_result
+    verification_status = "通过" if verification_result and verification_result.passed else "未通过"
+    verification_summary = verification_result.summary if verification_result else "尚未生成验证结果。"
+
+    tool_lines = []
+    for execution in runtime_state.tool_executions:
+        tool_ok = execution.tool_output.get("ok")
+        tool_status = "成功" if tool_ok is True else "已记录"
+        tool_lines.append(f"- `{execution.tool_name}`：{tool_status}")
+    tool_summary = "\n".join(tool_lines) if tool_lines else "- 本次 run 未执行工具。"
+
+    verification_lines = []
+    if verification_result:
+        for check in verification_result.checks:
+            check_status = "通过" if check.passed else "未通过"
+            verification_lines.append(f"- {check.name}：{check_status}。{check.detail}")
+    verification_details = "\n".join(verification_lines) if verification_lines else "- 暂无验证检查项。"
 
     return (
         f"# 运行报告\n\n"
@@ -55,4 +72,10 @@ def _build_phase_2_report(settings: RunSettings, runtime_state: RuntimeState) ->
         f"- reflect：{reflect_status}\n"
         f"- stop reason：`{stop_reason_code}`\n"
         f"- stop reason 说明：{stop_reason_text}\n"
+        f"\n## 工具调用摘要\n\n"
+        f"{tool_summary}\n"
+        f"\n## 验证结果\n\n"
+        f"- 验证状态：{verification_status}\n"
+        f"- 验证说明：{verification_summary}\n"
+        f"\n{verification_details}\n"
     )
