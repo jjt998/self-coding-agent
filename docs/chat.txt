@@ -1,0 +1,46 @@
+和ai断断续续沟通了三天后，产出了这几份文档：PRD、架构书、月计划书、开发执行手册。
+PRD：定义做什么
+ARCHITECTURE：定义怎么组织系统，系统如何分层
+MONTH_PLAN：定义一个月节奏
+DEVELOPMENT_PLAYBOOK：定义实现顺序、阶段完成标准、会话恢复步骤、给新会话的接手提示词。（怎么开发）
+CURRENT_STATUS.md：现在做到哪
+PHASE_PROGRESS.md：各阶段完成情况和验收记录
+DECISIONS.md：为什么这样定
+    记录这些决策：
+    为什么第一版用显式状态机
+    为什么先文件级召回，不做重型符号系统
+    为什么长期记忆不用 embedding
+    为什么 eval 第一周就要进来
+    为什么 memory 污染只做检测，不做第一版核心实验
+    这样新会话如果想改方向，会先看到历史理由，而不是重复从头辩论。
+CURRENT_STATUS.md
+    作用：记录“现在做到哪了”。
+    这个对会话恢复特别有用，比长聊天记录更高效。
+    建议固定模板：
+        当前 phase
+        已完成项
+        进行中项
+        下一个明确动作
+        当前阻塞
+        最近一次变更日期
+    这样新会话一打开就知道：“现在不是讨论期，而是该开始 scaffold。”
+现在还缺一份真正适合“新会话快速启动”的轻量文档。我建议再补一个：
+docs/SESSION_ENTRY.md
+这个文档只写几件事：目的是按需加载所需文档
+    当前 phase
+    当前唯一推荐下一步
+    实现这个下一步必须读哪些文档
+    不需要读哪些文档
+    完成后要更新哪些文件
+
+暂时不建议再补的文档
+先不要继续加这些：
+    详细接口文档大全
+    大段 prompt 文档
+    复杂流程图集
+    长篇研究综述
+    过细的代码规范文档
+原因很简单：现在项目还没进入实现，继续补这些会让文档增长快于代码增长，维护成本开始反噬。
+
+新会话开发提示词：
+继续开发这个项目。先只阅读 docs/SESSION_ENTRY.md、docs/CURRENT_STATUS.md、docs/PHASE_PROGRESS.md 和 docs/DEVELOPMENT_PLAYBOOK.md，不要预加载全部项目文档。检查仓库，识别当前 phase，并从下一个未完成实现步骤继续。只有在当前阶段确实需要时，再读取 ARCHITECTURE、DECISIONS、PRD 或 MONTH_PLAN。完成工作后更新 CURRENT_STATUS 和 PHASE_PROGRESS。
