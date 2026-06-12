@@ -1,31 +1,31 @@
-# Session Entry
+# 会话入口
 
-## Purpose
+## 目的
 
-This document is the lightweight entrypoint for a new AI session.
+本文档是新 AI 会话进入本项目时使用的轻量入口文档。
 
-Do not start by loading every project document. Start here, then read only the minimum required files for the current phase.
+不要一开始就加载全部项目文档。应从这里进入，再根据当前阶段只读取最少必要文档。
 
-## Current Default Workflow
+## 当前默认工作流
 
-1. Read:
+1. 先阅读：
    - `docs/CURRENT_STATUS.md`
    - `docs/PHASE_PROGRESS.md`
    - `docs/DEVELOPMENT_PLAYBOOK.md`
-2. Inspect the repository structure.
-3. Identify the current active phase.
-4. Continue from the next unfinished implementation step.
-5. Read other documents only if the current phase needs them.
+2. 检查当前仓库结构。
+3. 识别当前激活阶段。
+4. 从下一个未完成实现步骤继续。
+5. 只有在当前阶段确实需要时，才继续读取其他文档。
 
-## Current Phase
+## 当前阶段
 
-- `Phase 1: Scaffold and Control Plane`
+- `Phase 1：脚手架与控制面`
 
-## Do Next
+## 当前下一步
 
-Build the Python project scaffold and control-plane skeleton.
+搭建 Python 项目脚手架与控制面骨架。
 
-The immediate implementation target is:
+当前直接实现目标是：
 
 - `pyproject.toml`
 - `src/self_coding_agent/`
@@ -34,57 +34,57 @@ The immediate implementation target is:
 - `eval_tasks/`
 - `runs/`
 
-Then implement:
+然后实现：
 
-- base config models
+- 基础 config models
 - trace event models
 - trace writer
 - CLI entrypoint
 
-## Read These First
+## 这些文档必须先读
 
-Always read these first:
+默认优先阅读：
 
 - `docs/CURRENT_STATUS.md`
 - `docs/PHASE_PROGRESS.md`
 - `docs/DEVELOPMENT_PLAYBOOK.md`
 
-## Read These Only If Needed
+## 这些文档按需再读
 
-Read these on demand:
+只有在需要时再读取：
 
 - `docs/ARCHITECTURE.md`
-  - when implementing package layout, module boundaries, trace, context, memory, or eval structure
+  - 当实现包结构、模块边界、trace、context、memory 或 eval 结构时
 - `docs/DECISIONS.md`
-  - when a design choice seems unclear or you are tempted to reopen an old decision
+  - 当某个设计选择变得不清晰，或你想重开旧决策时
 - `docs/PRD.md`
-  - when scope, task types, or MVP boundaries need clarification
+  - 当范围、任务类型或 MVP 边界需要澄清时
 - `docs/MONTH_PLAN.md`
-  - when you need the month-level milestone framing
+  - 当需要回看一个月里程碑安排时
 
-## Do Not Load By Default
+## 默认不要加载
 
-Do not load all documents at the start of a session unless the user explicitly asks for a full documentation review.
+除非用户明确要求做完整文档回顾，否则不要在会话开始时加载全部文档。
 
-## After Finishing Work
+## 完成工作后需要更新
 
-Update:
+更新：
 
 - `docs/CURRENT_STATUS.md`
 - `docs/PHASE_PROGRESS.md`
 
-If a key design decision changed, also update:
+如果关键设计决策发生变化，还要更新：
 
 - `docs/DECISIONS.md`
 
-If execution order changed, also update:
+如果执行顺序发生变化，还要更新：
 
 - `docs/DEVELOPMENT_PLAYBOOK.md`
 
-## Session Resume Prompt
+## 新会话提示词
 
-Use this prompt in a new session:
+新会话建议使用下面这段提示词：
 
 ```text
-Continue development of this project. Start by reading only docs/SESSION_ENTRY.md, docs/CURRENT_STATUS.md, docs/PHASE_PROGRESS.md, and docs/DEVELOPMENT_PLAYBOOK.md. Do not preload all project documents. Inspect the repository, identify the current phase, and continue from the next unfinished implementation step. Read ARCHITECTURE, DECISIONS, PRD, or MONTH_PLAN only if the current phase needs them. After finishing work, update CURRENT_STATUS and PHASE_PROGRESS.
+继续开发这个项目。先只阅读 docs/SESSION_ENTRY.md、docs/CURRENT_STATUS.md、docs/PHASE_PROGRESS.md 和 docs/DEVELOPMENT_PLAYBOOK.md，不要预加载全部项目文档。检查仓库，识别当前 phase，并从下一个未完成实现步骤继续。只有在当前阶段确实需要时，再读取 ARCHITECTURE、DECISIONS、PRD 或 MONTH_PLAN。完成工作后更新 CURRENT_STATUS 和 PHASE_PROGRESS。更新前的CURRENT_STATUS 和 PHASE_PROGRESS放到文件夹dev_process_history里面，并且CURRENT_STATUS 和 PHASE_PROGRESS的命名需要符合其工作阶段。更新后的CURRENT_STATUS 和 PHASE_PROGRESS代替之前的CURRENT_STATUS 和 PHASE_PROGRESS放在原地。
 ```

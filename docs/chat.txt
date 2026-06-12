@@ -43,4 +43,4 @@ docs/SESSION_ENTRY.md
 原因很简单：现在项目还没进入实现，继续补这些会让文档增长快于代码增长，维护成本开始反噬。
 
 新会话开发提示词：
-继续开发这个项目。先只阅读 docs/SESSION_ENTRY.md、docs/CURRENT_STATUS.md、docs/PHASE_PROGRESS.md 和 docs/DEVELOPMENT_PLAYBOOK.md，不要预加载全部项目文档。检查仓库，识别当前 phase，并从下一个未完成实现步骤继续。只有在当前阶段确实需要时，再读取 ARCHITECTURE、DECISIONS、PRD 或 MONTH_PLAN。完成工作后更新 CURRENT_STATUS 和 PHASE_PROGRESS。
+继续开发这个项目。先只阅读 docs/SESSION_ENTRY.md、docs/CURRENT_STATUS.md、docs/PHASE_PROGRESS.md 和 docs/DEVELOPMENT_PLAYBOOK.md，不要预加载全部项目文档。检查仓库，识别当前 phase，并从下一个未完成实现步骤继续。只有在当前阶段确实需要时，再读取 ARCHITECTURE、DECISIONS、PRD 或 MONTH_PLAN。完成工作后更新 CURRENT_STATUS 和 PHASE_PROGRESS。更新前的CURRENT_STATUS 和 PHASE_PROGRESS放到文件夹dev_process_history里面，并且CURRENT_STATUS 和 PHASE_PROGRESS的命名需要符合其工作阶段。更新后的CURRENT_STATUS 和 PHASE_PROGRESS代替之前的CURRENT_STATUS 和 PHASE_PROGRESS放在原地。

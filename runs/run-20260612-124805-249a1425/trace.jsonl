@@ -1,0 +1,2 @@
+{"event_type": "run_initialized", "payload": {"run_id": "run-20260612-124805-249a1425", "task_type": "bootstrap", "repo_root": "D:\\1technical_stack_study\\agent_study\\agent_projects\\self-coding-agent"}, "timestamp": "2026-06-12T04:48:05+00:00"}
+{"event_type": "state_transition", "payload": {"from_state": "bootstrap", "to_state": "initialized", "reason": "phase_1_scaffold"}, "timestamp": "2026-06-12T04:48:05+00:00"}

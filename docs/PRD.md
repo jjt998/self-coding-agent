@@ -1,100 +1,100 @@
-# Self Coding Agent PRD
+# Self Coding Agent 产品需求文档
 
-## 1. Project Goal
+## 1. 项目目标
 
-Build a local-repo coding agent harness for research and learning. The system should be usable, but its primary goal is to compare and iterate on agent loop, context management, memory, tool use, and eval strategies.
+构建一个面向本地代码仓库的 coding agent harness，用于研究和学习。系统需要可用，但首要目标不是做一个外观完整的产品，而是能够比较和迭代 agent loop、上下文管理、记忆系统、工具使用和评测策略。
 
-The one-month MVP should prove that the harness can run local coding tasks, record structured traces, evaluate outcomes, and compare strategy variants.
+一个月 MVP 要证明：这个 harness 能运行本地代码任务，记录结构化 trace，评估结果，并比较不同策略变体。
 
-## 2. Product Positioning
+## 2. 产品定位
 
-This project is a research-oriented harness, not a polished IDE product.
+这是一个研究型 harness，不是一个成熟 IDE 插件或商业化 coding agent 产品。
 
-It should answer questions such as:
+它应该能回答这些问题：
 
-- Which context strategy reduces context misses?
-- Does structured memory reduce repeated exploration?
-- Does conditional reflection reduce repeated no-progress loops?
-- Which failures come from context, tools, loop design, verification, or memory?
+- 哪种上下文策略能减少 `context_miss`？
+- 结构化 memory 是否能减少重复探索？
+- 条件触发 reflect 是否能减少 `repeated_no_progress`？
+- 失败到底来自上下文、工具、loop、验证，还是 memory？
 
-## 3. In Scope
+## 3. MVP 范围内
 
-- Local repository CLI.
-- Single-agent execution loop.
-- Pluggable model adapter interface.
-- Core tools for local code work.
-- Explicit state-machine loop.
-- File-level context recall.
-- Runtime memory.
-- Structured long-term memory.
-- JSONL trace.
-- Trace replay.
-- Markdown run reports.
-- Batch eval runner.
-- Strategy comparison reports.
+- 本地仓库 CLI。
+- 单 agent 执行 loop。
+- 可插拔模型适配接口。
+- 本地代码工作的核心工具。
+- 显式状态机 loop。
+- 文件级上下文召回。
+- 运行时记忆。
+- 结构化长期记忆。
+- JSONL trace。
+- trace replay。
+- Markdown run report。
+- 批量 eval runner。
+- 策略对比 report。
 
-## 4. Out of Scope for MVP
+## 4. MVP 暂不做
 
-- Web UI.
-- IDE plugin.
-- Multi-agent collaboration.
-- Browser automation.
-- Remote sandbox or cloud runner.
-- GitHub PR automation.
-- Heavy AST/LSP symbol graph.
-- Vector database or embedding memory.
-- Large public benchmark reproduction.
-- Complex permission system.
-- Dedicated memory pollution A/B experiments.
+- Web UI。
+- IDE 插件。
+- 多 agent 协作。
+- 浏览器自动化。
+- 远程沙箱或云端 runner。
+- GitHub PR 自动化。
+- 重型 AST/LSP 符号图。
+- 向量数据库或 embedding memory。
+- 大型公开 benchmark 复现。
+- 复杂权限系统。
+- 专门的 memory 污染 A/B 实验。
 
-## 5. Target Task Types
+## 5. 目标任务类型
 
-The MVP should support four task categories:
+MVP 支持四类任务：
 
-- `code_understanding`: locate and explain relevant code.
-- `bug_fix`: fix a small, localized bug.
-- `test_generation`: add or improve focused tests.
-- `refactor`: perform a local behavior-preserving refactor.
+- `code_understanding`：定位并解释相关代码。
+- `bug_fix`：修复小型、局部 bug。
+- `test_generation`：新增或改进聚焦测试。
+- `refactor`：执行局部、行为保持的重构。
 
-## 6. Core User Flows
+## 6. 核心用户流程
 
-### 6.1 Single Task Run
+### 6.1 单任务运行
 
-Input:
+输入：
 
-- Repo path.
-- Task instruction.
-- Model config.
-- Strategy config.
-- Budgets.
+- 仓库路径。
+- 任务指令。
+- 模型配置。
+- 策略配置。
+- 预算限制。
 
-Output:
+输出：
 
-- Final status.
-- Modified files, if any.
-- Verification result.
-- JSONL trace.
-- Markdown run report.
+- 最终状态。
+- 修改文件。
+- 验证结果。
+- JSONL trace。
+- Markdown run report。
 
-### 6.2 Batch Eval Run
+### 6.2 批量评测运行
 
-Input:
+输入：
 
-- Eval task set.
-- Model config.
-- Strategy config.
-- Fixed budgets.
+- eval task set。
+- 模型配置。
+- 策略配置。
+- 固定预算。
 
-Output:
+输出：
 
-- Per-task run reports.
-- Aggregate eval summary.
-- Result, process, and diagnostic metrics.
-- Strategy comparison report.
+- 每个任务的 run report。
+- 聚合 eval summary。
+- 结果、过程、诊断指标。
+- 策略对比 report。
 
-## 7. Agent Loop Requirements
+## 7. Agent Loop 需求
 
-The first MVP loop is a fixed baseline:
+第一版 loop 是固定 baseline：
 
 - `ingest`
 - `analyze`
@@ -105,88 +105,88 @@ The first MVP loop is a fixed baseline:
 - `verify`
 - `finalize`
 
-`fail` is not a state. Failures are represented by structured status and stop reason.
+`fail` 不作为显式状态。失败通过结构化 `status` 和 `stop_reason` 表示。
 
-Rules:
+规则：
 
-- The first `act` must be preceded by `plan`.
-- During execution, `act <-> observe` may repeat without re-planning.
-- `reflect` is conditionally triggered by verification failure, repeated low-value attempts, conflicting results, or budget pressure.
-- `finalize` requires at least one verification attempt.
-- Verification failure enters `reflect` before further action or termination.
+- 第一次进入 `act` 前必须先经过 `plan`。
+- 执行过程中允许 `act <-> observe` 多轮，不强制每一轮重新 plan。
+- `reflect` 只在条件触发时执行，包括验证失败、重复低价值尝试、结果冲突或预算压力。
+- `finalize` 前必须至少有一次验证尝试。
+- 验证失败后先进入 `reflect`，再决定继续行动、重规划、终止或人工接管。
 
-## 8. Context Requirements
+## 8. Context 需求
 
-The context system has four layers:
+上下文系统分四层：
 
-- `task_context`: objective, success criteria, task type, constraints, prohibitions, and budgets.
-- `repo_context`: repo map, relevant files, key modules, build/test commands, and task-specific code facts.
-- `runtime_context`: current plan, recent tool calls, key observations, diff summary, failed paths, active hypotheses.
-- `memory_context`: selected stable cross-run knowledge.
+- `task_context`：目标、成功标准、任务类型、约束、禁止事项、预算。
+- `repo_context`：repo map、相关文件、关键模块、构建/测试命令、与任务相关的代码事实。
+- `runtime_context`：当前计划、最近工具调用、关键观察、diff 摘要、失败路径、活跃假设。
+- `memory_context`：被选中的稳定跨任务知识。
 
-Context injection policy:
+上下文注入策略：
 
-- Preserve precise high-value content as raw text.
-- Summarize large or historical content.
-- Keep large low-probability content as an index or reference.
-- Prefer key information over merely recent information.
+- 高精度信息保留原文。
+- 大块或历史信息先摘要。
+- 大型低概率信息只做索引或引用。
+- 优先保留关键性信息，而不是机械保留最新信息。
 
-## 9. Memory Requirements
+## 9. Memory 需求
 
-### 9.1 Runtime Memory
+### 9.1 运行时记忆
 
-Runtime memory serves one run and records:
+运行时记忆服务单次 run，记录：
 
-- Current state.
-- Current plan.
-- Read files.
-- Modified files.
-- Candidate files.
-- Tried paths.
-- Key tool results.
-- Key errors.
-- Verify status.
-- Diff summary.
-- Active hypotheses.
-- Progress and no-progress signals.
+- 当前状态。
+- 当前计划。
+- 已读文件。
+- 已修改文件。
+- 候选文件。
+- 已尝试路径。
+- 关键工具结果。
+- 关键错误。
+- verify 状态。
+- diff 摘要。
+- 活跃假设。
+- progress/no-progress 信号。
 
-Runtime memory is broader than the model context. Only selected slices enter the prompt.
+运行时记忆比模型上下文更大。只有被选中的切片会进入 prompt。
 
-### 9.2 Long-Term Memory
+### 9.2 长期记忆
 
-Long-term memory serves cross-run reuse.
+长期记忆服务跨 run 复用。
 
-It should store stable, low-noise, high-value information:
+它应该存储稳定、低噪音、高复用价值的信息：
 
-- Repo facts.
-- Build and test commands.
-- Key modules and entry points.
-- User preferences.
-- Successful repair patterns.
-- Task-type-specific repo experience.
+- repo 稳定事实。
+- 构建和测试命令。
+- 关键模块和入口点。
+- 用户偏好。
+- 成功修复模式。
+- 当前 repo 上特定任务类型的经验。
 
-Default write rule:
+默认写入规则：
 
-- Write long-term memory only after task success and verification pass.
+- 只有任务成功且验证通过后，才写入长期记忆。
 
-Default retrieval:
+默认检索方式：
 
-- Structured filtering by repo, task type, tags, paths, and keywords.
-- No vector database or embedding retrieval in MVP.
+- 按 repo、任务类型、标签、路径、关键词做结构化过滤。
+- MVP 不使用向量数据库或 embedding 检索。
 
-### 9.3 Memory Pollution Scope
+### 9.3 Memory 污染范围
 
-MVP includes basic pollution awareness:
+MVP 包含基础污染感知：
 
-- Diagnostic label: `memory_pollution`.
-- Runtime evidence: `memory_conflict`.
-- Schema fields for confidence, conflict count, and memory status.
+- 诊断标签：`memory_pollution`。
+- 运行时证据：`memory_conflict`。
+- schema 预留 confidence、conflict count、memory status 等字段。
 
-MVP excludes dedicated memory pollution experiments.
+MVP 不做专门的 memory 污染实验。
 
-## 10. Tool Requirements
+## 10. Tool 需求
 
-MVP core tools:
+MVP 核心工具：
 
 - `search_text`
 - `read_file`
@@ -194,34 +194,34 @@ MVP core tools:
 - `run_command`
 - `git_diff`
 
-Tool requirements:
+工具要求：
 
-- Structured input.
-- Structured output.
-- Status, error, duration, and metadata recorded.
-- Workspace path restrictions.
-- Command timeout.
-- Dangerous command blocking.
-- Trace every tool call.
+- 结构化输入。
+- 结构化输出。
+- 记录 status、error、duration 和 metadata。
+- 限制 workspace 路径。
+- 命令超时。
+- 阻断危险命令。
+- 每次工具调用都写入 trace。
 
-## 11. Eval Requirements
+## 11. Eval 需求
 
-Eval must start in week 1.
+eval 必须从第一周开始做。
 
-Metrics are grouped into:
+指标分为：
 
-- `result_metrics`: success, validation pass, expected files touched, unexpected changes.
-- `process_metrics`: steps, tool calls, verify count, reflect count, duration.
-- `diagnostic_metrics`: failure type and evidence.
+- `result_metrics`：success、validation pass、expected files touched、unexpected changes。
+- `process_metrics`：steps、tool calls、verify count、reflect count、duration。
+- `diagnostic_metrics`：失败类型和证据。
 
-MVP task set size:
+MVP 任务集规模：
 
-- 12 to 20 tasks.
-- 3 to 5 tasks per target task type.
+- 12 到 20 个任务。
+- 每类目标任务 3 到 5 个。
 
-## 12. Diagnostic Labels
+## 12. 诊断标签
 
-MVP diagnostic labels:
+MVP 诊断标签：
 
 - `context_miss`
 - `context_noise`
@@ -234,7 +234,7 @@ MVP diagnostic labels:
 - `budget_exhausted`
 - `memory_pollution`
 
-Each diagnosis should include evidence and a source:
+每个诊断结果应该包含 evidence 和 source：
 
 - `rule`
 - `llm_judge`
@@ -242,7 +242,7 @@ Each diagnosis should include evidence and a source:
 
 ## 13. Stop Reasons
 
-MVP stop reasons:
+MVP stop reasons：
 
 - `success`
 - `step_budget_exceeded`
@@ -253,16 +253,16 @@ MVP stop reasons:
 - `environment_blocked`
 - `need_human_input`
 
-## 14. MVP Success Criteria
+## 14. MVP 成功标准
 
-After one month, the project should be able to:
+一个月后项目应能做到：
 
-- Run a local repo task from CLI.
-- Plan, act, observe, reflect, verify, and finalize.
-- Modify files through controlled tools.
-- Produce JSONL trace.
-- Produce Markdown run report.
-- Run a fixed eval task set.
-- Compare at least two strategies.
-- Output failure type distribution.
-- Produce at least one interpretable result about context, memory, or reflect strategy.
+- 通过 CLI 运行本地 repo 任务。
+- 执行 plan、act、observe、reflect、verify、finalize。
+- 通过受控工具修改文件。
+- 生成 JSONL trace。
+- 生成 Markdown run report。
+- 运行固定 eval task set。
+- 比较至少两种策略。
+- 输出失败类型分布。
+- 至少产出一条关于 context、memory 或 reflect 策略的可解释实验结论。
