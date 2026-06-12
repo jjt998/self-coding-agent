@@ -77,14 +77,14 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     tool_results = [event["payload"] for event in trace_events if event["event_type"] == "tool_result"]
     assert len(tool_results) == 5
     assert tool_results[1]["tool_output"]["ok"] is True
-    assert tool_results[2]["tool_output"]["content"].startswith("# Agent Scratchpad")
-    assert tool_results[3]["tool_output"]["stdout"].strip() == "# Agent Scratchpad"
+    assert tool_results[2]["tool_output"]["content"].startswith("# Agent Notes")
+    assert tool_results[3]["tool_output"]["stdout"].strip() == "# Agent Notes"
     assert tool_results[4]["tool_output"]["changed_file_count"] == 1
-    assert "agent_scratchpad.md" in tool_results[4]["tool_output"]["diffs"][0]["path"]
+    assert "agent_notes.md" in tool_results[4]["tool_output"]["diffs"][0]["path"]
 
-    scratchpad_path = repo_root / "agent_scratchpad.md"
-    assert scratchpad_path.exists()
-    assert "状态：已记录到 Phase 3 工具闭环。" in scratchpad_path.read_text(encoding="utf-8")
+    notes_path = repo_root / "agent_notes.md"
+    assert notes_path.exists()
+    assert "当前情况：已记录到 Phase 3 工具闭环。" in notes_path.read_text(encoding="utf-8")
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "`finalize`" in report_text

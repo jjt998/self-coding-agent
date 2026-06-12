@@ -16,7 +16,7 @@
 - 已实现 `Phase 2` 最小状态机 loop，CLI 现在可完整跑过一条 stub 状态链路。
 - 已完成 `Phase 3` 最小核心工具闭环，`act` 阶段现在会执行真实工具序列。
 - trace 中已可看到结构化状态迁移、状态结果、工具调用与工具结果事件。
-- repo 根目录下会生成 `agent_scratchpad.md` 作为 Phase 3 的最小工具操作结果。
+- repo 根目录下会生成 `agent_notes.md` 作为 Phase 3 的最小工具操作结果。
 - report 目前仍是最小 loop 运行报告，下一阶段需要补强验证与报告细节。
 
 ## 已完成
