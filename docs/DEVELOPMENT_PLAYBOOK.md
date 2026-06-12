@@ -130,7 +130,7 @@ MVP 不包含专门的 memory 污染对比实验。
 交付：
 
 - `pyproject.toml`
-- `src/self_coding_agent/` 包结构
+- `src/` 源码目录结构
 - `tests/`
 - `configs/`
 - `eval_tasks/`
@@ -325,7 +325,7 @@ Trace 最少应记录：
 
 仓库可以通过：
 
-- `python -m self_coding_agent.cli ...`
+- `python -m cli ...`
 
 启动，并生成：
 

@@ -3,7 +3,7 @@
 ## 总览
 
 - 最后更新时间：2026-06-12
-- 当前激活阶段：`Phase 4：验证与报告`
+- 当前激活阶段：`Phase 2：最小 Agent Loop`
 
 ## Phase 1：脚手架与控制面
 
@@ -11,7 +11,7 @@
 - 目标：让仓库具备可运行、可扩展、结构稳定的基础。
 - 已完成：
   - 创建 `pyproject.toml`
-  - 创建 `src/` 源码目录结构
+  - 创建 `src/self_coding_agent/` 包结构
   - 创建 `tests/`、`configs/`、`eval_tasks/`、`runs/`
   - 增加基础 settings model
   - 增加 trace event model
@@ -25,51 +25,45 @@
 
 ## Phase 2：最小 Agent Loop
 
-- 状态：`completed`
+- 状态：`in_progress`
 - 目标：让任务能沿着基线状态机 loop 跑通。
 - 已完成：
   - 已具备可承载 loop 的基础 run/trace 骨架
+- 剩余：
   - 实现状态枚举
   - 实现运行时状态
   - 实现 stop reasons
   - 实现 loop orchestrator
   - 实现初步状态迁移流程
-  - 实现一次条件触发的 reflect 占位逻辑
-  - 实现最小无进展跟踪
 - 验收：
-  - 已通过
+  - 一次 run 可以完成状态迁移并发出状态迁移事件。
 - 备注：
-  - 当前仍是 stub loop，但控制面已经具备继续接工具与验证流程的条件。
+  - 这是当前下一步实现目标。
 
 ## Phase 3：核心工具
 
-- 状态：`completed`
+- 状态：`not_started`
 - 目标：支持本地代码任务的核心仓库操作。
 - 已完成：
   - 核心工具列表已固定。
-  - Phase 2 loop 已为工具接入预留 trace 与执行骨架。
+- 剩余：
   - 实现 `search_text`
   - 实现 `read_file`
   - 实现 `apply_patch`
   - 实现 `run_command`
   - 实现 `git_diff`
   - 将所有工具交互写入 trace
-  - 在 `act` 阶段接入受控最小工具序列
-  - 扩充 CLI 测试，验证工具调用与工具产物
-- 剩余：
-  - 暂无
 - 验收：
-  - 已通过
+  - 五个工具都有结构化输入输出，并可在一次 run 中被调用。
 - 备注：
-  - 当前 `git_diff` 先基于运行前文本快照生成统一 diff，后续如需更贴近真实 git 语义可再增强。
+  - 依赖 Phase 1 的 model 与 trace。
 
 ## Phase 4：验证与报告
 
-- 状态：`in_progress`
+- 状态：`not_started`
 - 目标：让成功与失败具备可审计性。
 - 已完成：
   - 验证需求已在文档中明确。
-  - Phase 3 已提供稳定的工具 trace，可作为验证与报告输入。
 - 剩余：
   - 实现 verification result schema
   - 实现 verify 执行流程

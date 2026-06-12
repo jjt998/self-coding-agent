@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-- `Phase 4：验证与报告`
+- `Phase 3：核心工具`
 
 ## 当前情况
 
@@ -14,10 +14,8 @@
 - 已建立 `pyproject.toml`、`src/`、`tests/`、`configs/`、`eval_tasks/`、`runs/`。
 - 已实现基础 settings model、trace event model、trace writer 与 CLI skeleton。
 - 已实现 `Phase 2` 最小状态机 loop，CLI 现在可完整跑过一条 stub 状态链路。
-- 已完成 `Phase 3` 最小核心工具闭环，`act` 阶段现在会执行真实工具序列。
-- trace 中已可看到结构化状态迁移、状态结果、工具调用与工具结果事件。
-- repo 根目录下会生成 `agent_scratchpad.md` 作为 Phase 3 的最小工具操作结果。
-- report 目前仍是最小 loop 运行报告，下一阶段需要补强验证与报告细节。
+- trace 中已可看到结构化状态迁移、状态结果与 run 完成事件。
+- report 已从初始化占位版本升级为最小 loop 运行报告。
 
 ## 已完成
 
@@ -41,30 +39,24 @@
   - `verify`
   - `finalize`
 - 完成状态迁移事件与状态结果事件 trace 写入。
-- 完成 `search_text`。
-- 完成 `read_file`。
-- 完成 `apply_patch`。
-- 完成 `run_command`。
-- 完成 `git_diff`。
-- 完成工具输入输出 trace 写入。
-- 完成 `Phase 3` 的 CLI 自动化测试扩展。
 
 ## 进行中
 
-- 进入 `Phase 4`，开始实现验证结果结构与报告增强。
+- 进入 `Phase 3`，开始实现最小工具闭环。
 
 ## 下一步明确动作
 
-- 实现 verification result schema。
-- 实现 `verify` 阶段的结构化验证流程。
-- 在报告中展示工具调用摘要与验证结果。
-- 在报告中输出结构化 stop reason。
-- 为失败验证预留清晰的可审计字段。
+- 实现 `search_text`。
+- 实现 `read_file`。
+- 实现 `apply_patch`。
+- 实现 `run_command`。
+- 实现 `git_diff`。
+- 将工具输入输出完整写入 trace。
 
 ## 当前阻塞
 
 - 暂无外部阻塞。
-- 当前主要约束是继续保持 MVP 节奏，先把验证与报告做成稳定结构化控制面，再进入 context、memory 与更复杂 agent 行为。
+- 主要实现约束是继续保持 MVP 节奏，先把五个核心工具做成稳定结构化接口，再进入验证与更复杂 agent 行为。
 
 ## 新会话恢复指引
 
@@ -73,5 +65,5 @@
 1. 阅读 `docs/DEVELOPMENT_PLAYBOOK.md`。
 2. 阅读 `docs/CURRENT_STATUS.md`。
 3. 阅读 `docs/PHASE_PROGRESS.md`。
-4. 检查 `src/tools.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
-5. 从 `Phase 4` 的验证与报告开始继续。
+4. 检查 `src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
+5. 从 `Phase 3` 的核心工具开始继续。

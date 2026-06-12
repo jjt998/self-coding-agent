@@ -29,14 +29,10 @@
 
 ##s/PHASE_PROGRESS.md 和 docs/DEVELOPMENT_PLAYBOOK.md，不要预加载全部项目文档。检查仓库，识别当前 phase，并从下一个未完成实现步骤继续。只有在当前阶段确实需要时，再读取 ARCHITECTURE、DECISIONS、PRD 或 MONTH_PLAN。完成工作后更新 CURRENT_STATUS 和 PHASE_PROGRESS。更新前的CURRENT_STATUS 和 PHASE_PROGRESS放到文件夹dev_process_history里面，并且CURRENT_STATUS 和 PHASE_PROGRESS的命名需要符合其工作阶段。更新后的CURRENT_STATUS 和 PHASE_PROGRESS代替之前的CURRENT_STATUS 和 PHASE_PROGRESS放在原地。
 
-
-
 #### 开发规范入口
 
 1. 涉及开发规范、代码风格、注释策略、描述语言选择时，先阅读 `docs/代码可读性规范.md`。
 2. 开发过程中按 `docs/代码可读性规范.md` 执行。
-
-
 
 ## 默认执行要求
 

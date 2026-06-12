@@ -15,7 +15,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     command = [
         sys.executable,
         "-m",
-        "self_coding_agent.cli",
+        "cli",
         "--task",
         "创建脚手架",
         "--repo-root",
@@ -39,3 +39,53 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert (run_dir / "report.md").exists()
     snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
     assert snapshot["task"] == "创建脚手架"
+
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    transition_targets = [
+        event["payload"]["to_state"]
+        for event in trace_events
+        if event["event_type"] == "state_transitioned"
+    ]
+    assert transition_targets == [
+        "ingest",
+        "analyze",
+        "plan",
+        "act",
+        "observe",
+        "reflect",
+        "verify",
+        "finalize",
+    ]
+
+    tool_called_names = [
+        event["payload"]["tool_name"]
+        for event in trace_events
+        if event["event_type"] == "tool_called"
+    ]
+    assert tool_called_names == [
+        "search_text",
+        "apply_patch",
+        "read_file",
+        "run_command",
+        "git_diff",
+    ]
+
+    tool_results = [event["payload"] for event in trace_events if event["event_type"] == "tool_result"]
+    assert len(tool_results) == 5
+    assert tool_results[1]["tool_output"]["ok"] is True
+    assert tool_results[2]["tool_output"]["content"].startswith("# Agent Scratchpad")
+    assert tool_results[3]["tool_output"]["stdout"].strip() == "# Agent Scratchpad"
+    assert tool_results[4]["tool_output"]["changed_file_count"] == 1
+    assert "agent_scratchpad.md" in tool_results[4]["tool_output"]["diffs"][0]["path"]
+
+    scratchpad_path = repo_root / "agent_scratchpad.md"
+    assert scratchpad_path.exists()
+    assert "状态：已记录到 Phase 3 工具闭环。" in scratchpad_path.read_text(encoding="utf-8")
+
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "`finalize`" in report_text
+    assert "reflect：已触发" in report_text

@@ -14,13 +14,11 @@ authors = [
 dependencies = []
 
 [project.scripts]
-self-coding-agent = "self_coding_agent.cli:main"
+self-coding-agent = "cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
+py-modules = ["cli", "config", "loop", "runner", "tools", "trace"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -270,6 +270,7 @@ MVP 核心工具：
 - `memory_written`
 - `verify_completed`
 - `reflect_completed`
+- `state_result`
 - `state_transitioned`
 - `run_finished`
 

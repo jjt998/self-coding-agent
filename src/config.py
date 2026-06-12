@@ -9,12 +9,15 @@ from uuid import uuid4
 
 
 def utc_now_iso() -> str:
+    """返回统一格式的 UTC ISO 时间字符串。"""
     # 统一使用 UTC 时间，后面做 trace 对齐和跨机器排查会更省事。
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 @dataclass(slots=True)
 class RunSettings:
+    """承载单次 run 所需的基础配置。"""
+
     task: str
     task_type: str = "ad_hoc"
     repo_root: str = "."
@@ -25,6 +28,7 @@ class RunSettings:
     created_at: str = field(default_factory=utc_now_iso)
 
     def to_dict(self) -> dict[str, Any]:
+        """把运行配置转换成可写入快照的字典。"""
         return asdict(self)
 
 
@@ -35,6 +39,7 @@ def build_settings(
     output_root: str,
     config_name: str,
 ) -> RunSettings:
+    """根据 CLI 输入构建标准化后的运行配置。"""
     # 这里先把 repo_root 规范成绝对路径，后面无论从哪里启动 CLI，trace 里看到的仓库路径都会稳定。
     return RunSettings(
         task=task,
@@ -46,6 +51,7 @@ def build_settings(
 
 
 def load_named_config(config_dir: Path, config_name: str) -> dict[str, Any]:
+    """从 configs 目录加载指定名称的 JSON 配置。"""
     config_path = config_dir / f"{config_name}.json"
     # Phase 1 先允许“没配配置也能跑”，这样可以优先把控制面打通。
     if not config_path.exists():

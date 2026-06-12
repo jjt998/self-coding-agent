@@ -3,15 +3,16 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .config import build_settings, load_named_config
-from .runner import execute_initial_run
+from config import build_settings, load_named_config
+from runner import execute_initial_run
 
 
 def build_parser() -> argparse.ArgumentParser:
-    # 这个 CLI 目前只是 Phase 1 的最小入口，先把 run 初始化流程跑通，再逐步接入真实 loop。
+    """构建 self-coding-agent 的命令行参数解析器。"""
+    # CLI 继续保持最小入口，但现在会跑过一条 Phase 2 的 stub 状态机链路。
     parser = argparse.ArgumentParser(
         prog="self-coding-agent",
-        description="运行 self-coding-agent 的 Phase 1 脚手架初始化流程。",
+        description="运行 self-coding-agent 的最小状态机实验流程。",
     )
     parser.add_argument("--task", required=True, help="本次 run 的任务描述。")
     parser.add_argument("--task-type", default="ad_hoc", help="任务类型标签。")
@@ -22,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """解析命令行参数并启动一次最小 agent run。"""
     parser = build_parser()
     args = parser.parse_args()
 
@@ -37,8 +39,8 @@ def main() -> int:
     config_data = load_named_config(config_dir=config_dir, config_name=args.config_name)
     run_dir = execute_initial_run(settings=settings, config_data=config_data)
 
-    # 这里先返回最关键的产物位置，方便手工检查当前 run 的输出。
-    print(f"已初始化 run 目录：{run_dir}")
+    # 这里继续返回最关键的产物位置，方便手工检查本次 run 的 trace 和报告。
+    print(f"已完成最小 loop 运行，产物目录：{run_dir}")
     return 0
 
 

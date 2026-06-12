@@ -172,47 +172,39 @@ self-coding-agent/
     MONTH_PLAN.md
     MONTH_PLAN.zh-CN.md
   src/
-    self_coding_agent/
-      cli/
-        main.py
-      core/
-        loop.py
-        state.py
-        runtime.py
-        stop.py
-        orchestrator.py
-      models/
-        base.py
-        openai_adapter.py
-      tools/
-        base.py
-        registry.py
-        filesystem.py
-        command.py
-        git.py
-      context/
-        builder.py
-        recall.py
-        compression.py
-        layers.py
-      memory/
-        runtime_memory.py
-        long_term_memory.py
-        store.py
-        retrieval.py
-      trace/
-        events.py
-        writer.py
-        replay.py
-      eval/
-        task_spec.py
-        runner.py
-        metrics.py
-        diagnostics.py
-      reports/
-        markdown.py
-      schemas/
-        common.py
+    cli.py
+    config.py
+    loop.py
+    runner.py
+    trace.py
+    tools/
+      base.py
+      registry.py
+      filesystem.py
+      command.py
+      git.py
+    context/
+      builder.py
+      recall.py
+      compression.py
+      layers.py
+    memory/
+      runtime_memory.py
+      long_term_memory.py
+      store.py
+      retrieval.py
+    models/
+      base.py
+      openai_adapter.py
+    eval/
+      task_spec.py
+      runner.py
+      metrics.py
+      diagnostics.py
+    reports/
+      markdown.py
+    schemas/
+      common.py
   eval_tasks/
   runs/
   tests/
@@ -642,6 +634,7 @@ Trace 使用 JSONL，一行一个事件。
 - `patch_applied`
 - `verify_completed`
 - `reflect_completed`
+- `state_result`
 - `state_transitioned`
 - `run_finished`
 
