@@ -11,6 +11,11 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     output_root = tmp_path / "runs"
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    # 先放一个和任务相关的说明文件，方便验证 Phase 5 的文件召回是否真的选中了它。
+    (repo_root / "README.md").write_text(
+        "# 项目说明\n\n这个仓库用于创建脚手架和验证最小 agent 流程。\n",
+        encoding="utf-8",
+    )
 
     command = [
         sys.executable,
@@ -87,6 +92,12 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert verification_events[0]["passed"] is True
     assert verification_events[0]["checks"][0]["name"] == "工具调用顺序"
 
+    context_events = [event["payload"] for event in trace_events if event["event_type"] == "context_snapshot"]
+    assert len(context_events) == 1
+    assert context_events[0]["task_context"]["task"] == "创建脚手架"
+    assert context_events[0]["repo_context"]["candidate_file_count"] >= 1
+    assert context_events[0]["repo_context"]["selected_files"][0]["path"] == "README.md"
+
     notes_path = repo_root / "agent_notes.md"
     assert notes_path.exists()
     assert "当前情况：已记录到 Phase 3 工具闭环。" in notes_path.read_text(encoding="utf-8")
@@ -94,6 +105,8 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "`finalize`" in report_text
     assert "reflect：已触发" in report_text
+    assert "## 上下文摘要" in report_text
+    assert "`README.md`" in report_text
     assert "## 工具调用摘要" in report_text
     assert "## 验证结果" in report_text
     assert "验证状态：通过" in report_text

@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
+from context import ContextBuilder, ContextSnapshot
 from config import RunSettings
 from trace import TraceEvent, TraceWriter
 from tools import CoreToolRunner, ToolExecution, build_phase_3_tool_sequence
@@ -57,6 +58,7 @@ class RuntimeState:
     step_count: int = 0
     no_progress_count: int = 0
     reflect_triggered: bool = False
+    context_snapshot: ContextSnapshot | None = None
     tool_executions: list[ToolExecution] = field(default_factory=list)
     verification_result: VerificationResult | None = None
     stop_reason: StopReason | None = None
@@ -78,6 +80,7 @@ class LoopOrchestrator:
     def run(self, settings: RunSettings, config_data: dict[str, Any]) -> RuntimeState:
         """执行一条最小 stub 状态链路并返回最终运行态。"""
         runtime_state = RuntimeState(task=settings.task, task_type=settings.task_type)
+        context_builder = ContextBuilder(repo_root=settings.repo_root)
         tool_runner = CoreToolRunner(repo_root=settings.repo_root)
         planned_states = [
             AgentState.INGEST,
@@ -97,6 +100,7 @@ class LoopOrchestrator:
                 state=state,
                 runtime_state=runtime_state,
                 config_data=config_data,
+                context_builder=context_builder,
                 tool_runner=tool_runner,
             )
             runtime_state.mark_completed(state)
@@ -160,6 +164,7 @@ class LoopOrchestrator:
         state: AgentState,
         runtime_state: RuntimeState,
         config_data: dict[str, Any],
+        context_builder: ContextBuilder,
         tool_runner: CoreToolRunner,
     ) -> dict[str, Any]:
         """为当前阶段生成占位结果，先把控制面和 trace 结构跑通。"""
@@ -170,9 +175,26 @@ class LoopOrchestrator:
                 "task": runtime_state.task,
             }
         if state is AgentState.ANALYZE:
+            runtime_state.context_snapshot = context_builder.build_context_snapshot(
+                task=runtime_state.task,
+                task_type=runtime_state.task_type,
+                current_state=runtime_state.current_state,
+                completed_states=runtime_state.completed_states,
+                step_count=runtime_state.step_count,
+            )
+            self.trace_writer.write_event(
+                TraceEvent(
+                    event_type="context_snapshot",
+                    payload=runtime_state.context_snapshot.to_dict(),
+                )
+            )
             return {
                 "summary": "已完成任务初步分析。",
                 "task_type": runtime_state.task_type,
+                "selected_context_files": [
+                    file_context.to_dict()
+                    for file_context in runtime_state.context_snapshot.repo_context.selected_files
+                ],
             }
         if state is AgentState.PLAN:
             return {

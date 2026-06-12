@@ -18,7 +18,7 @@ self-coding-agent = "cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["cli", "config", "loop", "runner", "tools", "trace", "verify"]
+py-modules = ["cli", "config", "context", "loop", "runner", "tools", "trace", "verify"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

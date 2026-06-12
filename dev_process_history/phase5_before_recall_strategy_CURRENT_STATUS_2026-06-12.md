@@ -18,9 +18,6 @@
 - trace 中已可看到结构化状态迁移、状态结果、工具调用与工具结果事件。
 - repo 根目录下会生成 `agent_notes.md` 作为 Phase 3 的最小工具操作结果。
 - 已完成结构化验证结果与报告增强，run 结束后可看到工具摘要、验证结论与 stop reason。
-- 已完成 `Phase 5` 第一版 context 控制面，`analyze` 阶段会生成四层 `context_snapshot`。
-- 已接入最小文件级召回，当前会按任务关键词和文件规则选出少量相关文件进入上下文。
-- report 现在会展示上下文摘要，包括任务关键词、扫描文件数和选中文件原因。
 
 ## 已完成
 
@@ -56,22 +53,18 @@
 - 完成 `verification_result` trace 事件写入。
 - 完成单次 run 的 Markdown 报告增强。
 - 完成 `Phase 4` 的 CLI 自动化测试扩展。
-- 完成 task/repo/runtime/memory context models。
-- 完成最小文件级召回。
-- 完成 `context_snapshot` trace 事件写入。
-- 完成上下文摘要报告输出。
-- 完成 `Phase 5` 的第一轮 CLI 自动化测试扩展。
 
 ## 进行中
 
-- 继续推进 `Phase 5`，准备细化召回策略与注入方式。
+- 进入 `Phase 5`，开始实现 context 与文件级 recall。
 
 ## 下一步明确动作
 
-- 细化原文、摘要、索引三种注入策略的实际使用规则。
-- 为召回结果补更多可解释字段，减少“为什么选中它”的歧义。
-- 给不同任务类型预留更清晰的文件召回入口。
-- 为后续 memory 接入对齐 context builder 接口。
+- 设计并实现 context models。
+- 实现 repo 文件级召回。
+- 实现原文、摘要、索引三种注入策略的最小骨架。
+- 将 context snapshot 写入 trace。
+- 为后续 memory 接入预留稳定接口。
 
 ## 当前阻塞
 
@@ -85,5 +78,5 @@
 1. 阅读 `docs/DEVELOPMENT_PLAYBOOK.md`。
 2. 阅读 `docs/CURRENT_STATUS.md`。
 3. 阅读 `docs/PHASE_PROGRESS.md`。
-4. 检查 `src/context.py`、`src/tools.py`、`src/verify.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
-5. 从 `Phase 5` 的召回策略细化开始继续。
+4. 检查 `src/tools.py`、`src/verify.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
+5. 从 `Phase 5` 的 context 与 recall 开始继续。
