@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-- `Phase 6：Memory`
+- `Phase 5：Context 与 Recall`
 
 ## 当前情况
 
@@ -29,8 +29,6 @@
 - 已落地 `runtime memory manager` 最小接口，`analyze` 阶段现在会通过统一入口拿到 memory 提示。
 - 当前 memory 结果已经接入 `context_snapshot` 和报告，可看到 query、source 与命中条目。
 - 已把默认任务类型从 `ad_hoc` 改成更直白的 `general`，避免继续扩散不友好命名。
-- 已落地长期 memory 的最小写入口，验证通过的 run 现在会写入 `.agent_memory/long_term_memory.jsonl`。
-- trace 和报告现在会记录 memory 写入结果，便于后续检查长期 memory 何时被写入。
 
 ## 已完成
 
@@ -84,21 +82,18 @@
 - 完成 context builder 与 memory manager 对齐。
 - 完成 `Phase 5` 的第四轮 CLI 自动化测试扩展。
 - 完成默认任务类型命名收敛：`ad_hoc` -> `general`。
-- 完成长期 memory entry schema。
-- 完成验证通过后写入长期 memory 的最小流程。
-- 完成 `memory_write_result` trace 事件。
-- 完成 `Phase 6` 的第一轮 CLI 自动化测试扩展。
 
 ## 进行中
 
-- 进入 `Phase 6`，开始实现长期 memory 的读取与筛选。
+- 继续推进 `Phase 5`，准备为长期 memory store 预留最小结构入口。
 
 ## 下一步明确动作
 
-- 让 `runtime memory manager` 读取长期 memory store。
-- 增加按 task type、tags、关键词的最小筛选。
-- 在上下文里区分 runtime rule memory 和长期 memory 命中结果。
-- 为 memory conflict evidence 预留最小字段。
+- 为召回结果补更多可解释字段，减少“为什么选中它”的歧义。
+- 继续补齐不同任务类型下的召回优先级规则。
+- 为长期 memory store 预留最小结构入口。
+- 设计长期 memory entry schema。
+- 设计成功 run 的 memory 写入时机。
 
 ## 当前阻塞
 
@@ -113,4 +108,4 @@
 2. 阅读 `docs/CURRENT_STATUS.md`。
 3. 阅读 `docs/PHASE_PROGRESS.md`。
 4. 检查 `src/context.py`、`src/tools.py`、`src/verify.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
-5. 从长期 memory 的读取与筛选开始继续。
+5. 从长期 memory store 的最小结构入口开始继续。

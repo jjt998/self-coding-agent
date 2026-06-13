@@ -85,7 +85,7 @@
 
 ## Phase 5：Context 与 Recall
 
-- 状态：`completed`
+- 状态：`in_progress`
 - 目标：让模型输入变得可控、可检查。
 - 已完成：
   - Context 分层设计已记录。
@@ -105,30 +105,30 @@
   - 让 context builder 通过统一入口读取 memory 结果
   - 将默认任务类型命名从 `ad_hoc` 收敛为更直白的 `general`
 - 剩余：
-  - 暂无
+  - 继续补齐不同任务类型召回入口
+  - 为长期 memory store 预留最小结构入口
+  - 设计 memory 写入时机
 - 验收：
-  - 已通过
+  - Trace 中可以看到 context snapshot 和文件召回决策。
 - 备注：
   - 第一版保持以文件为中心，当前优先保证可检查、可解释、可裁剪，并先把 runtime memory 接口稳定下来。
 
 ## Phase 6：Memory
 
-- 状态：`in_progress`
+- 状态：`not_started`
 - 目标：在具备基本抗污染意识的前提下实现经验复用。
 - 已完成：
   - Memory 范围和检索基线已确定。
-  - 实现长期 memory entry schema
-  - 实现验证通过后写入长期 memory 的最小流程
-  - 增加 `memory_write_result` trace 事件
-  - 扩充 CLI 测试，验证长期 memory 文件写入
 - 剩余：
-  - 让 `runtime memory manager` 读取长期 memory store
+  - 实现 runtime memory manager
+  - 实现 long-term memory store
+  - 实现结构化 memory entry
   - 实现 tag/path/keyword 检索
   - 实现 memory conflict evidence
 - 验收：
   - 成功且验证通过的 run 可以写入 memory，后续 run 可以读取。
 - 备注：
-  - MVP 不上 embedding 检索，先保证写入和读取接口稳定。
+  - MVP 不上 embedding 检索。
 
 ## Phase 7：Eval
 

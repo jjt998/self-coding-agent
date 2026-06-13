@@ -98,6 +98,11 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert verification_events[0]["passed"] is True
     assert verification_events[0]["checks"][0]["name"] == "工具调用顺序"
 
+    memory_write_events = [event["payload"] for event in trace_events if event["event_type"] == "memory_write_result"]
+    assert len(memory_write_events) == 1
+    assert memory_write_events[0]["written"] is True
+    assert memory_write_events[0]["store_path"].endswith(".agent_memory\\long_term_memory.jsonl")
+
     context_events = [event["payload"] for event in trace_events if event["event_type"] == "context_snapshot"]
     assert len(context_events) == 1
     assert context_events[0]["task_context"]["task"] == "创建脚手架"
@@ -106,7 +111,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert context_events[0]["repo_context"]["clipped_file_count"] >= 1
     assert context_events[0]["repo_context"]["total_original_lines"] >= context_events[0]["repo_context"]["total_selected_lines"]
     assert context_events[0]["memory_context"]["enabled"] is True
-    assert context_events[0]["memory_context"]["query"] == "ad_hoc:创建脚手架"
+    assert context_events[0]["memory_context"]["query"] == "general:创建脚手架"
     assert context_events[0]["memory_context"]["source"] == "runtime_memory_manager"
     assert len(context_events[0]["memory_context"]["matched_entries"]) >= 1
     selected_files = context_events[0]["repo_context"]["selected_files"]
@@ -126,6 +131,18 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert notes_path.exists()
     assert "当前情况：已记录到 Phase 3 工具闭环。" in notes_path.read_text(encoding="utf-8")
 
+    memory_store_path = repo_root / ".agent_memory" / "long_term_memory.jsonl"
+    assert memory_store_path.exists()
+    memory_entries = [
+        json.loads(line)
+        for line in memory_store_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(memory_entries) == 1
+    assert memory_entries[0]["task"] == "创建脚手架"
+    assert memory_entries[0]["task_type"] == "general"
+    assert memory_entries[0]["tags"] == ["general", "verified", "mvp"]
+
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "`finalize`" in report_text
     assert "reflect：已触发" in report_text
@@ -137,6 +154,8 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "memory：已启用" in report_text
     assert "## 工具调用摘要" in report_text
     assert "## 验证结果" in report_text
+    assert "## Memory 写入" in report_text
+    assert "写入状态：已写入" in report_text
     assert "验证状态：通过" in report_text
     assert "`apply_patch`：成功" in report_text
 
@@ -204,3 +223,4 @@ def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path)
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "召回倾向：优先测试文件和相关代码文件" in report_text
     assert "memory：已启用" in report_text
+    assert "写入状态：已写入" in report_text

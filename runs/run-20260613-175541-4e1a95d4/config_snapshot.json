@@ -1,0 +1,19 @@
+{
+  "task": "测试到阶段6开头，实现run成功且验证通过的长期记忆写入。",
+  "task_type": "general",
+  "repo_root": "D:\\1technical_stack_study\\agent_study\\agent_projects\\self-coding-agent",
+  "output_root": "runs",
+  "config_name": "default",
+  "run_id": "run-20260613-175541-4e1a95d4",
+  "created_at": "2026-06-13T09:55:41+00:00",
+  "config": {
+    "model": {
+      "provider": "stub",
+      "name": "phase-1-placeholder"
+    },
+    "runtime": {
+      "max_steps": 1,
+      "trace_level": "standard"
+    }
+  }
+}

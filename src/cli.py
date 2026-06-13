@@ -15,7 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="运行 self-coding-agent 的最小状态机实验流程。",
     )
     parser.add_argument("--task", required=True, help="本次 run 的任务描述。")
-    parser.add_argument("--task-type", default="ad_hoc", help="任务类型标签。")
+    parser.add_argument("--task-type", default="general", help="任务类型标签。")
     parser.add_argument("--repo-root", default=".", help="目标仓库根目录。")
     parser.add_argument("--output-root", default="runs", help="run 产物输出目录。")
     parser.add_argument("--config-name", default="default", help="configs 目录下使用的配置名。")

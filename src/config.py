@@ -19,7 +19,7 @@ class RunSettings:
     """承载单次 run 所需的基础配置。"""
 
     task: str
-    task_type: str = "ad_hoc"
+    task_type: str = "general"
     repo_root: str = "."
     output_root: str = "runs"
     config_name: str = "default"
