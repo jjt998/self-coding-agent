@@ -16,6 +16,12 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
         "# 项目说明\n\n这个仓库用于创建脚手架和验证最小 agent 流程。\n",
         encoding="utf-8",
     )
+    long_lines = ["# 长说明"] + [f"第{i}行：这里继续讨论创建脚手架的实现细节。" for i in range(1, 55)]
+    (repo_root / "LONG_GUIDE.md").write_text("\n".join(long_lines) + "\n", encoding="utf-8")
+    (repo_root / "DIRECTORY_GUIDE.md").write_text(
+        "# 目录说明\n\n这个文件主要介绍目录结构。\n",
+        encoding="utf-8",
+    )
 
     command = [
         sys.executable,
@@ -95,8 +101,19 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     context_events = [event["payload"] for event in trace_events if event["event_type"] == "context_snapshot"]
     assert len(context_events) == 1
     assert context_events[0]["task_context"]["task"] == "创建脚手架"
-    assert context_events[0]["repo_context"]["candidate_file_count"] >= 1
-    assert context_events[0]["repo_context"]["selected_files"][0]["path"] == "README.md"
+    assert context_events[0]["repo_context"]["candidate_file_count"] >= 3
+    selected_files = context_events[0]["repo_context"]["selected_files"]
+    selected_by_path = {item["path"]: item for item in selected_files}
+    assert selected_by_path["README.md"]["injection_mode"] == "original"
+    assert selected_by_path["README.md"]["included_line_count"] >= 1
+    assert selected_by_path["README.md"]["was_clipped"] is False
+    assert "# 项目说明" in selected_by_path["README.md"]["injection_content"]
+    assert selected_by_path["LONG_GUIDE.md"]["injection_mode"] == "summary"
+    assert selected_by_path["LONG_GUIDE.md"]["was_clipped"] is True
+    assert "内容摘要：" in selected_by_path["LONG_GUIDE.md"]["injection_content"]
+    assert selected_by_path["LONG_GUIDE.md"]["included_line_count"] == 8
+    assert selected_by_path["DIRECTORY_GUIDE.md"]["injection_mode"] == "index"
+    assert "索引提示：" in selected_by_path["DIRECTORY_GUIDE.md"]["injection_content"]
 
     notes_path = repo_root / "agent_notes.md"
     assert notes_path.exists()
@@ -107,6 +124,8 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "reflect：已触发" in report_text
     assert "## 上下文摘要" in report_text
     assert "`README.md`" in report_text
+    assert "`LONG_GUIDE.md`" in report_text
+    assert "是否裁剪：是" in report_text
     assert "## 工具调用摘要" in report_text
     assert "## 验证结果" in report_text
     assert "验证状态：通过" in report_text

@@ -67,8 +67,11 @@ def _build_phase_4_report(settings: RunSettings, runtime_state: RuntimeState) ->
         )
         if context_snapshot.repo_context.selected_files:
             for file_context in context_snapshot.repo_context.selected_files:
+                clip_text = "是" if file_context.was_clipped else "否"
                 context_lines.append(
-                    f"- `{file_context.path}`：以 `{file_context.injection_mode}` 方式放入上下文。原因：{file_context.reason}"
+                    f"- `{file_context.path}`：以 `{file_context.injection_mode}` 方式放入上下文，"
+                    f"保留 `{file_context.included_line_count}` 行，总行数 `{file_context.total_line_count}`，"
+                    f"是否裁剪：{clip_text}。原因：{file_context.reason}"
                 )
         else:
             context_lines.append("- 本次没有选中文件进入上下文。")

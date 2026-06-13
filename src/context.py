@@ -35,8 +35,12 @@ class FileContext:
     path: str
     injection_mode: str
     reason: str
+    injection_content: str
     content_preview: str
     score: int
+    total_line_count: int
+    included_line_count: int
+    was_clipped: bool
 
     def to_dict(self) -> dict[str, Any]:
         """转换成便于写入 trace 和报告的字典。"""
@@ -121,6 +125,10 @@ class ContextBuilder:
     def __init__(self, repo_root: str) -> None:
         """绑定仓库根目录，后面统一从这里做文件召回。"""
         self.repo_root = Path(repo_root).resolve()
+        # 第一版先把裁剪规则固定成简单常量，后面更换策略时只改这里即可。
+        self.original_line_limit = 40
+        self.summary_line_limit = 8
+        self.index_line_limit = 5
 
     def build_context_snapshot(
         self,
@@ -161,13 +169,23 @@ class ContextBuilder:
             score, reason = self._score_file(relative_path=relative_path, content=content, task_keywords=task_keywords)
             if score <= 0:
                 continue
+            injection_mode = self._choose_injection_mode(content=content, score=score)
+            injection_content, included_line_count, was_clipped = self._build_injection_content(
+                relative_path=relative_path,
+                content=content,
+                injection_mode=injection_mode,
+            )
             candidate_files.append(
                 FileContext(
                     path=relative_path,
-                    injection_mode=self._choose_injection_mode(content=content, score=score),
+                    injection_mode=injection_mode,
                     reason=reason,
+                    injection_content=injection_content,
                     content_preview=self._build_content_preview(content=content),
                     score=score,
+                    total_line_count=len(content.splitlines()),
+                    included_line_count=included_line_count,
+                    was_clipped=was_clipped,
                 )
             )
 
@@ -203,11 +221,43 @@ class ContextBuilder:
     def _choose_injection_mode(self, content: str, score: int) -> str:
         """按文件长度和相关性，决定放原文、摘要还是索引说明。"""
         line_count = len(content.splitlines())
-        if score >= 4 and line_count <= 40:
+        if score >= 4 and line_count <= self.original_line_limit:
             return "original"
         if score >= 3:
             return "summary"
         return "index"
+
+    def _build_injection_content(
+        self,
+        relative_path: str,
+        content: str,
+        injection_mode: str,
+    ) -> tuple[str, int, bool]:
+        """根据注入方式生成真正放进上下文的内容，并记录是否裁剪。"""
+        lines = content.splitlines()
+        if injection_mode == "original":
+            selected_lines = lines[: self.original_line_limit]
+            was_clipped = len(lines) > self.original_line_limit
+            return "\n".join(selected_lines), len(selected_lines), was_clipped
+
+        if injection_mode == "summary":
+            selected_lines = [line.strip() for line in lines if line.strip()][: self.summary_line_limit]
+            summary_lines = [
+                f"文件：{relative_path}",
+                f"总行数：{len(lines)}",
+                "内容摘要：",
+            ]
+            summary_lines.extend(f"- {line}" for line in selected_lines)
+            was_clipped = len([line for line in lines if line.strip()]) > self.summary_line_limit
+            return "\n".join(summary_lines), len(selected_lines), was_clipped
+
+        index_lines = [line.strip() for line in lines if line.strip()][: self.index_line_limit]
+        index_text = "；".join(index_lines) if index_lines else "文件为空。"
+        return (
+            f"文件：{relative_path}\n总行数：{len(lines)}\n索引提示：{index_text}",
+            len(index_lines),
+            len([line for line in lines if line.strip()]) > self.index_line_limit,
+        )
 
     def _build_content_preview(self, content: str) -> str:
         """截一小段内容预览，方便 trace 和报告快速看懂选中文件。"""
