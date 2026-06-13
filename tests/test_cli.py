@@ -130,3 +130,64 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "## 验证结果" in report_text
     assert "验证状态：通过" in report_text
     assert "`apply_patch`：成功" in report_text
+
+
+def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text(
+        "# 项目说明\n\n这里主要介绍仓库背景。\n",
+        encoding="utf-8",
+    )
+    (repo_root / "app.py").write_text(
+        "def broken_logic():\n    raise ValueError('fail to load data')\n",
+        encoding="utf-8",
+    )
+    tests_dir = repo_root / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_app.py").write_text(
+        "def test_broken_logic_error_message():\n    assert 'fail' in 'fail to load data'\n",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--task",
+        "修复 fail 错误",
+        "--task-type",
+        "bug_fix",
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    run_dir = list(output_root.iterdir())[0]
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
+    assert context_payload["task_context"]["task_type"] == "bug_fix"
+    assert context_payload["repo_context"]["recall_strategy"] == "优先测试文件和相关代码文件"
+
+    selected_files = context_payload["repo_context"]["selected_files"]
+    selected_paths = [item["path"] for item in selected_files]
+    assert "tests/test_app.py" in selected_paths
+    assert "app.py" in selected_paths
+
+    selected_by_path = {item["path"]: item for item in selected_files}
+    assert "当前任务像修 bug" in selected_by_path["tests/test_app.py"]["reason"]
+    assert "当前任务像修 bug" in selected_by_path["app.py"]["reason"]
+
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "召回倾向：优先测试文件和相关代码文件" in report_text

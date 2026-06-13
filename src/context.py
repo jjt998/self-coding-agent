@@ -65,6 +65,7 @@ class RepoContext:
     """保存从仓库里召回出来的文件上下文。"""
 
     repo_root: str
+    recall_strategy: str
     selected_files: list[FileContext] = field(default_factory=list)
     candidate_file_count: int = 0
 
@@ -140,11 +141,15 @@ class ContextBuilder:
     ) -> ContextSnapshot:
         """收集任务信息、召回相关文件，并整理成四层上下文结构。"""
         task_keywords = _extract_task_keywords(task)
-        selected_files, candidate_file_count = self._select_repo_files(task_keywords=task_keywords)
+        selected_files, candidate_file_count = self._select_repo_files(
+            task_keywords=task_keywords,
+            task_type=task_type,
+        )
         return ContextSnapshot(
             task_context=TaskContext(task=task, task_type=task_type, keywords=task_keywords),
             repo_context=RepoContext(
                 repo_root=str(self.repo_root),
+                recall_strategy=self._describe_recall_strategy(task_type=task_type),
                 selected_files=selected_files,
                 candidate_file_count=candidate_file_count,
             ),
@@ -156,7 +161,7 @@ class ContextBuilder:
             memory_context=MemoryContext(),
         )
 
-    def _select_repo_files(self, task_keywords: list[str]) -> tuple[list[FileContext], int]:
+    def _select_repo_files(self, task_keywords: list[str], task_type: str) -> tuple[list[FileContext], int]:
         """按最小规则从仓库里挑出值得放进上下文的文件。"""
         candidate_files: list[FileContext] = []
         candidate_count = 0
@@ -166,7 +171,12 @@ class ContextBuilder:
             candidate_count += 1
             relative_path = path.relative_to(self.repo_root).as_posix()
             content = path.read_text(encoding="utf-8")
-            score, reason = self._score_file(relative_path=relative_path, content=content, task_keywords=task_keywords)
+            score, reason = self._score_file(
+                relative_path=relative_path,
+                content=content,
+                task_keywords=task_keywords,
+                task_type=task_type,
+            )
             if score <= 0:
                 continue
             injection_mode = self._choose_injection_mode(content=content, score=score)
@@ -192,7 +202,13 @@ class ContextBuilder:
         candidate_files.sort(key=lambda item: (-item.score, item.path))
         return candidate_files[:3], candidate_count
 
-    def _score_file(self, relative_path: str, content: str, task_keywords: list[str]) -> tuple[int, str]:
+    def _score_file(
+        self,
+        relative_path: str,
+        content: str,
+        task_keywords: list[str],
+        task_type: str,
+    ) -> tuple[int, str]:
         """给文件做一个简单分数，分数越高表示越值得先读。"""
         score = 0
         reasons: list[str] = []
@@ -212,11 +228,79 @@ class ContextBuilder:
                 score += 3
                 reasons.append(f"文件内容包含任务关键词“{keyword}”")
 
+        task_type_bonus, task_type_reasons = self._score_by_task_type(
+            lowered_path=lowered_path,
+            content=content,
+            task_type=task_type,
+        )
+        score += task_type_bonus
+        reasons.extend(task_type_reasons)
+
         if score == 0 and relative_path.endswith(".md"):
             score = 1
             reasons.append("当前先保守保留一个文档文件，方便理解仓库")
 
         return score, "；".join(reasons) if reasons else "未命中召回规则"
+
+    def _score_by_task_type(self, lowered_path: str, content: str, task_type: str) -> tuple[int, list[str]]:
+        """按任务类型补充分数，让不同任务优先看到更合适的文件。"""
+        reasons: list[str] = []
+        score = 0
+        normalized_task_type = task_type.lower()
+
+        if normalized_task_type == "bug_fix":
+            if lowered_path.endswith(".py"):
+                score += 2
+                reasons.append("当前任务像修 bug，先提高代码文件优先级")
+            if "test" in lowered_path:
+                score += 3
+                reasons.append("当前任务像修 bug，测试文件更值得优先检查")
+            if "error" in content or "fail" in content:
+                score += 2
+                reasons.append("文件内容里出现失败相关词，可能和 bug 线索有关")
+            return score, reasons
+
+        if normalized_task_type == "code_understanding":
+            if lowered_path.endswith(".md"):
+                score += 3
+                reasons.append("当前任务偏理解代码，说明文档优先级更高")
+            if "readme" in lowered_path:
+                score += 2
+                reasons.append("当前任务偏理解代码，README 往往更适合先读")
+            return score, reasons
+
+        if normalized_task_type == "test_generation":
+            if "test" in lowered_path:
+                score += 3
+                reasons.append("当前任务要补测试，测试文件优先级更高")
+            if lowered_path.endswith(".py"):
+                score += 2
+                reasons.append("当前任务要补测试，需要先看代码文件")
+            return score, reasons
+
+        if normalized_task_type == "refactor":
+            if lowered_path.endswith(".py"):
+                score += 3
+                reasons.append("当前任务偏重构，代码文件优先级更高")
+            if "utils" in lowered_path or "helper" in lowered_path:
+                score += 1
+                reasons.append("当前任务偏重构，公共辅助文件值得先检查")
+            return score, reasons
+
+        return score, reasons
+
+    def _describe_recall_strategy(self, task_type: str) -> str:
+        """用一句白话说明当前任务类型使用的召回倾向。"""
+        normalized_task_type = task_type.lower()
+        if normalized_task_type == "bug_fix":
+            return "优先测试文件和相关代码文件"
+        if normalized_task_type == "code_understanding":
+            return "优先说明文档和仓库介绍文件"
+        if normalized_task_type == "test_generation":
+            return "优先现有测试文件和目标代码文件"
+        if normalized_task_type == "refactor":
+            return "优先核心代码文件和公共辅助文件"
+        return "按任务关键词和通用文件规则做保守召回"
 
     def _choose_injection_mode(self, content: str, score: int) -> str:
         """按文件长度和相关性，决定放原文、摘要还是索引说明。"""

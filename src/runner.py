@@ -62,6 +62,7 @@ def _build_phase_4_report(settings: RunSettings, runtime_state: RuntimeState) ->
     context_lines = []
     if context_snapshot:
         context_lines.append(f"- 任务关键词：`{', '.join(context_snapshot.task_context.keywords)}`")
+        context_lines.append(f"- 召回倾向：{context_snapshot.repo_context.recall_strategy}")
         context_lines.append(
             f"- 扫描到的文本文件数：`{context_snapshot.repo_context.candidate_file_count}`"
         )
