@@ -101,16 +101,14 @@
   - 扩充 CLI 测试，验证 `bug_fix` 任务的召回倾向
   - 实现上下文统计字段
   - 为 memory context 增加查询词、来源和命中条数接口位
-  - 实现 `runtime memory manager` 最小接口
-  - 让 context builder 通过统一入口读取 memory 结果
 - 剩余：
   - 继续补齐不同任务类型召回入口
-  - 为长期 memory store 预留最小结构入口
-  - 设计 memory 写入时机
+  - 设计 runtime memory manager 最小接口
+  - 让 context builder 与 memory manager 对齐
 - 验收：
   - Trace 中可以看到 context snapshot 和文件召回决策。
 - 备注：
-  - 第一版保持以文件为中心，当前优先保证可检查、可解释、可裁剪，并先把 runtime memory 接口稳定下来。
+  - 第一版保持以文件为中心，当前优先保证可检查、可解释、可裁剪，并为 memory 接入留位。
 
 ## Phase 6：Memory
 

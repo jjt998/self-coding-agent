@@ -1,0 +1,19 @@
+{
+  "task": "测试到阶段5，实现接口记忆管理器：根据任务补回相关记忆，当前是mock返回。拿到后放到上下文的记忆层",
+  "task_type": "ad_hoc",
+  "repo_root": "D:\\1technical_stack_study\\agent_study\\agent_projects\\self-coding-agent",
+  "output_root": "runs",
+  "config_name": "default",
+  "run_id": "run-20260613-173128-e0739b09",
+  "created_at": "2026-06-13T09:31:28+00:00",
+  "config": {
+    "model": {
+      "provider": "stub",
+      "name": "phase-1-placeholder"
+    },
+    "runtime": {
+      "max_steps": 1,
+      "trace_level": "standard"
+    }
+  }
+}

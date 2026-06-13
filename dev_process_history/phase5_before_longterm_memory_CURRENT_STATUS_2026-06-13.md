@@ -26,8 +26,6 @@
 - 已接入按任务类型区分的召回倾向，不同任务现在会优先看到不同类型的文件。
 - 已补上上下文统计摘要，当前可看到选中文件数、保留总行数、原始总行数和裁剪文件数。
 - 已为 memory 接入预留明确接口位，当前上下文里会记录 memory 查询词、来源和命中条数。
-- 已落地 `runtime memory manager` 最小接口，`analyze` 阶段现在会通过统一入口拿到 memory 提示。
-- 当前 memory 结果已经接入 `context_snapshot` 和报告，可看到 query、source 与命中条目。
 
 ## 已完成
 
@@ -77,21 +75,18 @@
 - 完成上下文统计字段。
 - 完成 memory context 预留接口字段。
 - 完成 `Phase 5` 的第三轮 CLI 自动化测试扩展。
-- 完成 `runtime memory manager` 最小接口。
-- 完成 context builder 与 memory manager 对齐。
-- 完成 `Phase 5` 的第四轮 CLI 自动化测试扩展。
 
 ## 进行中
 
-- 继续推进 `Phase 5`，准备为长期 memory store 预留最小结构入口。
+- 继续推进 `Phase 5`，准备把 context builder 和 memory manager 正式对齐。
 
 ## 下一步明确动作
 
 - 为召回结果补更多可解释字段，减少“为什么选中它”的歧义。
 - 继续补齐不同任务类型下的召回优先级规则。
+- 设计并实现 runtime memory manager 最小接口。
+- 让 context builder 能读取 memory manager 返回值。
 - 为长期 memory store 预留最小结构入口。
-- 设计长期 memory entry schema。
-- 设计成功 run 的 memory 写入时机。
 
 ## 当前阻塞
 
@@ -106,4 +101,4 @@
 2. 阅读 `docs/CURRENT_STATUS.md`。
 3. 阅读 `docs/PHASE_PROGRESS.md`。
 4. 检查 `src/context.py`、`src/tools.py`、`src/verify.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
-5. 从长期 memory store 的最小结构入口开始继续。
+5. 从 `Phase 5` 的 memory manager 最小接口开始继续。

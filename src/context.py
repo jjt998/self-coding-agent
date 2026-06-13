@@ -175,7 +175,7 @@ class ContextBuilder:
                 enabled=bool(matched_entries),
                 query=memory_query,
                 matched_entries=matched_entries,
-                source="placeholder_runtime_memory" if matched_entries else "disabled",
+                source="runtime_memory_manager" if matched_entries else "disabled",
             ),
         )
 

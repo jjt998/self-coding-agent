@@ -6,6 +6,7 @@ from typing import Any
 
 from context import ContextBuilder, ContextSnapshot
 from config import RunSettings
+from memory import RuntimeMemoryManager
 from trace import TraceEvent, TraceWriter
 from tools import CoreToolRunner, ToolExecution, build_phase_3_tool_sequence
 from verify import VerificationResult, build_phase_4_verification
@@ -81,6 +82,7 @@ class LoopOrchestrator:
         """执行一条最小 stub 状态链路并返回最终运行态。"""
         runtime_state = RuntimeState(task=settings.task, task_type=settings.task_type)
         context_builder = ContextBuilder(repo_root=settings.repo_root)
+        memory_manager = RuntimeMemoryManager()
         tool_runner = CoreToolRunner(repo_root=settings.repo_root)
         planned_states = [
             AgentState.INGEST,
@@ -101,6 +103,7 @@ class LoopOrchestrator:
                 runtime_state=runtime_state,
                 config_data=config_data,
                 context_builder=context_builder,
+                memory_manager=memory_manager,
                 tool_runner=tool_runner,
             )
             runtime_state.mark_completed(state)
@@ -165,6 +168,7 @@ class LoopOrchestrator:
         runtime_state: RuntimeState,
         config_data: dict[str, Any],
         context_builder: ContextBuilder,
+        memory_manager: RuntimeMemoryManager,
         tool_runner: CoreToolRunner,
     ) -> dict[str, Any]:
         """为当前阶段生成占位结果，先把控制面和 trace 结构跑通。"""
@@ -175,14 +179,25 @@ class LoopOrchestrator:
                 "task": runtime_state.task,
             }
         if state is AgentState.ANALYZE:
+            memory_query = memory_manager.build_query(
+                task=runtime_state.task,
+                task_type=runtime_state.task_type,
+            )
+            matched_memory_entries = [
+                entry.to_dict()
+                for entry in memory_manager.search(
+                    task=runtime_state.task,
+                    task_type=runtime_state.task_type,
+                )
+            ]
             runtime_state.context_snapshot = context_builder.build_context_snapshot(
                 task=runtime_state.task,
                 task_type=runtime_state.task_type,
                 current_state=runtime_state.current_state,
                 completed_states=runtime_state.completed_states,
                 step_count=runtime_state.step_count,
-                memory_query=runtime_state.task,
-                matched_memory_entries=[],
+                memory_query=memory_query,
+                matched_memory_entries=matched_memory_entries,
             )
             self.trace_writer.write_event(
                 TraceEvent(
