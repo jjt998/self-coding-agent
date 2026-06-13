@@ -129,6 +129,18 @@ def _build_phase_4_report(
             f"conflict evidence "
             f"`{len(context_snapshot.memory_context.conflict_evidence)}` 条"
         )
+        diagnostic_labels = context_snapshot.memory_context.diagnostic_labels
+        context_lines.append(
+            f"- memory 诊断标签：`{', '.join(diagnostic_labels) if diagnostic_labels else '无'}`"
+        )
+        if context_snapshot.memory_context.conflict_evidence:
+            for item in context_snapshot.memory_context.conflict_evidence:
+                context_lines.append(
+                    f"- memory 冲突：{item['summary']}。"
+                    f"任务类型：`{', '.join(item.get('task_types', [])) or '未知'}`。"
+                    f"共享关键词：`{', '.join(item.get('shared_keywords', [])) or '无'}`。"
+                    f"共享文件：`{', '.join(item.get('shared_file_paths', [])) or '无'}`"
+                )
     context_summary = "\n".join(context_lines) if context_lines else "- 尚未生成上下文快照。"
 
     return (

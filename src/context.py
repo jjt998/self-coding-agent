@@ -103,6 +103,7 @@ class MemoryContext:
     runtime_rule_entries: list[dict[str, Any]] = field(default_factory=list)
     long_term_entries: list[dict[str, Any]] = field(default_factory=list)
     conflict_evidence: list[dict[str, Any]] = field(default_factory=list)
+    diagnostic_labels: list[str] = field(default_factory=list)
     source: str = "disabled"
 
     def to_dict(self) -> dict[str, Any]:
@@ -152,6 +153,7 @@ class ContextBuilder:
         runtime_rule_entries: list[dict[str, Any]] | None = None,
         long_term_memory_entries: list[dict[str, Any]] | None = None,
         memory_conflict_evidence: list[dict[str, Any]] | None = None,
+        memory_diagnostic_labels: list[str] | None = None,
     ) -> ContextSnapshot:
         """收集任务信息、召回相关文件，并整理成四层上下文结构。"""
         task_keywords = _extract_task_keywords(task)
@@ -163,6 +165,7 @@ class ContextBuilder:
         runtime_entries = runtime_rule_entries or []
         long_term_entries = long_term_memory_entries or []
         conflict_evidence = memory_conflict_evidence or []
+        diagnostic_labels = memory_diagnostic_labels or []
         return ContextSnapshot(
             task_context=TaskContext(task=task, task_type=task_type, keywords=task_keywords),
             repo_context=RepoContext(
@@ -187,6 +190,7 @@ class ContextBuilder:
                 runtime_rule_entries=runtime_entries,
                 long_term_entries=long_term_entries,
                 conflict_evidence=conflict_evidence,
+                diagnostic_labels=diagnostic_labels,
                 source="runtime_memory_manager" if (matched_entries or runtime_entries or long_term_entries) else "disabled",
             ),
         )

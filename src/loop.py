@@ -207,6 +207,7 @@ class LoopOrchestrator:
                 runtime_rule_entries=runtime_rule_entries,
                 long_term_memory_entries=long_term_entries,
                 memory_conflict_evidence=memory_search_result.conflict_evidence,
+                memory_diagnostic_labels=memory_search_result.diagnostic_labels,
             )
             self.trace_writer.write_event(
                 TraceEvent(

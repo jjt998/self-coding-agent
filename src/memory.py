@@ -45,6 +45,7 @@ class MemorySearchResult:
     runtime_rule_entries: list[MemoryEntry] = field(default_factory=list)
     long_term_entries: list[MemoryEntry] = field(default_factory=list)
     conflict_evidence: list[dict[str, Any]] = field(default_factory=list)
+    diagnostic_labels: list[str] = field(default_factory=list)
 
     def all_entries(self) -> list[MemoryEntry]:
         """按展示顺序返回本次查询的全部 memory 条目。"""
@@ -135,7 +136,7 @@ class RuntimeMemoryManager:
                 )
             )
 
-        long_term_entries, conflict_evidence = self._search_long_term_memory(
+        long_term_entries, conflict_evidence, diagnostic_labels = self._search_long_term_memory(
             task=task,
             task_type=normalized_task_type,
         )
@@ -143,13 +144,18 @@ class RuntimeMemoryManager:
             runtime_rule_entries=runtime_entries,
             long_term_entries=long_term_entries,
             conflict_evidence=conflict_evidence,
+            diagnostic_labels=diagnostic_labels,
         )
 
-    def _search_long_term_memory(self, task: str, task_type: str) -> tuple[list[MemoryEntry], list[dict[str, Any]]]:
+    def _search_long_term_memory(
+        self,
+        task: str,
+        task_type: str,
+    ) -> tuple[list[MemoryEntry], list[dict[str, Any]], list[str]]:
         """按 task type、tags、关键词和路径交集做最小长期 memory 检索。"""
         store_entries = self.long_term_store.read_entries()
         if not store_entries:
-            return [], []
+            return [], [], []
 
         repo_paths = {
             path.relative_to(self.repo_root).as_posix()
@@ -158,6 +164,7 @@ class RuntimeMemoryManager:
         }
         task_keywords = set(_extract_keywords(task))
         scored_entries: list[tuple[int, MemoryEntry]] = []
+        matched_candidates: list[dict[str, Any]] = []
 
         for item in store_entries:
             score = 0
@@ -192,6 +199,16 @@ class RuntimeMemoryManager:
             if score <= 0:
                 continue
 
+            matched_candidates.append(
+                {
+                    "run_id": str(item.get("run_id", "")),
+                    "task": entry_task,
+                    "task_type": entry_task_type,
+                    "matched_keywords": matched_keywords,
+                    "matched_paths": matched_paths,
+                    "matched_on": matched_on,
+                }
+            )
             scored_entries.append(
                 (
                     score,
@@ -210,6 +227,8 @@ class RuntimeMemoryManager:
                 )
             )
 
+        conflict_evidence = self._detect_conflicts(matched_candidates=matched_candidates)
+        diagnostic_labels = self._build_diagnostic_labels(conflict_evidence=conflict_evidence)
         scored_entries.sort(
             key=lambda item: (
                 -item[0],
@@ -218,7 +237,52 @@ class RuntimeMemoryManager:
             )
         )
         long_term_entries = [entry for _, entry in scored_entries[:3]]
-        return long_term_entries, []
+        return long_term_entries, conflict_evidence, diagnostic_labels
+
+    def _detect_conflicts(self, matched_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """为共享线索却任务类型不同的长期 memory 留下最小冲突证据。"""
+        conflicts: list[dict[str, Any]] = []
+        seen_keys: set[tuple[str, str, str, str]] = set()
+
+        for index, left in enumerate(matched_candidates):
+            for right in matched_candidates[index + 1 :]:
+                if left["task_type"] == right["task_type"]:
+                    continue
+
+                shared_keywords = sorted(set(left["matched_keywords"]).intersection(right["matched_keywords"]))
+                shared_paths = sorted(set(left["matched_paths"]).intersection(right["matched_paths"]))
+                if not shared_keywords and not shared_paths:
+                    continue
+
+                pair_key = (
+                    left["run_id"],
+                    right["run_id"],
+                    "|".join(shared_keywords),
+                    "|".join(shared_paths),
+                )
+                if pair_key in seen_keys:
+                    continue
+                seen_keys.add(pair_key)
+
+                conflicts.append(
+                    {
+                        "kind": "task_type_mismatch",
+                        "summary": "不同任务类型的长期 memory 共享了当前任务线索，需要警惕经验污染。",
+                        "run_ids": [left["run_id"], right["run_id"]],
+                        "task_types": [left["task_type"], right["task_type"]],
+                        "tasks": [left["task"], right["task"]],
+                        "shared_keywords": shared_keywords,
+                        "shared_file_paths": shared_paths,
+                    }
+                )
+
+        return conflicts
+
+    def _build_diagnostic_labels(self, conflict_evidence: list[dict[str, Any]]) -> list[str]:
+        """根据冲突证据生成当前最小诊断标签。"""
+        if not conflict_evidence:
+            return []
+        return ["memory_conflict", "memory_pollution"]
 
 
 class LongTermMemoryStore:

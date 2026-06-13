@@ -36,9 +36,6 @@
 - 已在 `memory_context` 中区分运行时规则 memory 与长期 memory 命中结果。
 - 已为 `memory conflict evidence` 增加最小字段，当前先记录为空列表占位。
 - 报告现在会展示运行时规则条数、长期 memory 条数和 conflict evidence 条数。
-- 已实现最小 `memory conflict evidence` 检测，当前会识别“共享关键词或文件路径，但任务类型不同”的长期 memory 命中对。
-- 已增加 `memory_conflict` 与 `memory_pollution` 两个最小诊断标签，并接入 `memory_context` 与报告。
-- 报告现在会展示 memory 诊断标签和冲突证据摘要，便于快速排查潜在污染。
 
 ## 已完成
 
@@ -100,20 +97,17 @@
 - 完成按 `task type`、`tags`、`keywords`、`file path` 的最小检索。
 - 完成 memory context 字段扩展：`runtime_rule_entries`、`long_term_entries`、`conflict_evidence`。
 - 完成 `Phase 6` 的第二轮 CLI 自动化测试扩展。
-- 完成最小 memory conflict evidence 检测规则。
-- 完成最小 `memory_conflict` / `memory_pollution` 诊断标签。
-- 完成 `Phase 6` 的第三轮 CLI 自动化测试扩展。
 
 ## 进行中
 
-- 继续推进 `Phase 6`，下一步开始增强长期 memory 写入证据与检索稳定性。
+- 继续推进 `Phase 6`，下一步进入长期 memory 的 conflict evidence 与污染诊断增强。
 
 ## 下一步明确动作
 
-- 在长期 memory 写入时补充更稳定的关键词、路径或任务摘要证据，降低后续检索歧义。
+- 为长期 memory 增加真正的 conflict evidence 检测规则，而不只是空字段占位。
+- 在长期 memory 写入时补充更稳定的关键词或路径证据，降低后续检索歧义。
 - 评估是否需要把长期 memory 命中摘要进一步压缩后再注入上下文。
-- 继续细化 conflict evidence 规则，避免把弱相关条目误判成污染。
-- 考虑为 memory 命中与冲突检测增加独立 trace event，提升可观测性。
+- 开始为 `Phase 6` 补最小的 `memory_pollution` 诊断标签。
 
 ## 当前阻塞
 
@@ -128,4 +122,4 @@
 2. 阅读 `docs/CURRENT_STATUS.md`。
 3. 阅读 `docs/PHASE_PROGRESS.md`。
 4. 检查 `src/context.py`、`src/tools.py`、`src/verify.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
-5. 从长期 memory 写入证据增强与 conflict 规则细化开始继续。
+5. 从长期 memory 的 conflict evidence 与污染诊断增强开始继续。

@@ -124,13 +124,11 @@
   - 让 `runtime memory manager` 读取长期 memory store
   - 实现按 `task type`、`tags`、`keywords`、`file path` 的最小检索
   - 在 `memory_context` 中区分 `runtime_rule_entries` 和 `long_term_entries`
-  - 实现最小 `conflict_evidence` 检测规则
-  - 增加 `memory_conflict` 与 `memory_pollution` 诊断标签
+  - 为 `conflict_evidence` 增加最小字段占位
   - 扩充 CLI 测试，验证长期 memory 读取与筛选
-  - 扩充 CLI 测试，验证 memory 冲突证据与污染标签
 - 剩余：
-  - 增强长期 memory 写入证据，降低检索歧义
-  - 细化 conflict evidence 规则，减少误判
+  - 实现真正的 memory conflict evidence 检测
+  - 增加 `memory_pollution` 相关诊断标签
 - 验收：
   - 成功且验证通过的 run 可以写入 memory，后续 run 可以读取。
 - 备注：
