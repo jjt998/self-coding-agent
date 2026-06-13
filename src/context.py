@@ -68,6 +68,10 @@ class RepoContext:
     recall_strategy: str
     selected_files: list[FileContext] = field(default_factory=list)
     candidate_file_count: int = 0
+    selected_file_count: int = 0
+    total_selected_lines: int = 0
+    total_original_lines: int = 0
+    clipped_file_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """转换成便于写入 trace 和报告的字典。"""
@@ -94,7 +98,9 @@ class MemoryContext:
     """为后续 memory 接入预留统一位置，当前先保持为空结构。"""
 
     enabled: bool = False
+    query: str = ""
     matched_entries: list[dict[str, Any]] = field(default_factory=list)
+    source: str = "disabled"
 
     def to_dict(self) -> dict[str, Any]:
         """转换成便于写入 trace 和报告的字典。"""
@@ -138,6 +144,8 @@ class ContextBuilder:
         current_state: str,
         completed_states: list[str],
         step_count: int,
+        memory_query: str = "",
+        matched_memory_entries: list[dict[str, Any]] | None = None,
     ) -> ContextSnapshot:
         """收集任务信息、召回相关文件，并整理成四层上下文结构。"""
         task_keywords = _extract_task_keywords(task)
@@ -145,6 +153,7 @@ class ContextBuilder:
             task_keywords=task_keywords,
             task_type=task_type,
         )
+        matched_entries = matched_memory_entries or []
         return ContextSnapshot(
             task_context=TaskContext(task=task, task_type=task_type, keywords=task_keywords),
             repo_context=RepoContext(
@@ -152,13 +161,22 @@ class ContextBuilder:
                 recall_strategy=self._describe_recall_strategy(task_type=task_type),
                 selected_files=selected_files,
                 candidate_file_count=candidate_file_count,
+                selected_file_count=len(selected_files),
+                total_selected_lines=sum(file_context.included_line_count for file_context in selected_files),
+                total_original_lines=sum(file_context.total_line_count for file_context in selected_files),
+                clipped_file_count=sum(1 for file_context in selected_files if file_context.was_clipped),
             ),
             runtime_context=RuntimeContext(
                 current_state=current_state,
                 completed_states=list(completed_states),
                 step_count=step_count,
             ),
-            memory_context=MemoryContext(),
+            memory_context=MemoryContext(
+                enabled=bool(matched_entries),
+                query=memory_query,
+                matched_entries=matched_entries,
+                source="placeholder_runtime_memory" if matched_entries else "disabled",
+            ),
         )
 
     def _select_repo_files(self, task_keywords: list[str], task_type: str) -> tuple[list[FileContext], int]:

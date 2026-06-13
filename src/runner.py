@@ -66,6 +66,12 @@ def _build_phase_4_report(settings: RunSettings, runtime_state: RuntimeState) ->
         context_lines.append(
             f"- 扫描到的文本文件数：`{context_snapshot.repo_context.candidate_file_count}`"
         )
+        context_lines.append(
+            f"- 选中文件数：`{context_snapshot.repo_context.selected_file_count}`，"
+            f"保留总行数：`{context_snapshot.repo_context.total_selected_lines}`，"
+            f"原始总行数：`{context_snapshot.repo_context.total_original_lines}`，"
+            f"发生裁剪的文件数：`{context_snapshot.repo_context.clipped_file_count}`"
+        )
         if context_snapshot.repo_context.selected_files:
             for file_context in context_snapshot.repo_context.selected_files:
                 clip_text = "是" if file_context.was_clipped else "否"
@@ -76,6 +82,12 @@ def _build_phase_4_report(settings: RunSettings, runtime_state: RuntimeState) ->
                 )
         else:
             context_lines.append("- 本次没有选中文件进入上下文。")
+        memory_status = "已启用" if context_snapshot.memory_context.enabled else "未启用"
+        context_lines.append(
+            f"- memory：{memory_status}。来源：`{context_snapshot.memory_context.source}`。"
+            f"查询词：`{context_snapshot.memory_context.query or '无'}`。"
+            f"命中条数：`{len(context_snapshot.memory_context.matched_entries)}`"
+        )
     context_summary = "\n".join(context_lines) if context_lines else "- 尚未生成上下文快照。"
 
     return (

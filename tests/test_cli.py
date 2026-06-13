@@ -102,6 +102,12 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert len(context_events) == 1
     assert context_events[0]["task_context"]["task"] == "创建脚手架"
     assert context_events[0]["repo_context"]["candidate_file_count"] >= 3
+    assert context_events[0]["repo_context"]["selected_file_count"] == 3
+    assert context_events[0]["repo_context"]["clipped_file_count"] >= 1
+    assert context_events[0]["repo_context"]["total_original_lines"] >= context_events[0]["repo_context"]["total_selected_lines"]
+    assert context_events[0]["memory_context"]["enabled"] is False
+    assert context_events[0]["memory_context"]["query"] == "创建脚手架"
+    assert context_events[0]["memory_context"]["source"] == "disabled"
     selected_files = context_events[0]["repo_context"]["selected_files"]
     selected_by_path = {item["path"]: item for item in selected_files}
     assert selected_by_path["README.md"]["injection_mode"] == "original"
@@ -126,6 +132,8 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "`README.md`" in report_text
     assert "`LONG_GUIDE.md`" in report_text
     assert "是否裁剪：是" in report_text
+    assert "选中文件数：`3`" in report_text
+    assert "memory：未启用" in report_text
     assert "## 工具调用摘要" in report_text
     assert "## 验证结果" in report_text
     assert "验证状态：通过" in report_text
@@ -179,6 +187,7 @@ def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path)
     context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
     assert context_payload["task_context"]["task_type"] == "bug_fix"
     assert context_payload["repo_context"]["recall_strategy"] == "优先测试文件和相关代码文件"
+    assert context_payload["memory_context"]["query"] == "修复 fail 错误"
 
     selected_files = context_payload["repo_context"]["selected_files"]
     selected_paths = [item["path"] for item in selected_files]

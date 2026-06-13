@@ -24,8 +24,6 @@
 - 已补上最小裁剪规则，trace 和 report 里现在能看到保留行数、总行数和是否裁剪。
 - report 现在会展示上下文摘要，包括任务关键词、扫描文件数、注入方式和选中文件原因。
 - 已接入按任务类型区分的召回倾向，不同任务现在会优先看到不同类型的文件。
-- 已补上上下文统计摘要，当前可看到选中文件数、保留总行数、原始总行数和裁剪文件数。
-- 已为 memory 接入预留明确接口位，当前上下文里会记录 memory 查询词、来源和命中条数。
 
 ## 已完成
 
@@ -72,21 +70,17 @@
 - 完成 `Phase 5` 的第二轮 CLI 自动化测试扩展。
 - 完成按任务类型区分的召回优先级。
 - 完成 `bug_fix` 任务类型的召回策略测试。
-- 完成上下文统计字段。
-- 完成 memory context 预留接口字段。
-- 完成 `Phase 5` 的第三轮 CLI 自动化测试扩展。
 
 ## 进行中
 
-- 继续推进 `Phase 5`，准备把 context builder 和 memory manager 正式对齐。
+- 继续推进 `Phase 5`，准备补上下文裁剪统计摘要。
 
 ## 下一步明确动作
 
 - 为召回结果补更多可解释字段，减少“为什么选中它”的歧义。
 - 继续补齐不同任务类型下的召回优先级规则。
-- 设计并实现 runtime memory manager 最小接口。
-- 让 context builder 能读取 memory manager 返回值。
-- 为长期 memory store 预留最小结构入口。
+- 补一个更明确的上下文裁剪统计摘要。
+- 为后续 memory 接入对齐 context builder 接口。
 
 ## 当前阻塞
 
@@ -101,4 +95,4 @@
 2. 阅读 `docs/CURRENT_STATUS.md`。
 3. 阅读 `docs/PHASE_PROGRESS.md`。
 4. 检查 `src/context.py`、`src/tools.py`、`src/verify.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
-5. 从 `Phase 5` 的 memory manager 最小接口开始继续。
+5. 从 `Phase 5` 的上下文裁剪统计与 memory 接口对齐开始继续。

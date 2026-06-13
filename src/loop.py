@@ -181,6 +181,8 @@ class LoopOrchestrator:
                 current_state=runtime_state.current_state,
                 completed_states=runtime_state.completed_states,
                 step_count=runtime_state.step_count,
+                memory_query=runtime_state.task,
+                matched_memory_entries=[],
             )
             self.trace_writer.write_event(
                 TraceEvent(
