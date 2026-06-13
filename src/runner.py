@@ -121,6 +121,14 @@ def _build_phase_4_report(
             f"查询词：`{context_snapshot.memory_context.query or '无'}`。"
             f"命中条数：`{len(context_snapshot.memory_context.matched_entries)}`"
         )
+        context_lines.append(
+            f"- memory 明细：运行时规则 "
+            f"`{len(context_snapshot.memory_context.runtime_rule_entries)}` 条，"
+            f"长期 memory "
+            f"`{len(context_snapshot.memory_context.long_term_entries)}` 条，"
+            f"conflict evidence "
+            f"`{len(context_snapshot.memory_context.conflict_evidence)}` 条"
+        )
     context_summary = "\n".join(context_lines) if context_lines else "- 尚未生成上下文快照。"
 
     return (

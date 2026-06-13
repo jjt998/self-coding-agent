@@ -31,11 +31,6 @@
 - 已把默认任务类型从 `ad_hoc` 改成更直白的 `general`，避免继续扩散不友好命名。
 - 已落地长期 memory 的最小写入口，验证通过的 run 现在会写入 `.agent_memory/long_term_memory.jsonl`。
 - trace 和报告现在会记录 memory 写入结果，便于后续检查长期 memory 何时被写入。
-- 已让 `runtime memory manager` 读取长期 memory store，并把命中结果接回分析阶段。
-- 已实现基于 `task type`、`tags`、`keywords`、`selected_context_files` 的最小长期 memory 筛选。
-- 已在 `memory_context` 中区分运行时规则 memory 与长期 memory 命中结果。
-- 已为 `memory conflict evidence` 增加最小字段，当前先记录为空列表占位。
-- 报告现在会展示运行时规则条数、长期 memory 条数和 conflict evidence 条数。
 
 ## 已完成
 
@@ -93,21 +88,17 @@
 - 完成验证通过后写入长期 memory 的最小流程。
 - 完成 `memory_write_result` trace 事件。
 - 完成 `Phase 6` 的第一轮 CLI 自动化测试扩展。
-- 完成长期 memory store 读取流程。
-- 完成按 `task type`、`tags`、`keywords`、`file path` 的最小检索。
-- 完成 memory context 字段扩展：`runtime_rule_entries`、`long_term_entries`、`conflict_evidence`。
-- 完成 `Phase 6` 的第二轮 CLI 自动化测试扩展。
 
 ## 进行中
 
-- 继续推进 `Phase 6`，下一步进入长期 memory 的 conflict evidence 与污染诊断增强。
+- 进入 `Phase 6`，开始实现长期 memory 的读取与筛选。
 
 ## 下一步明确动作
 
-- 为长期 memory 增加真正的 conflict evidence 检测规则，而不只是空字段占位。
-- 在长期 memory 写入时补充更稳定的关键词或路径证据，降低后续检索歧义。
-- 评估是否需要把长期 memory 命中摘要进一步压缩后再注入上下文。
-- 开始为 `Phase 6` 补最小的 `memory_pollution` 诊断标签。
+- 让 `runtime memory manager` 读取长期 memory store。
+- 增加按 task type、tags、关键词的最小筛选。
+- 在上下文里区分 runtime rule memory 和长期 memory 命中结果。
+- 为 memory conflict evidence 预留最小字段。
 
 ## 当前阻塞
 
@@ -122,4 +113,4 @@
 2. 阅读 `docs/CURRENT_STATUS.md`。
 3. 阅读 `docs/PHASE_PROGRESS.md`。
 4. 检查 `src/context.py`、`src/tools.py`、`src/verify.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
-5. 从长期 memory 的 conflict evidence 与污染诊断增强开始继续。
+5. 从长期 memory 的读取与筛选开始继续。

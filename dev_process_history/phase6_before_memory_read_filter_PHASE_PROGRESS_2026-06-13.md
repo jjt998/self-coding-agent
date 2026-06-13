@@ -3,7 +3,7 @@
 ## 总览
 
 - 最后更新时间：2026-06-13
-- 当前激活阶段：`Phase 6：Memory`
+- 当前激活阶段：`Phase 5：Context 与 Recall`
 
 ## Phase 1：脚手架与控制面
 
@@ -121,14 +121,10 @@
   - 实现验证通过后写入长期 memory 的最小流程
   - 增加 `memory_write_result` trace 事件
   - 扩充 CLI 测试，验证长期 memory 文件写入
-  - 让 `runtime memory manager` 读取长期 memory store
-  - 实现按 `task type`、`tags`、`keywords`、`file path` 的最小检索
-  - 在 `memory_context` 中区分 `runtime_rule_entries` 和 `long_term_entries`
-  - 为 `conflict_evidence` 增加最小字段占位
-  - 扩充 CLI 测试，验证长期 memory 读取与筛选
 - 剩余：
-  - 实现真正的 memory conflict evidence 检测
-  - 增加 `memory_pollution` 相关诊断标签
+  - 让 `runtime memory manager` 读取长期 memory store
+  - 实现 tag/path/keyword 检索
+  - 实现 memory conflict evidence
 - 验收：
   - 成功且验证通过的 run 可以写入 memory，后续 run 可以读取。
 - 备注：

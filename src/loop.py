@@ -82,7 +82,7 @@ class LoopOrchestrator:
         """执行一条最小 stub 状态链路并返回最终运行态。"""
         runtime_state = RuntimeState(task=settings.task, task_type=settings.task_type)
         context_builder = ContextBuilder(repo_root=settings.repo_root)
-        memory_manager = RuntimeMemoryManager()
+        memory_manager = RuntimeMemoryManager(repo_root=settings.repo_root)
         tool_runner = CoreToolRunner(repo_root=settings.repo_root)
         planned_states = [
             AgentState.INGEST,
@@ -183,12 +183,18 @@ class LoopOrchestrator:
                 task=runtime_state.task,
                 task_type=runtime_state.task_type,
             )
+            memory_search_result = memory_manager.search(
+                task=runtime_state.task,
+                task_type=runtime_state.task_type,
+            )
+            runtime_rule_entries = [
+                entry.to_dict() for entry in memory_search_result.runtime_rule_entries
+            ]
+            long_term_entries = [
+                entry.to_dict() for entry in memory_search_result.long_term_entries
+            ]
             matched_memory_entries = [
-                entry.to_dict()
-                for entry in memory_manager.search(
-                    task=runtime_state.task,
-                    task_type=runtime_state.task_type,
-                )
+                entry.to_dict() for entry in memory_search_result.all_entries()
             ]
             runtime_state.context_snapshot = context_builder.build_context_snapshot(
                 task=runtime_state.task,
@@ -198,6 +204,9 @@ class LoopOrchestrator:
                 step_count=runtime_state.step_count,
                 memory_query=memory_query,
                 matched_memory_entries=matched_memory_entries,
+                runtime_rule_entries=runtime_rule_entries,
+                long_term_memory_entries=long_term_entries,
+                memory_conflict_evidence=memory_search_result.conflict_evidence,
             )
             self.trace_writer.write_event(
                 TraceEvent(

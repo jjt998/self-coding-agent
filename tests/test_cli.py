@@ -114,6 +114,9 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert context_events[0]["memory_context"]["query"] == "general:创建脚手架"
     assert context_events[0]["memory_context"]["source"] == "runtime_memory_manager"
     assert len(context_events[0]["memory_context"]["matched_entries"]) >= 1
+    assert len(context_events[0]["memory_context"]["runtime_rule_entries"]) >= 1
+    assert context_events[0]["memory_context"]["long_term_entries"] == []
+    assert context_events[0]["memory_context"]["conflict_evidence"] == []
     selected_files = context_events[0]["repo_context"]["selected_files"]
     selected_by_path = {item["path"]: item for item in selected_files}
     assert selected_by_path["README.md"]["injection_mode"] == "original"
@@ -152,6 +155,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "是否裁剪：是" in report_text
     assert "选中文件数：`3`" in report_text
     assert "memory：已启用" in report_text
+    assert "长期 memory `0` 条" in report_text
     assert "## 工具调用摘要" in report_text
     assert "## 验证结果" in report_text
     assert "## Memory 写入" in report_text
@@ -210,6 +214,9 @@ def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path)
     assert context_payload["memory_context"]["query"] == "bug_fix:修复 fail 错误"
     assert context_payload["memory_context"]["source"] == "runtime_memory_manager"
     assert len(context_payload["memory_context"]["matched_entries"]) >= 2
+    assert len(context_payload["memory_context"]["runtime_rule_entries"]) >= 2
+    assert context_payload["memory_context"]["long_term_entries"] == []
+    assert context_payload["memory_context"]["conflict_evidence"] == []
 
     selected_files = context_payload["repo_context"]["selected_files"]
     selected_paths = [item["path"] for item in selected_files]
@@ -224,3 +231,106 @@ def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path)
     assert "召回倾向：优先测试文件和相关代码文件" in report_text
     assert "memory：已启用" in report_text
     assert "写入状态：已写入" in report_text
+
+
+def test_cli_reads_long_term_memory_with_task_type_keyword_and_path_filters(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text(
+        "# 项目说明\n\n这里记录 app fail 问题和处理方式。\n",
+        encoding="utf-8",
+    )
+    (repo_root / "app.py").write_text(
+        "def broken_logic():\n    raise ValueError('fail to load data')\n",
+        encoding="utf-8",
+    )
+    tests_dir = repo_root / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_app.py").write_text(
+        "def test_broken_logic_error_message():\n    assert 'fail' in 'fail to load data'\n",
+        encoding="utf-8",
+    )
+
+    memory_dir = repo_root / ".agent_memory"
+    memory_dir.mkdir()
+    memory_store_path = memory_dir / "long_term_memory.jsonl"
+    memory_store_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "run_id": "run-memory-match",
+                        "task": "修复 app fail 错误",
+                        "task_type": "bug_fix",
+                        "summary": "之前通过先看 test_app.py 和 app.py 很快定位了 fail 原因。",
+                        "tags": ["bug_fix", "verified", "mvp"],
+                        "evidence": {
+                            "selected_context_files": ["app.py", "tests/test_app.py"],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "run_id": "run-memory-ignore",
+                        "task": "重构 utils helper",
+                        "task_type": "refactor",
+                        "summary": "这条经验和当前 bug 修复无关。",
+                        "tags": ["refactor", "verified"],
+                        "evidence": {
+                            "selected_context_files": ["utils.py"],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--task",
+        "修复 app fail 错误",
+        "--task-type",
+        "bug_fix",
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    run_dir = list(output_root.iterdir())[0]
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
+    memory_context = context_payload["memory_context"]
+    assert memory_context["enabled"] is True
+    assert len(memory_context["runtime_rule_entries"]) >= 2
+    assert len(memory_context["long_term_entries"]) == 1
+    assert len(memory_context["matched_entries"]) >= 3
+    assert memory_context["conflict_evidence"] == []
+
+    long_term_entry = memory_context["long_term_entries"][0]
+    assert long_term_entry["source"] == "long_term_memory"
+    assert long_term_entry["evidence"]["run_id"] == "run-memory-match"
+    assert long_term_entry["evidence"]["matched_on"]["task_type"] == "bug_fix"
+    assert "bug_fix" in long_term_entry["evidence"]["matched_on"]["tags"]
+    assert "fail" in long_term_entry["evidence"]["matched_on"]["keywords"]
+    assert "app.py" in long_term_entry["evidence"]["matched_on"]["file_paths"]
+    assert "tests/test_app.py" in long_term_entry["evidence"]["matched_on"]["file_paths"]
+
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "长期 memory `1` 条" in report_text
