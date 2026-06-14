@@ -44,6 +44,7 @@ class MemorySearchResult:
 
     runtime_rule_entries: list[MemoryEntry] = field(default_factory=list)
     long_term_entries: list[MemoryEntry] = field(default_factory=list)
+    suppressed_long_term_entries: list[dict[str, Any]] = field(default_factory=list)
     conflict_evidence: list[dict[str, Any]] = field(default_factory=list)
     diagnostic_labels: list[str] = field(default_factory=list)
 
@@ -65,13 +66,36 @@ def _extract_keywords(text: str) -> list[str]:
     return keywords
 
 
+def _normalize_file_paths(paths: list[str]) -> list[str]:
+    """把文件路径整理成稳定去重格式，避免长期 memory 因路径写法不同而难匹配。"""
+    normalized_paths: list[str] = []
+    for raw_path in paths:
+        normalized_path = str(raw_path).strip().replace("\\", "/")
+        if normalized_path and normalized_path not in normalized_paths:
+            normalized_paths.append(normalized_path)
+    return normalized_paths
+
+
+def _compress_memory_summary(summary: str, max_length: int = 80) -> tuple[str, int, bool]:
+    """把长期 memory 摘要压到稳定长度，避免注入上下文和 trace 时事件体积持续膨胀。"""
+    normalized_summary = " ".join(summary.split())
+    original_length = len(normalized_summary)
+    safe_max_length = max(10, max_length)
+    if original_length <= safe_max_length:
+        return normalized_summary or "该长期 memory 未提供摘要。", original_length, False
+    return f"{normalized_summary[: safe_max_length - 1]}…", original_length, True
+
+
 class RuntimeMemoryManager:
     """提供当前阶段最小可用的 runtime memory 查询接口。"""
 
-    def __init__(self, repo_root: str) -> None:
-        """绑定仓库根目录，方便同时读取运行时规则和长期 memory。"""
+    def __init__(self, repo_root: str, strategy_config: dict[str, Any] | None = None) -> None:
+        """绑定仓库根目录，并加载当前 memory 策略配置。"""
         self.repo_root = Path(repo_root).resolve()
         self.long_term_store = LongTermMemoryStore(repo_root=str(self.repo_root))
+        self.strategy_config = strategy_config or {}
+        self.weak_conflict_penalty = int(self.strategy_config.get("weak_conflict_penalty", 3))
+        self.summary_max_length = int(self.strategy_config.get("summary_max_length", 80))
 
     def build_query(self, task: str, task_type: str) -> str:
         """把任务描述和任务类型整理成统一查询词。"""
@@ -136,13 +160,14 @@ class RuntimeMemoryManager:
                 )
             )
 
-        long_term_entries, conflict_evidence, diagnostic_labels = self._search_long_term_memory(
+        long_term_entries, conflict_evidence, diagnostic_labels, suppressed_long_term_entries = self._search_long_term_memory(
             task=task,
             task_type=normalized_task_type,
         )
         return MemorySearchResult(
             runtime_rule_entries=runtime_entries,
             long_term_entries=long_term_entries,
+            suppressed_long_term_entries=suppressed_long_term_entries,
             conflict_evidence=conflict_evidence,
             diagnostic_labels=diagnostic_labels,
         )
@@ -151,11 +176,11 @@ class RuntimeMemoryManager:
         self,
         task: str,
         task_type: str,
-    ) -> tuple[list[MemoryEntry], list[dict[str, Any]], list[str]]:
+    ) -> tuple[list[MemoryEntry], list[dict[str, Any]], list[str], list[dict[str, Any]]]:
         """按 task type、tags、关键词和路径交集做最小长期 memory 检索。"""
         store_entries = self.long_term_store.read_entries()
         if not store_entries:
-            return [], [], []
+            return [], [], [], []
 
         repo_paths = {
             path.relative_to(self.repo_root).as_posix()
@@ -163,7 +188,7 @@ class RuntimeMemoryManager:
             if path.is_file()
         }
         task_keywords = set(_extract_keywords(task))
-        scored_entries: list[tuple[int, MemoryEntry]] = []
+        scored_entries: list[dict[str, Any]] = []
         matched_candidates: list[dict[str, Any]] = []
 
         for item in store_entries:
@@ -173,15 +198,25 @@ class RuntimeMemoryManager:
             entry_tags = [str(tag).strip().lower() for tag in item.get("tags", []) if str(tag).strip()]
             entry_task = str(item.get("task", ""))
             entry_summary = str(item.get("summary", ""))
-            entry_keywords = set(_extract_keywords(f"{entry_task} {entry_summary}"))
-            matched_keywords = sorted(task_keywords.intersection(entry_keywords))
             evidence = item.get("evidence", {}) if isinstance(item.get("evidence", {}), dict) else {}
-            selected_paths = [
-                str(path).strip().replace("\\", "/")
-                for path in evidence.get("selected_context_files", [])
-                if str(path).strip()
+            stored_task_keywords = [
+                str(keyword).strip().lower()
+                for keyword in evidence.get("task_keywords", [])
+                if str(keyword).strip()
             ]
+            stored_summary_keywords = [
+                str(keyword).strip().lower()
+                for keyword in evidence.get("summary_keywords", [])
+                if str(keyword).strip()
+            ]
+            entry_keywords = set(stored_task_keywords + stored_summary_keywords)
+            if not entry_keywords:
+                # 兼容旧格式 memory：老数据没有显式关键词时，继续从 task + summary 兜底提取。
+                entry_keywords = set(_extract_keywords(f"{entry_task} {entry_summary}"))
+            matched_keywords = sorted(task_keywords.intersection(entry_keywords))
+            selected_paths = _normalize_file_paths(evidence.get("selected_context_files", []))
             matched_paths = sorted(path for path in selected_paths if path in repo_paths)
+            summary_excerpt = str(evidence.get("task_summary_excerpt", "")).strip()
 
             if entry_task_type == task_type:
                 score += 3
@@ -209,38 +244,81 @@ class RuntimeMemoryManager:
                     "matched_on": matched_on,
                 }
             )
+            compressed_summary, original_summary_length, summary_was_compressed = _compress_memory_summary(
+                entry_summary or "该长期 memory 未提供摘要。",
+                max_length=self.summary_max_length,
+            )
             scored_entries.append(
-                (
-                    score,
-                    MemoryEntry(
+                {
+                    "run_id": str(item.get("run_id", "")),
+                    "task_type": entry_task_type,
+                    "raw_score": score,
+                    "entry": MemoryEntry(
                         title=f"长期经验：{entry_task[:30] or '未命名任务'}",
-                        summary=entry_summary or "该长期 memory 未提供摘要。",
+                        summary=compressed_summary,
                         source="long_term_memory",
                         tags=entry_tags,
                         evidence={
                             "run_id": item.get("run_id", ""),
                             "task": entry_task,
                             "task_type": entry_task_type,
+                            "task_summary_excerpt": summary_excerpt,
+                            "original_summary_length": original_summary_length,
+                            "summary_was_compressed": summary_was_compressed,
+                            "stored_task_keywords": stored_task_keywords,
+                            "stored_summary_keywords": stored_summary_keywords,
+                            "selected_context_files": selected_paths,
                             "matched_on": matched_on,
                         },
                     ),
-                )
+                }
             )
 
         conflict_evidence = self._detect_conflicts(matched_candidates=matched_candidates)
-        diagnostic_labels = self._build_diagnostic_labels(conflict_evidence=conflict_evidence)
+        weak_penalty_by_run_id = self._build_weak_conflict_penalties(
+            current_task_type=task_type,
+            conflict_evidence=conflict_evidence,
+        )
+        for item in scored_entries:
+            run_id = str(item["run_id"]).strip()
+            weak_penalty = weak_penalty_by_run_id.get(run_id, 0)
+            item["adjusted_score"] = item["raw_score"] - weak_penalty
+            item["entry"].evidence["raw_score"] = item["raw_score"]
+            item["entry"].evidence["ranking_penalty"] = weak_penalty
+            item["entry"].evidence["adjusted_score"] = item["adjusted_score"]
+            if weak_penalty > 0:
+                item["entry"].evidence["ranking_adjustment_reason"] = "weak_conflict_with_current_task"
+        suppressed_long_term_entries = self._build_suppressed_long_term_entries(
+            current_task_type=task_type,
+            conflict_evidence=conflict_evidence,
+            scored_entries=scored_entries,
+        )
+        diagnostic_labels = self._build_diagnostic_labels(
+            conflict_evidence=conflict_evidence,
+            suppressed_long_term_entries=suppressed_long_term_entries,
+        )
         scored_entries.sort(
             key=lambda item: (
-                -item[0],
-                str(item[1].evidence.get("run_id", "")),
-                item[1].title,
+                -int(item.get("adjusted_score", item["raw_score"])),
+                -int(item["raw_score"]),
+                str(item["entry"].evidence.get("run_id", "")),
+                item["entry"].title,
             )
         )
-        long_term_entries = [entry for _, entry in scored_entries[:3]]
-        return long_term_entries, conflict_evidence, diagnostic_labels
+        suppressed_run_ids = {
+            str(item.get("run_id", "")).strip()
+            for item in suppressed_long_term_entries
+            if str(item.get("run_id", "")).strip()
+        }
+        long_term_entries = [
+            item["entry"]
+            for item in scored_entries
+            if str(item["entry"].evidence.get("run_id", "")).strip() not in suppressed_run_ids
+        ][:3]
+        return long_term_entries, conflict_evidence, diagnostic_labels, suppressed_long_term_entries
 
     def _detect_conflicts(self, matched_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """为共享线索却任务类型不同的长期 memory 留下最小冲突证据。"""
+        """按共享线索强弱记录冲突或提醒，为后续抗污染策略保留梯度。"""
         conflicts: list[dict[str, Any]] = []
         seen_keys: set[tuple[str, str, str, str]] = set()
 
@@ -251,8 +329,11 @@ class RuntimeMemoryManager:
 
                 shared_keywords = sorted(set(left["matched_keywords"]).intersection(right["matched_keywords"]))
                 shared_paths = sorted(set(left["matched_paths"]).intersection(right["matched_paths"]))
-                if not shared_keywords and not shared_paths:
-                    continue
+                shared_signal_types = 0
+                if shared_keywords:
+                    shared_signal_types += 1
+                if shared_paths:
+                    shared_signal_types += 1
 
                 pair_key = (
                     left["run_id"],
@@ -264,25 +345,104 @@ class RuntimeMemoryManager:
                     continue
                 seen_keys.add(pair_key)
 
+                if shared_signal_types >= 2:
+                    severity = "strong"
+                    summary = "不同任务类型的长期 memory 共享了多类当前任务线索，需要警惕经验污染。"
+                elif shared_signal_types == 1:
+                    severity = "weak"
+                    summary = "不同任务类型的长期 memory 只共享了单一线索，当前先记为弱提醒。"
+                else:
+                    continue
+
                 conflicts.append(
                     {
                         "kind": "task_type_mismatch",
-                        "summary": "不同任务类型的长期 memory 共享了当前任务线索，需要警惕经验污染。",
+                        "severity": severity,
+                        "summary": summary,
                         "run_ids": [left["run_id"], right["run_id"]],
                         "task_types": [left["task_type"], right["task_type"]],
                         "tasks": [left["task"], right["task"]],
                         "shared_keywords": shared_keywords,
                         "shared_file_paths": shared_paths,
+                        "shared_signal_types": shared_signal_types,
                     }
                 )
 
         return conflicts
 
-    def _build_diagnostic_labels(self, conflict_evidence: list[dict[str, Any]]) -> list[str]:
-        """根据冲突证据生成当前最小诊断标签。"""
+    def _build_suppressed_long_term_entries(
+        self,
+        current_task_type: str,
+        conflict_evidence: list[dict[str, Any]],
+        scored_entries: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """只压下与当前任务类型不一致且落入强冲突的长期 memory，保留同任务类型经验继续注入。"""
+        suppressed_run_ids: set[str] = set()
+        for item in conflict_evidence:
+            if item.get("severity") != "strong":
+                continue
+            run_ids = [str(run_id).strip() for run_id in item.get("run_ids", [])]
+            task_types = [str(task_type).strip().lower() for task_type in item.get("task_types", [])]
+            for run_id, entry_task_type in zip(run_ids, task_types):
+                if run_id and entry_task_type and entry_task_type != current_task_type:
+                    suppressed_run_ids.add(run_id)
+
+        suppressed_entries: list[dict[str, Any]] = []
+        for item in scored_entries:
+            entry = item["entry"]
+            run_id = str(entry.evidence.get("run_id", "")).strip()
+            if run_id not in suppressed_run_ids:
+                continue
+            suppressed_entries.append(
+                {
+                    "run_id": run_id,
+                    "task": entry.evidence.get("task", ""),
+                    "task_type": entry.evidence.get("task_type", ""),
+                    "title": entry.title,
+                    "reason": "strong_conflict_with_current_task",
+                }
+            )
+        return suppressed_entries
+
+    def _build_weak_conflict_penalties(
+        self,
+        current_task_type: str,
+        conflict_evidence: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        """让弱提醒不仅停留在标签层，而是真的把异类长期 memory 往后排。"""
+        penalty_by_run_id: dict[str, int] = {}
+        for item in conflict_evidence:
+            if item.get("severity") != "weak":
+                continue
+            run_ids = [str(run_id).strip() for run_id in item.get("run_ids", [])]
+            task_types = [str(task_type).strip().lower() for task_type in item.get("task_types", [])]
+            for run_id, entry_task_type in zip(run_ids, task_types):
+                if not run_id or not entry_task_type or entry_task_type == current_task_type:
+                    continue
+                penalty_by_run_id[run_id] = penalty_by_run_id.get(run_id, 0) + self.weak_conflict_penalty
+        return penalty_by_run_id
+
+    def _build_diagnostic_labels(
+        self,
+        conflict_evidence: list[dict[str, Any]],
+        suppressed_long_term_entries: list[dict[str, Any]],
+    ) -> list[str]:
+        """根据冲突证据强弱生成当前最小诊断标签。"""
         if not conflict_evidence:
-            return []
-        return ["memory_conflict", "memory_pollution"]
+            return ["memory_injection_suppressed"] if suppressed_long_term_entries else []
+        has_strong_conflict = any(item.get("severity") == "strong" for item in conflict_evidence)
+        has_weak_conflict = any(item.get("severity") == "weak" for item in conflict_evidence)
+        if has_strong_conflict:
+            labels = ["memory_conflict", "memory_pollution"]
+            if suppressed_long_term_entries:
+                labels.append("memory_injection_suppressed")
+            return labels
+        if has_weak_conflict:
+            labels = ["memory_conflict_warning"]
+            if suppressed_long_term_entries:
+                labels.append("memory_injection_suppressed")
+            return labels
+        return []
 
 
 class LongTermMemoryStore:

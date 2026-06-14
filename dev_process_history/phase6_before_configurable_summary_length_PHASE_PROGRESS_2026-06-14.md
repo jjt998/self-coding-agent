@@ -142,9 +142,8 @@
   - 增加 `suppressed_long_term_entries`，让被抑制条目也能在 trace、上下文和报告中检查
   - 把弱提醒接入长期 memory 检索排序，为异类长期 memory 增加 `ranking_penalty` 与 `adjusted_score`
   - 把 `weak_conflict_penalty` 提升为配置项，并增加高 penalty 配置样例
-  - 把 `summary_max_length` 提升为配置项，并增加短摘要配置样例
 - 剩余：
-  - 评估是否需要让摘要压缩长度按事件类型、注入位置或任务类型分层配置
+  - 评估是否需要让摘要压缩长度按事件类型或注入位置分层配置
   - 评估是否需要把 penalty 继续按任务类型或线索数量细分
 - 验收：
   - 成功且验证通过的 run 可以写入 memory，后续 run 可以读取。

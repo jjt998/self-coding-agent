@@ -82,7 +82,10 @@ class LoopOrchestrator:
         """执行一条最小 stub 状态链路并返回最终运行态。"""
         runtime_state = RuntimeState(task=settings.task, task_type=settings.task_type)
         context_builder = ContextBuilder(repo_root=settings.repo_root)
-        memory_manager = RuntimeMemoryManager(repo_root=settings.repo_root)
+        memory_manager = RuntimeMemoryManager(
+            repo_root=settings.repo_root,
+            strategy_config=config_data.get("memory", {}),
+        )
         tool_runner = CoreToolRunner(repo_root=settings.repo_root)
         planned_states = [
             AgentState.INGEST,
@@ -193,9 +196,39 @@ class LoopOrchestrator:
             long_term_entries = [
                 entry.to_dict() for entry in memory_search_result.long_term_entries
             ]
+            suppressed_long_term_entries = list(memory_search_result.suppressed_long_term_entries)
             matched_memory_entries = [
                 entry.to_dict() for entry in memory_search_result.all_entries()
             ]
+            # 这里把 memory 检索结果单独记成事件，后续做诊断时不必再从 context_snapshot 里反推。
+            self.trace_writer.write_event(
+                TraceEvent(
+                    event_type="memory_search_result",
+                    payload={
+                        "query": memory_query,
+                        "runtime_rule_count": len(runtime_rule_entries),
+                        "long_term_count": len(long_term_entries),
+                        "suppressed_long_term_count": len(suppressed_long_term_entries),
+                        "matched_count": len(matched_memory_entries),
+                        "diagnostic_labels": list(memory_search_result.diagnostic_labels),
+                        "runtime_rule_entries": runtime_rule_entries,
+                        "long_term_entries": long_term_entries,
+                        "suppressed_long_term_entries": suppressed_long_term_entries,
+                    },
+                )
+            )
+            if memory_search_result.conflict_evidence:
+                self.trace_writer.write_event(
+                    TraceEvent(
+                        event_type="memory_conflict_detected",
+                        payload={
+                            "query": memory_query,
+                            "conflict_count": len(memory_search_result.conflict_evidence),
+                            "diagnostic_labels": list(memory_search_result.diagnostic_labels),
+                            "conflicts": list(memory_search_result.conflict_evidence),
+                        },
+                    )
+                )
             runtime_state.context_snapshot = context_builder.build_context_snapshot(
                 task=runtime_state.task,
                 task_type=runtime_state.task_type,
@@ -206,6 +239,7 @@ class LoopOrchestrator:
                 matched_memory_entries=matched_memory_entries,
                 runtime_rule_entries=runtime_rule_entries,
                 long_term_memory_entries=long_term_entries,
+                suppressed_long_term_entries=suppressed_long_term_entries,
                 memory_conflict_evidence=memory_search_result.conflict_evidence,
                 memory_diagnostic_labels=memory_search_result.diagnostic_labels,
             )

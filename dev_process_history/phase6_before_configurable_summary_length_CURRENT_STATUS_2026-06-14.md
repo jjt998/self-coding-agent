@@ -54,7 +54,6 @@
 - 被抑制的长期 memory 现在会单独记录到 `suppressed_long_term_entries`，trace、上下文和报告都能直接看到抑制原因。
 - 弱提醒现在不再只是标签，当前会对异类长期 memory 施加排序降权，并把 `ranking_penalty`、`adjusted_score` 和原因写进证据。
 - 弱提醒降权力度现在已支持配置，当前会从 `configs/*.json` 的 `memory.weak_conflict_penalty` 读取，不再写死在代码里。
-- 长期 memory 摘要压缩长度现在也已支持配置，当前会从 `configs/*.json` 的 `memory.summary_max_length` 读取。
 
 ## 已完成
 
@@ -130,17 +129,15 @@
 - 完成基于强冲突的长期 memory 注入抑制策略。
 - 完成基于弱提醒的长期 memory 排序降权策略。
 - 完成弱提醒降权力度配置化，并增加 `high_weak_conflict_penalty` 配置样例。
-- 完成摘要压缩长度配置化，并增加 `short_memory_summary` 配置样例。
 
 ## 进行中
 
-- 继续推进 `Phase 6`，下一步可评估是否把 penalty 和摘要长度进一步按任务类型分层。
+- 继续推进 `Phase 6`，下一步可评估是否把摘要压缩长度也配置化。
 
 ## 下一步明确动作
 
 - 评估是否需要让摘要压缩长度按事件类型或注入位置分层配置。
 - 评估是否需要把弱提醒降权力度按冲突线索数量或任务类型继续细分。
-- 评估是否需要把 `summary_max_length` 也按任务类型或注入位置继续细分。
 
 ## 当前阻塞
 
@@ -155,4 +152,4 @@
 2. 阅读 `docs/CURRENT_STATUS.md`。
 3. 阅读 `docs/PHASE_PROGRESS.md`。
 4. 检查 `src/context.py`、`src/tools.py`、`src/verify.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
-5. 从更细粒度 penalty / summary 参数分层配置开始继续。
+5. 从摘要压缩分层配置或更细粒度 penalty 配置开始继续。

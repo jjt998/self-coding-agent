@@ -5,7 +5,7 @@ from pathlib import Path
 
 from config import RunSettings
 from loop import LoopOrchestrator, RuntimeState
-from memory import LongTermMemoryEntry, LongTermMemoryStore
+from memory import LongTermMemoryEntry, LongTermMemoryStore, _extract_keywords, _normalize_file_paths
 from trace import TraceEvent, TraceWriter
 
 
@@ -39,7 +39,20 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
         )
     )
     runtime_state = LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=config_data)
+    memory_entry_written_payload = None
+    if runtime_state.verification_result and runtime_state.verification_result.passed:
+        memory_entry_written_payload = _build_memory_entry_written_payload(
+            settings=settings,
+            runtime_state=runtime_state,
+        )
     memory_write_result = _write_long_term_memory_if_needed(settings=settings, runtime_state=runtime_state)
+    if memory_entry_written_payload:
+        trace_writer.write_event(
+            TraceEvent(
+                event_type="memory_entry_written",
+                payload=memory_entry_written_payload,
+            )
+        )
     trace_writer.write_event(
         TraceEvent(
             event_type="memory_write_result",
@@ -126,6 +139,8 @@ def _build_phase_4_report(
             f"`{len(context_snapshot.memory_context.runtime_rule_entries)}` 条，"
             f"长期 memory "
             f"`{len(context_snapshot.memory_context.long_term_entries)}` 条，"
+            f"被抑制的长期 memory "
+            f"`{len(context_snapshot.memory_context.suppressed_long_term_entries)}` 条，"
             f"conflict evidence "
             f"`{len(context_snapshot.memory_context.conflict_evidence)}` 条"
         )
@@ -135,11 +150,19 @@ def _build_phase_4_report(
         )
         if context_snapshot.memory_context.conflict_evidence:
             for item in context_snapshot.memory_context.conflict_evidence:
+                severity_text = "强冲突" if item.get("severity") == "strong" else "弱提醒"
                 context_lines.append(
-                    f"- memory 冲突：{item['summary']}。"
+                    f"- memory 冲突：[{severity_text}] {item['summary']}。"
                     f"任务类型：`{', '.join(item.get('task_types', [])) or '未知'}`。"
                     f"共享关键词：`{', '.join(item.get('shared_keywords', [])) or '无'}`。"
                     f"共享文件：`{', '.join(item.get('shared_file_paths', [])) or '无'}`"
+                )
+        if context_snapshot.memory_context.suppressed_long_term_entries:
+            for item in context_snapshot.memory_context.suppressed_long_term_entries:
+                context_lines.append(
+                    f"- memory 注入抑制：`{item.get('title', '未命名长期 memory')}`。"
+                    f"任务类型：`{item.get('task_type', '未知')}`。"
+                    f"原因：`{item.get('reason', '未知')}`"
                 )
     context_summary = "\n".join(context_lines) if context_lines else "- 尚未生成上下文快照。"
 
@@ -187,6 +210,9 @@ def _write_long_term_memory_if_needed(settings: RunSettings, runtime_state: Runt
     selected_paths = []
     if context_snapshot:
         selected_paths = [file_context.path for file_context in context_snapshot.repo_context.selected_files]
+    normalized_selected_paths = _normalize_file_paths(selected_paths)
+    task_keywords = _extract_keywords(settings.task)
+    summary_keywords = _extract_keywords(verification_result.summary)
 
     entry = LongTermMemoryEntry(
         run_id=settings.run_id,
@@ -196,7 +222,11 @@ def _write_long_term_memory_if_needed(settings: RunSettings, runtime_state: Runt
         tags=[settings.task_type, "verified", "mvp"],
         evidence={
             "stop_reason": runtime_state.stop_reason.to_dict() if runtime_state.stop_reason else {},
-            "selected_context_files": selected_paths,
+            # 这里把后续检索更稳定的证据一起写下来，减少只靠自然语言摘要做匹配的歧义。
+            "selected_context_files": normalized_selected_paths,
+            "task_keywords": task_keywords,
+            "summary_keywords": summary_keywords,
+            "task_summary_excerpt": verification_result.summary[:120],
             "tool_count": len(runtime_state.tool_executions),
             "verification_checks": [check.to_dict() for check in verification_result.checks],
         },
@@ -207,3 +237,32 @@ def _write_long_term_memory_if_needed(settings: RunSettings, runtime_state: Runt
         store_path=str(store_path),
         reason="本次 run 已验证通过，已追加写入长期 memory。",
     )
+
+
+def _build_memory_entry_written_payload(settings: RunSettings, runtime_state: RuntimeState) -> dict:
+    """整理长期 memory 写入事件明细，方便单独检查写入证据而不依赖最终 store 文件。"""
+    verification_result = runtime_state.verification_result
+    if not verification_result:
+        return {}
+
+    context_snapshot = runtime_state.context_snapshot
+    selected_paths: list[str] = []
+    if context_snapshot:
+        selected_paths = [file_context.path for file_context in context_snapshot.repo_context.selected_files]
+
+    return LongTermMemoryEntry(
+        run_id=settings.run_id,
+        task=settings.task,
+        task_type=settings.task_type,
+        summary=verification_result.summary,
+        tags=[settings.task_type, "verified", "mvp"],
+        evidence={
+            "stop_reason": runtime_state.stop_reason.to_dict() if runtime_state.stop_reason else {},
+            "selected_context_files": _normalize_file_paths(selected_paths),
+            "task_keywords": _extract_keywords(settings.task),
+            "summary_keywords": _extract_keywords(verification_result.summary),
+            "task_summary_excerpt": verification_result.summary[:120],
+            "tool_count": len(runtime_state.tool_executions),
+            "verification_checks": [check.to_dict() for check in verification_result.checks],
+        },
+    ).to_dict()

@@ -8,7 +8,6 @@
     "trace_level": "standard"
   },
   "memory": {
-    "weak_conflict_penalty": 3,
-    "summary_max_length": 80
+    "weak_conflict_penalty": 5
   }
 }

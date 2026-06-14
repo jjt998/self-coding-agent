@@ -98,6 +98,20 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert verification_events[0]["passed"] is True
     assert verification_events[0]["checks"][0]["name"] == "工具调用顺序"
 
+    memory_search_events = [event["payload"] for event in trace_events if event["event_type"] == "memory_search_result"]
+    assert len(memory_search_events) == 1
+    assert memory_search_events[0]["query"] == "general:创建脚手架"
+    assert memory_search_events[0]["runtime_rule_count"] >= 1
+    assert memory_search_events[0]["long_term_count"] == 0
+    assert memory_search_events[0]["suppressed_long_term_count"] == 0
+    assert memory_search_events[0]["matched_count"] >= 1
+
+    memory_entry_written_events = [event["payload"] for event in trace_events if event["event_type"] == "memory_entry_written"]
+    assert len(memory_entry_written_events) == 1
+    assert memory_entry_written_events[0]["run_id"] == snapshot["run_id"]
+    assert memory_entry_written_events[0]["task"] == "创建脚手架"
+    assert memory_entry_written_events[0]["evidence"]["task_keywords"][0] == "创建脚手架"
+
     memory_write_events = [event["payload"] for event in trace_events if event["event_type"] == "memory_write_result"]
     assert len(memory_write_events) == 1
     assert memory_write_events[0]["written"] is True
@@ -116,6 +130,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert len(context_events[0]["memory_context"]["matched_entries"]) >= 1
     assert len(context_events[0]["memory_context"]["runtime_rule_entries"]) >= 1
     assert context_events[0]["memory_context"]["long_term_entries"] == []
+    assert context_events[0]["memory_context"]["suppressed_long_term_entries"] == []
     assert context_events[0]["memory_context"]["conflict_evidence"] == []
     assert context_events[0]["memory_context"]["diagnostic_labels"] == []
     selected_files = context_events[0]["repo_context"]["selected_files"]
@@ -146,6 +161,14 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert memory_entries[0]["task"] == "创建脚手架"
     assert memory_entries[0]["task_type"] == "general"
     assert memory_entries[0]["tags"] == ["general", "verified", "mvp"]
+    assert memory_entries[0]["evidence"]["task_keywords"][0] == "创建脚手架"
+    assert "验证通过" in memory_entries[0]["evidence"]["summary_keywords"][0]
+    assert memory_entries[0]["evidence"]["task_summary_excerpt"].startswith("验证通过")
+    assert memory_entries[0]["evidence"]["selected_context_files"] == [
+        "README.md",
+        "LONG_GUIDE.md",
+        "DIRECTORY_GUIDE.md",
+    ]
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "`finalize`" in report_text
@@ -265,7 +288,8 @@ def test_cli_reads_long_term_memory_with_task_type_keyword_and_path_filters(tmp_
                         "run_id": "run-memory-match",
                         "task": "修复 app fail 错误",
                         "task_type": "bug_fix",
-                        "summary": "之前通过先看 test_app.py 和 app.py 很快定位了 fail 原因。",
+                        "summary": "之前通过先看 test_app.py 和 app.py 很快定位了 fail 原因。"
+                        "后面还补查了 README、错误路径、调用顺序和验证输出，最终确认这条经验对同类问题依然有效。",
                         "tags": ["bug_fix", "verified", "mvp"],
                         "evidence": {
                             "selected_context_files": ["app.py", "tests/test_app.py"],
@@ -317,11 +341,18 @@ def test_cli_reads_long_term_memory_with_task_type_keyword_and_path_filters(tmp_
         for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    memory_search_payload = next(event["payload"] for event in trace_events if event["event_type"] == "memory_search_result")
+    assert memory_search_payload["query"] == "bug_fix:修复 app fail 错误"
+    assert memory_search_payload["long_term_count"] == 1
+    assert memory_search_payload["suppressed_long_term_count"] == 0
+    assert memory_search_payload["matched_count"] >= 3
+
     context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
     memory_context = context_payload["memory_context"]
     assert memory_context["enabled"] is True
     assert len(memory_context["runtime_rule_entries"]) >= 2
     assert len(memory_context["long_term_entries"]) == 1
+    assert memory_context["suppressed_long_term_entries"] == []
     assert len(memory_context["matched_entries"]) >= 3
     assert memory_context["conflict_evidence"] == []
     assert memory_context["diagnostic_labels"] == []
@@ -329,6 +360,11 @@ def test_cli_reads_long_term_memory_with_task_type_keyword_and_path_filters(tmp_
     long_term_entry = memory_context["long_term_entries"][0]
     assert long_term_entry["source"] == "long_term_memory"
     assert long_term_entry["evidence"]["run_id"] == "run-memory-match"
+    assert long_term_entry["evidence"]["summary_was_compressed"] is True
+    assert long_term_entry["evidence"]["original_summary_length"] > len(long_term_entry["summary"])
+    assert long_term_entry["summary"].endswith("…")
+    assert long_term_entry["evidence"]["stored_task_keywords"] == []
+    assert long_term_entry["evidence"]["stored_summary_keywords"] == []
     assert long_term_entry["evidence"]["matched_on"]["task_type"] == "bug_fix"
     assert "bug_fix" in long_term_entry["evidence"]["matched_on"]["tags"]
     assert "fail" in long_term_entry["evidence"]["matched_on"]["keywords"]
@@ -417,20 +453,307 @@ def test_cli_records_memory_conflict_evidence_and_pollution_labels(tmp_path: Pat
         for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    conflict_events = [event["payload"] for event in trace_events if event["event_type"] == "memory_conflict_detected"]
+    assert len(conflict_events) == 1
+    assert conflict_events[0]["query"] == "bug_fix:修复 app fail 错误"
+    assert conflict_events[0]["conflict_count"] == 1
+    memory_search_payload = next(event["payload"] for event in trace_events if event["event_type"] == "memory_search_result")
+    assert memory_search_payload["long_term_count"] == 1
+    assert memory_search_payload["suppressed_long_term_count"] == 1
+
     context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
     memory_context = context_payload["memory_context"]
-    assert len(memory_context["long_term_entries"]) == 2
+    assert len(memory_context["long_term_entries"]) == 1
+    assert len(memory_context["suppressed_long_term_entries"]) == 1
     assert "memory_conflict" in memory_context["diagnostic_labels"]
     assert "memory_pollution" in memory_context["diagnostic_labels"]
+    assert "memory_injection_suppressed" in memory_context["diagnostic_labels"]
     assert len(memory_context["conflict_evidence"]) == 1
+    assert memory_context["suppressed_long_term_entries"][0]["task_type"] == "refactor"
+    assert memory_context["suppressed_long_term_entries"][0]["reason"] == "strong_conflict_with_current_task"
 
     conflict = memory_context["conflict_evidence"][0]
     assert conflict["kind"] == "task_type_mismatch"
+    assert conflict["severity"] == "strong"
     assert "bug_fix" in conflict["task_types"]
     assert "refactor" in conflict["task_types"]
     assert "fail" in conflict["shared_keywords"]
     assert "app.py" in conflict["shared_file_paths"]
+    assert conflict["shared_signal_types"] == 2
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
-    assert "memory 诊断标签：`memory_conflict, memory_pollution`" in report_text
-    assert "memory 冲突：" in report_text
+    assert "memory 诊断标签：`memory_conflict, memory_pollution, memory_injection_suppressed`" in report_text
+    assert "memory 冲突：[强冲突]" in report_text
+    assert "memory 注入抑制：" in report_text
+
+
+def test_cli_records_weak_memory_conflict_warning_when_only_single_signal_is_shared(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "app.py").write_text(
+        "def broken_logic():\n    raise ValueError('fail to load data')\n",
+        encoding="utf-8",
+    )
+
+    memory_dir = repo_root / ".agent_memory"
+    memory_dir.mkdir()
+    memory_store_path = memory_dir / "long_term_memory.jsonl"
+    memory_store_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "run_id": "run-memory-bug-fix",
+                        "task": "修复 app fail 错误",
+                        "task_type": "bug_fix",
+                        "summary": "之前通过检查 app.py 修掉了 fail。",
+                        "tags": ["bug_fix", "verified"],
+                        "evidence": {
+                            "selected_context_files": ["app.py"],
+                            "task_keywords": ["修复", "app", "fail", "错误"],
+                            "summary_keywords": ["检查", "app.py", "修掉了", "fail"],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "run_id": "run-memory-refactor",
+                        "task": "重构 app fail 流程",
+                        "task_type": "refactor",
+                        "summary": "这次只是重构流程，没有沿用之前的 bug 修复结论。",
+                        "tags": ["refactor", "verified"],
+                        "evidence": {
+                            "selected_context_files": ["docs/irrelevant.md"],
+                            "task_keywords": ["重构", "app", "fail", "流程"],
+                            "summary_keywords": ["重构", "流程"],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--task",
+        "修复 app fail 错误",
+        "--task-type",
+        "bug_fix",
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    run_dir = list(output_root.iterdir())[0]
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    conflict_events = [event["payload"] for event in trace_events if event["event_type"] == "memory_conflict_detected"]
+    assert len(conflict_events) == 1
+    assert conflict_events[0]["conflict_count"] == 1
+    memory_search_payload = next(event["payload"] for event in trace_events if event["event_type"] == "memory_search_result")
+    assert memory_search_payload["long_term_count"] == 2
+    assert memory_search_payload["suppressed_long_term_count"] == 0
+
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
+    memory_context = context_payload["memory_context"]
+    assert len(memory_context["long_term_entries"]) == 2
+    assert memory_context["suppressed_long_term_entries"] == []
+    assert len(memory_context["conflict_evidence"]) == 1
+    assert memory_context["diagnostic_labels"] == ["memory_conflict_warning"]
+    assert memory_context["conflict_evidence"][0]["severity"] == "weak"
+    assert memory_context["conflict_evidence"][0]["shared_keywords"] == ["app", "fail"]
+    assert memory_context["conflict_evidence"][0]["shared_file_paths"] == []
+    assert memory_context["long_term_entries"][0]["evidence"]["summary_was_compressed"] is False
+    weak_penalized_entry = next(
+        item for item in memory_context["long_term_entries"] if item["evidence"]["task_type"] == "refactor"
+    )
+    assert weak_penalized_entry["evidence"]["ranking_penalty"] == 3
+    assert weak_penalized_entry["evidence"]["adjusted_score"] == (
+        weak_penalized_entry["evidence"]["raw_score"] - 3
+    )
+    assert weak_penalized_entry["evidence"]["ranking_adjustment_reason"] == "weak_conflict_with_current_task"
+
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "memory 诊断标签：`memory_conflict_warning`" in report_text
+    assert "memory 冲突：[弱提醒]" in report_text
+
+
+def test_cli_uses_configured_weak_conflict_penalty_for_ranking(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "app.py").write_text(
+        "def broken_logic():\n    raise ValueError('fail to load data')\n",
+        encoding="utf-8",
+    )
+
+    memory_dir = repo_root / ".agent_memory"
+    memory_dir.mkdir()
+    memory_store_path = memory_dir / "long_term_memory.jsonl"
+    memory_store_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "run_id": "run-memory-bug-fix",
+                        "task": "修复 app fail 错误",
+                        "task_type": "bug_fix",
+                        "summary": "之前通过检查 app.py 修掉了 fail。",
+                        "tags": ["bug_fix", "verified"],
+                        "evidence": {
+                            "selected_context_files": ["app.py"],
+                            "task_keywords": ["修复", "app", "fail", "错误"],
+                            "summary_keywords": ["检查", "app.py", "修掉了", "fail"],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "run_id": "run-memory-refactor",
+                        "task": "重构 app fail 流程",
+                        "task_type": "refactor",
+                        "summary": "这次只是重构流程，没有沿用之前的 bug 修复结论。",
+                        "tags": ["refactor", "verified"],
+                        "evidence": {
+                            "selected_context_files": ["docs/irrelevant.md"],
+                            "task_keywords": ["重构", "app", "fail", "流程"],
+                            "summary_keywords": ["重构", "流程"],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--task",
+        "修复 app fail 错误",
+        "--task-type",
+        "bug_fix",
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+        "--config-name",
+        "high_weak_conflict_penalty",
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    run_dir = list(output_root.iterdir())[0]
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
+    weak_penalized_entry = next(
+        item
+        for item in context_payload["memory_context"]["long_term_entries"]
+        if item["evidence"]["task_type"] == "refactor"
+    )
+    assert weak_penalized_entry["evidence"]["ranking_penalty"] == 5
+    assert weak_penalized_entry["evidence"]["adjusted_score"] == (
+        weak_penalized_entry["evidence"]["raw_score"] - 5
+    )
+
+
+def test_cli_uses_configured_summary_max_length_for_long_term_memory(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text(
+        "# 项目说明\n\n这里记录 app fail 问题和处理方式。\n",
+        encoding="utf-8",
+    )
+    (repo_root / "app.py").write_text(
+        "def broken_logic():\n    raise ValueError('fail to load data')\n",
+        encoding="utf-8",
+    )
+    tests_dir = repo_root / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_app.py").write_text(
+        "def test_broken_logic_error_message():\n    assert 'fail' in 'fail to load data'\n",
+        encoding="utf-8",
+    )
+
+    memory_dir = repo_root / ".agent_memory"
+    memory_dir.mkdir()
+    memory_store_path = memory_dir / "long_term_memory.jsonl"
+    memory_store_path.write_text(
+        json.dumps(
+            {
+                "run_id": "run-memory-match",
+                "task": "修复 app fail 错误",
+                "task_type": "bug_fix",
+                "summary": "之前通过先看 test_app.py 和 app.py 很快定位了 fail 原因。"
+                "后面还补查了 README、错误路径、调用顺序和验证输出，最终确认这条经验对同类问题依然有效。",
+                "tags": ["bug_fix", "verified", "mvp"],
+                "evidence": {
+                    "selected_context_files": ["app.py", "tests/test_app.py"],
+                },
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--task",
+        "修复 app fail 错误",
+        "--task-type",
+        "bug_fix",
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+        "--config-name",
+        "short_memory_summary",
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    run_dir = list(output_root.iterdir())[0]
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
+    long_term_entry = context_payload["memory_context"]["long_term_entries"][0]
+    assert len(long_term_entry["summary"]) == 40
+    assert long_term_entry["summary"].endswith("…")
+    assert long_term_entry["evidence"]["original_summary_length"] > 40

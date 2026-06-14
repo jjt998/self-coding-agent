@@ -10,7 +10,6 @@
 
 ## 当前情况
 
-- 已在 `docs/SESSION_ENTRY.md` 增加项目级行为约束，要求以第一性原理思考、目标不清先讨论、路径不优时主动指出、遇到问题追根因、输出只保留决策相关信息。
 - `Phase 1` 最小骨架已经落地，仓库现在具备可运行的 Python 项目结构。
 - 已建立 `pyproject.toml`、`src/`、`tests/`、`configs/`、`eval_tasks/`、`runs/`。
 - 已实现基础 settings model、trace event model、trace writer 与 CLI skeleton。
@@ -48,17 +47,9 @@
 - 现在即使不展开 `context_snapshot`，也能直接从 trace 回放一次 run 的 memory 检索、冲突和写入证据。
 - 已增加长期 memory 命中摘要压缩规则，当前会把注入上下文和 trace 的长期 memory 摘要裁到稳定长度。
 - memory 命中证据里现在会额外记录 `original_summary_length` 与 `summary_was_compressed`，便于后续观察事件体积与信息损失。
-- 已把 memory conflict evidence 分成“强冲突”和“弱提醒”两档，当前会在证据里记录 `severity`。
-- 现在只有强冲突才会触发 `memory_conflict` / `memory_pollution`，单一线索冲突只会打 `memory_conflict_warning`。
-- 已把冲突强弱接入长期 memory 注入策略，当前会抑制“与当前任务类型不一致且落入强冲突”的长期 memory 注入。
-- 被抑制的长期 memory 现在会单独记录到 `suppressed_long_term_entries`，trace、上下文和报告都能直接看到抑制原因。
-- 弱提醒现在不再只是标签，当前会对异类长期 memory 施加排序降权，并把 `ranking_penalty`、`adjusted_score` 和原因写进证据。
-- 弱提醒降权力度现在已支持配置，当前会从 `configs/*.json` 的 `memory.weak_conflict_penalty` 读取，不再写死在代码里。
-- 长期 memory 摘要压缩长度现在也已支持配置，当前会从 `configs/*.json` 的 `memory.summary_max_length` 读取。
 
 ## 已完成
 
-- 完成 `SESSION_ENTRY` 行为约束更新，补充第一性原理、目标澄清、最短路径提醒、根因优先和高信号输出要求。
 - 完成 Python 项目骨架初始化。
 - 完成最小可运行 CLI 入口。
 - 完成 run 目录初始化逻辑。
@@ -126,21 +117,15 @@
 - 完成 `Phase 6` 的第四轮 CLI 自动化测试扩展。
 - 完成独立 memory trace event：`memory_search_result`、`memory_conflict_detected`、`memory_entry_written`。
 - 完成长期 memory 命中摘要压缩与压缩证据记录。
-- 完成 memory conflict severity 分级：`strong` / `weak`。
-- 完成基于强冲突的长期 memory 注入抑制策略。
-- 完成基于弱提醒的长期 memory 排序降权策略。
-- 完成弱提醒降权力度配置化，并增加 `high_weak_conflict_penalty` 配置样例。
-- 完成摘要压缩长度配置化，并增加 `short_memory_summary` 配置样例。
 
 ## 进行中
 
-- 继续推进 `Phase 6`，下一步可评估是否把 penalty 和摘要长度进一步按任务类型分层。
+- 继续推进 `Phase 6`，下一步可评估更细粒度冲突分级。
 
 ## 下一步明确动作
 
+- 评估是否需要让 conflict evidence 区分“强冲突”和“弱提醒”，为后续污染策略实验留出梯度。
 - 评估是否需要让摘要压缩长度按事件类型或注入位置分层配置。
-- 评估是否需要把弱提醒降权力度按冲突线索数量或任务类型继续细分。
-- 评估是否需要把 `summary_max_length` 也按任务类型或注入位置继续细分。
 
 ## 当前阻塞
 
@@ -155,4 +140,4 @@
 2. 阅读 `docs/CURRENT_STATUS.md`。
 3. 阅读 `docs/PHASE_PROGRESS.md`。
 4. 检查 `src/context.py`、`src/tools.py`、`src/verify.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
-5. 从更细粒度 penalty / summary 参数分层配置开始继续。
+5. 从更细粒度冲突分级或摘要压缩分层配置开始继续。

@@ -2,7 +2,7 @@
 
 ## 最后更新时间
 
-- 日期：2026-06-14
+- 日期：2026-06-13
 
 ## 当前阶段
 
@@ -10,7 +10,6 @@
 
 ## 当前情况
 
-- 已在 `docs/SESSION_ENTRY.md` 增加项目级行为约束，要求以第一性原理思考、目标不清先讨论、路径不优时主动指出、遇到问题追根因、输出只保留决策相关信息。
 - `Phase 1` 最小骨架已经落地，仓库现在具备可运行的 Python 项目结构。
 - 已建立 `pyproject.toml`、`src/`、`tests/`、`configs/`、`eval_tasks/`、`runs/`。
 - 已实现基础 settings model、trace event model、trace writer 与 CLI skeleton。
@@ -40,25 +39,9 @@
 - 已实现最小 `memory conflict evidence` 检测，当前会识别“共享关键词或文件路径，但任务类型不同”的长期 memory 命中对。
 - 已增加 `memory_conflict` 与 `memory_pollution` 两个最小诊断标签，并接入 `memory_context` 与报告。
 - 报告现在会展示 memory 诊断标签和冲突证据摘要，便于快速排查潜在污染。
-- 已为长期 memory 写入补充稳定证据字段，当前会持久化 `task_keywords`、`summary_keywords`、`task_summary_excerpt` 与规范化后的 `selected_context_files`。
-- 长期 memory 检索现在会优先读取已落盘证据关键词，旧数据缺字段时再回退到 `task + summary` 现算关键词。
-- 已收紧最小 conflict evidence 规则，当前要求“共享关键词”和“共享文件路径”两类线索同时成立，才标记为潜在 memory 冲突。
-- 已补上 `Phase 6` 的第四轮 CLI 自动化测试扩展，覆盖 memory 写入证据与弱线索误判回归。
-- 已增加独立 memory trace event，当前会单独记录 `memory_search_result`、`memory_conflict_detected` 与 `memory_entry_written`。
-- 现在即使不展开 `context_snapshot`，也能直接从 trace 回放一次 run 的 memory 检索、冲突和写入证据。
-- 已增加长期 memory 命中摘要压缩规则，当前会把注入上下文和 trace 的长期 memory 摘要裁到稳定长度。
-- memory 命中证据里现在会额外记录 `original_summary_length` 与 `summary_was_compressed`，便于后续观察事件体积与信息损失。
-- 已把 memory conflict evidence 分成“强冲突”和“弱提醒”两档，当前会在证据里记录 `severity`。
-- 现在只有强冲突才会触发 `memory_conflict` / `memory_pollution`，单一线索冲突只会打 `memory_conflict_warning`。
-- 已把冲突强弱接入长期 memory 注入策略，当前会抑制“与当前任务类型不一致且落入强冲突”的长期 memory 注入。
-- 被抑制的长期 memory 现在会单独记录到 `suppressed_long_term_entries`，trace、上下文和报告都能直接看到抑制原因。
-- 弱提醒现在不再只是标签，当前会对异类长期 memory 施加排序降权，并把 `ranking_penalty`、`adjusted_score` 和原因写进证据。
-- 弱提醒降权力度现在已支持配置，当前会从 `configs/*.json` 的 `memory.weak_conflict_penalty` 读取，不再写死在代码里。
-- 长期 memory 摘要压缩长度现在也已支持配置，当前会从 `configs/*.json` 的 `memory.summary_max_length` 读取。
 
 ## 已完成
 
-- 完成 `SESSION_ENTRY` 行为约束更新，补充第一性原理、目标澄清、最短路径提醒、根因优先和高信号输出要求。
 - 完成 Python 项目骨架初始化。
 - 完成最小可运行 CLI 入口。
 - 完成 run 目录初始化逻辑。
@@ -120,27 +103,17 @@
 - 完成最小 memory conflict evidence 检测规则。
 - 完成最小 `memory_conflict` / `memory_pollution` 诊断标签。
 - 完成 `Phase 6` 的第三轮 CLI 自动化测试扩展。
-- 完成长期 memory 稳定证据写入：`task_keywords`、`summary_keywords`、`task_summary_excerpt`、规范化 `selected_context_files`。
-- 完成基于显式证据字段优先的长期 memory 检索兼容逻辑。
-- 完成更保守的 memory 冲突判定规则，降低单一弱线索导致的误判。
-- 完成 `Phase 6` 的第四轮 CLI 自动化测试扩展。
-- 完成独立 memory trace event：`memory_search_result`、`memory_conflict_detected`、`memory_entry_written`。
-- 完成长期 memory 命中摘要压缩与压缩证据记录。
-- 完成 memory conflict severity 分级：`strong` / `weak`。
-- 完成基于强冲突的长期 memory 注入抑制策略。
-- 完成基于弱提醒的长期 memory 排序降权策略。
-- 完成弱提醒降权力度配置化，并增加 `high_weak_conflict_penalty` 配置样例。
-- 完成摘要压缩长度配置化，并增加 `short_memory_summary` 配置样例。
 
 ## 进行中
 
-- 继续推进 `Phase 6`，下一步可评估是否把 penalty 和摘要长度进一步按任务类型分层。
+- 继续推进 `Phase 6`，下一步开始增强长期 memory 写入证据与检索稳定性。
 
 ## 下一步明确动作
 
-- 评估是否需要让摘要压缩长度按事件类型或注入位置分层配置。
-- 评估是否需要把弱提醒降权力度按冲突线索数量或任务类型继续细分。
-- 评估是否需要把 `summary_max_length` 也按任务类型或注入位置继续细分。
+- 在长期 memory 写入时补充更稳定的关键词、路径或任务摘要证据，降低后续检索歧义。
+- 评估是否需要把长期 memory 命中摘要进一步压缩后再注入上下文。
+- 继续细化 conflict evidence 规则，避免把弱相关条目误判成污染。
+- 考虑为 memory 命中与冲突检测增加独立 trace event，提升可观测性。
 
 ## 当前阻塞
 
@@ -155,4 +128,4 @@
 2. 阅读 `docs/CURRENT_STATUS.md`。
 3. 阅读 `docs/PHASE_PROGRESS.md`。
 4. 检查 `src/context.py`、`src/tools.py`、`src/verify.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
-5. 从更细粒度 penalty / summary 参数分层配置开始继续。
+5. 从长期 memory 写入证据增强与 conflict 规则细化开始继续。

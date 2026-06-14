@@ -102,6 +102,7 @@ class MemoryContext:
     matched_entries: list[dict[str, Any]] = field(default_factory=list)
     runtime_rule_entries: list[dict[str, Any]] = field(default_factory=list)
     long_term_entries: list[dict[str, Any]] = field(default_factory=list)
+    suppressed_long_term_entries: list[dict[str, Any]] = field(default_factory=list)
     conflict_evidence: list[dict[str, Any]] = field(default_factory=list)
     diagnostic_labels: list[str] = field(default_factory=list)
     source: str = "disabled"
@@ -152,6 +153,7 @@ class ContextBuilder:
         matched_memory_entries: list[dict[str, Any]] | None = None,
         runtime_rule_entries: list[dict[str, Any]] | None = None,
         long_term_memory_entries: list[dict[str, Any]] | None = None,
+        suppressed_long_term_entries: list[dict[str, Any]] | None = None,
         memory_conflict_evidence: list[dict[str, Any]] | None = None,
         memory_diagnostic_labels: list[str] | None = None,
     ) -> ContextSnapshot:
@@ -164,6 +166,7 @@ class ContextBuilder:
         matched_entries = matched_memory_entries or []
         runtime_entries = runtime_rule_entries or []
         long_term_entries = long_term_memory_entries or []
+        suppressed_entries = suppressed_long_term_entries or []
         conflict_evidence = memory_conflict_evidence or []
         diagnostic_labels = memory_diagnostic_labels or []
         return ContextSnapshot(
@@ -189,9 +192,12 @@ class ContextBuilder:
                 matched_entries=matched_entries,
                 runtime_rule_entries=runtime_entries,
                 long_term_entries=long_term_entries,
+                suppressed_long_term_entries=suppressed_entries,
                 conflict_evidence=conflict_evidence,
                 diagnostic_labels=diagnostic_labels,
-                source="runtime_memory_manager" if (matched_entries or runtime_entries or long_term_entries) else "disabled",
+                source="runtime_memory_manager"
+                if (matched_entries or runtime_entries or long_term_entries or suppressed_entries)
+                else "disabled",
             ),
         )
 

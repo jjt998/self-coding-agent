@@ -4,7 +4,6 @@
 
 - 最后更新时间：2026-06-14
 - 当前激活阶段：`Phase 6：Memory`
-- 补充说明：`docs/SESSION_ENTRY.md` 已增加项目级行为约束，后续会话默认按第一性原理、根因优先和高信号输出执行。
 
 ## Phase 1：脚手架与控制面
 
@@ -133,19 +132,9 @@
   - 让长期 memory 检索优先使用显式证据字段，并兼容旧格式 memory 回退逻辑
   - 收紧最小 conflict evidence 规则，要求共享关键词和共享文件路径同时成立后再标记冲突
   - 扩充 CLI 测试，验证 memory 写入证据和单一弱线索不误报冲突
-  - 增加独立 memory trace event：`memory_search_result`、`memory_conflict_detected`、`memory_entry_written`
-  - 扩充 CLI 测试，验证 memory 检索事件、冲突事件和写入事件都会单独落入 trace
-  - 增加长期 memory 命中摘要压缩规则，并记录 `original_summary_length`、`summary_was_compressed`
-  - 增加 memory conflict severity 分级：`strong` / `weak`
-  - 让强冲突触发 `memory_conflict` / `memory_pollution`，让单一线索冲突仅触发 `memory_conflict_warning`
-  - 把强冲突接入长期 memory 注入策略，抑制与当前任务类型不一致的强冲突长期 memory
-  - 增加 `suppressed_long_term_entries`，让被抑制条目也能在 trace、上下文和报告中检查
-  - 把弱提醒接入长期 memory 检索排序，为异类长期 memory 增加 `ranking_penalty` 与 `adjusted_score`
-  - 把 `weak_conflict_penalty` 提升为配置项，并增加高 penalty 配置样例
-  - 把 `summary_max_length` 提升为配置项，并增加短摘要配置样例
 - 剩余：
-  - 评估是否需要让摘要压缩长度按事件类型、注入位置或任务类型分层配置
-  - 评估是否需要把 penalty 继续按任务类型或线索数量细分
+  - 评估是否需要压缩长期 memory 命中摘要后再注入上下文
+  - 评估是否需要增加独立 memory trace event
 - 验收：
   - 成功且验证通过的 run 可以写入 memory，后续 run 可以读取。
 - 备注：
