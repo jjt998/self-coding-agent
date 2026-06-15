@@ -3,8 +3,8 @@
 ## 总览
 
 - 最后更新时间：2026-06-15
-- 当前激活阶段：`Phase 9：真实任务最小闭环`
-- 当前阶段状态：`in_progress`
+- 当前激活阶段：`Phase 8：策略对比`
+- 当前阶段状态：`completed`
 
 ## Phase 1：脚手架与控制面
 
@@ -65,27 +65,8 @@
   - 已完成 `experiment_suites/first_batch.json` 首次实跑，产出第一版 baseline 结果目录
   - 自动化验收：`python -m pytest -q` 通过，结果为 `21 passed`
 
-## Phase 9：真实任务最小闭环
-
-- 状态：`in_progress`
-- 目标：
-  - 让 agent 从“固定 stub 演示链路”进入“真实代码任务求解链路”。
-  - 让 eval task 从“任务描述集”升级为“可复现实验任务集”。
-  - 让 verify 从“演示型检查”升级为“真实任务完成性验证”。
-  - 让批量实验具备任务级隔离，固定采用“每题独立 sandbox 目录”。
-- 当前已识别缺口：
-  - `src/loop.py` 仍依赖 `_run_stub_state`
-  - `src/tools.py` 仍依赖固定 `build_phase_3_tool_sequence()`
-  - `src/verify.py` 仍是 `agent_notes.md` 演示验证
-  - eval task schema 尚未承载 sandbox / setup / verify / pass criteria
-- 下一步实现顺序建议：
-  1. 定义真实任务最小 schema。
-  2. 落地每题独立 sandbox 目录。
-  3. 重写任务级 verify。
-  4. 把 loop 从 stub 逐步替换为真实求解链路。
-
 ## 下一步
 
-- 先围绕真实任务实验补“schema + sandbox + verify”三件套。
-- 在保留现有 comparison / experiment 外壳的前提下，把真实任务执行链路接进去。
-- 等最小闭环跑通后，再重新设计第二批更能区分 context 策略的研究任务集。
+- 基于首批结果补第二版固定任务集，重点增强 context 策略区分度。
+- 评估是否需要收紧默认 memory / reflect baseline，减少当前已暴露出的稳定噪声和额外步骤。
+- 根据第二轮实验结果决定下一轮要不要继续细化 comparison 指标或扩展新策略维度。
