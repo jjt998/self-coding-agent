@@ -46,11 +46,16 @@ class EvalExpectationAssessment:
 
 @dataclass(slots=True)
 class EvalTaskSpec:
-    """描述一条批量评测任务，包括任务文本、类型和可选 expectation。"""
+    """描述一条批量评测任务，包括任务文本、隔离执行信息和可选 expectation。"""
 
     name: str
     task: str
     task_type: str = "general"
+    repo_subdir: str = "."
+    workspace_mode: str = "per_task_sandbox"
+    sandbox_retention: str = "delete_on_success"
+    setup_commands: list[list[str]] = field(default_factory=list)
+    verify_commands: list[list[str]] = field(default_factory=list)
     expectation: EvalExpectationSpec | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -218,6 +223,11 @@ def load_eval_task_specs(task_file: Path) -> list[EvalTaskSpec]:
                 name=task_name,
                 task=task_text,
                 task_type=task_type,
+                repo_subdir=_normalize_repo_subdir(raw_task.get("repo_subdir")),
+                workspace_mode=_normalize_workspace_mode(raw_task.get("workspace_mode")),
+                sandbox_retention=_normalize_sandbox_retention(raw_task.get("sandbox_retention")),
+                setup_commands=_normalize_command_matrix(raw_task.get("setup_commands")),
+                verify_commands=_normalize_command_matrix(raw_task.get("verify_commands")),
                 expectation=_load_expectation_spec(raw_task.get("expectation")),
             )
         )
@@ -263,12 +273,18 @@ def run_eval_batch(
     config_data = load_named_config(config_dir=Path("configs"), config_name=config_name)
     for task_spec in task_specs:
         # 这里每条任务都走一遍统一 run 内核，避免 eval 和真实运行两套逻辑慢慢漂移。
+        task_repo_root = _resolve_task_repo_root(repo_root=Path(repo_root), repo_subdir=task_spec.repo_subdir)
         settings = build_settings(
             task=task_spec.task,
             task_type=task_spec.task_type,
-            repo_root=repo_root,
+            repo_root=str(task_repo_root),
             output_root=str(runs_dir),
             config_name=config_name,
+            source_repo_root=str(task_repo_root),
+            workspace_mode=task_spec.workspace_mode,
+            sandbox_retention=task_spec.sandbox_retention,
+            setup_commands=task_spec.setup_commands,
+            verify_commands=task_spec.verify_commands,
         )
         run_dir = execute_initial_run(settings=settings, config_data=config_data)
         run_results.append(_collect_eval_run_result(task_spec=task_spec, run_id=settings.run_id, run_dir=run_dir))
@@ -1010,6 +1026,67 @@ def _normalize_count_dict(raw_value: Any) -> dict[str, int]:
         except (TypeError, ValueError):
             continue
     return normalized
+
+
+def _normalize_repo_subdir(raw_value: Any) -> str:
+    """把任务里的 repo_subdir 收敛成稳定相对路径，缺省时表示仓库根目录。"""
+    if raw_value is None:
+        return "."
+    text = str(raw_value).strip().replace("\\", "/")
+    if not text or text == ".":
+        return "."
+    return text.strip("/")
+
+
+def _normalize_workspace_mode(raw_value: Any) -> str:
+    """把任务里的 workspace_mode 收敛成当前支持的执行模式。"""
+    text = _normalize_optional_string(raw_value)
+    if text in {"in_place", "per_task_sandbox"}:
+        return text
+    return "per_task_sandbox"
+
+
+def _normalize_command_matrix(raw_value: Any) -> list[list[str]]:
+    """把 setup/verify 命令字段清洗成二维字符串列表。"""
+    if not isinstance(raw_value, list):
+        return []
+    commands: list[list[str]] = []
+    for item in raw_value:
+        normalized_command = _normalize_command_list(item)
+        if normalized_command:
+            commands.append(normalized_command)
+    return commands
+
+
+def _normalize_sandbox_retention(raw_value: Any) -> str:
+    """把 sandbox 保留策略收敛成当前支持的有限枚举。"""
+    text = _normalize_optional_string(raw_value)
+    if text in {"always_keep", "delete_on_success", "always_delete"}:
+        return text
+    return "delete_on_success"
+
+
+def _normalize_command_list(raw_value: Any) -> list[str]:
+    """把单条命令收敛成干净的 argv 列表，方便后面直接 subprocess 调用。"""
+    if not isinstance(raw_value, list):
+        return []
+    command: list[str] = []
+    for item in raw_value:
+        text = str(item).strip()
+        if text:
+            command.append(text)
+    return command
+
+
+def _resolve_task_repo_root(repo_root: Path, repo_subdir: str) -> Path:
+    """把任务想作用的仓库子目录解析成真实路径，并阻止越界到仓库外。"""
+    base_repo_root = repo_root.resolve()
+    candidate_repo_root = (base_repo_root / repo_subdir).resolve()
+    try:
+        candidate_repo_root.relative_to(base_repo_root)
+    except ValueError as error:
+        raise ValueError(f"repo_subdir '{repo_subdir}' escapes repo_root") from error
+    return candidate_repo_root
 
 
 def _assess_expectation(

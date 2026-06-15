@@ -85,11 +85,7 @@
   - `src/runner.py` 补齐每题独立 sandbox 目录准备、路径忽略规则和 setup trace 事件
   - sandbox 工作区改为更短的临时目录，绕开 experiment suite 下 Windows `cwd` 过长问题
   - 回归测试新增覆盖：schema 解析、sandbox 隔离、setup command 执行
-  - `src/config.py` / `src/eval_runner.py` / `src/runner.py` 补齐 sandbox 保留策略字段与执行逻辑
-  - 当前支持 `always_keep`、`delete_on_success`、`always_delete` 三种 sandbox 生命周期策略，默认 `delete_on_success`
-  - `sandbox_cleanup_result` 已进入 trace，报告中已新增 `Sandbox 清理` 小节
-  - 回归测试新增覆盖：默认成功后删除 sandbox、显式保留 sandbox
-  - 自动化验收：`python -m pytest -q` 通过，结果为 `23 passed`
+  - 自动化验收：`python -m pytest -q` 通过，结果为 `22 passed`
 - 下一步实现顺序建议：
   1. 把 `verify_commands` 和通过条件真正接入任务级 verify。
   2. 接入真实模型/策略决策层本体。

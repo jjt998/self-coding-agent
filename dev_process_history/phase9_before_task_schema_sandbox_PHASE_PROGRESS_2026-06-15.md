@@ -78,26 +78,16 @@
   - `src/tools.py` 仍依赖固定 `build_phase_3_tool_sequence()`
   - `src/verify.py` 仍是 `agent_notes.md` 演示验证
   - 当前还缺少真实模型/策略决策层本体，尚未接入真正的任务级模型决策、工具选择与步骤推进回路
-  - eval task schema 已承载 `repo_subdir` / `workspace_mode` / `setup_commands` / `verify_commands`，但 `verify_commands` 还未真正驱动任务级 verify
-- 本轮已完成：
-  - `src/config.py` 补齐 `source_repo_root`、`workspace_mode`、`sandbox_dir`、`setup_commands`、`verify_commands`
-  - `src/eval_runner.py` 补齐真实任务最小 schema 第一版，并默认让 eval task 走 `per_task_sandbox`
-  - `src/runner.py` 补齐每题独立 sandbox 目录准备、路径忽略规则和 setup trace 事件
-  - sandbox 工作区改为更短的临时目录，绕开 experiment suite 下 Windows `cwd` 过长问题
-  - 回归测试新增覆盖：schema 解析、sandbox 隔离、setup command 执行
-  - `src/config.py` / `src/eval_runner.py` / `src/runner.py` 补齐 sandbox 保留策略字段与执行逻辑
-  - 当前支持 `always_keep`、`delete_on_success`、`always_delete` 三种 sandbox 生命周期策略，默认 `delete_on_success`
-  - `sandbox_cleanup_result` 已进入 trace，报告中已新增 `Sandbox 清理` 小节
-  - 回归测试新增覆盖：默认成功后删除 sandbox、显式保留 sandbox
-  - 自动化验收：`python -m pytest -q` 通过，结果为 `23 passed`
+  - eval task schema 尚未承载 sandbox / setup / verify / pass criteria
 - 下一步实现顺序建议：
-  1. 把 `verify_commands` 和通过条件真正接入任务级 verify。
-  2. 接入真实模型/策略决策层本体。
-  3. 把 loop 从 stub 逐步替换为真实求解链路。
-  4. 把 setup / verify 失败都收口为结构化 stop reason 与 failure taxonomy。
+  1. 定义真实任务最小 schema。
+  2. 落地每题独立 sandbox 目录。
+ 3. 接入真实模型/策略决策层本体。
+ 4. 重写任务级 verify。
+ 5. 把 loop 从 stub 逐步替换为真实求解链路。
 
 ## 下一步
 
-- 先围绕真实任务实验补“真实 verify + 决策层 + loop”三件套。
-- 在保留现有 comparison / experiment 外壳的前提下，把真实任务执行链路继续接深。
+- 先围绕真实任务实验补“schema + sandbox + verify”三件套。
+- 在保留现有 comparison / experiment 外壳的前提下，把真实任务执行链路接进去。
 - 等最小闭环跑通后，再重新设计第二批更能区分 context 策略的研究任务集。

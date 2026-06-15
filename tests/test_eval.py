@@ -16,6 +16,7 @@ from eval_runner import (
     _build_eval_summary_markdown,
     _build_failure_taxonomy_tags,
     _load_expectation_spec,
+    load_eval_task_specs,
 )
 
 
@@ -47,6 +48,14 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
                         "name": "general_scaffold",
                         "task": "创建脚手架",
                         "task_type": "general",
+                        "sandbox_retention": "always_keep",
+                        "setup_commands": [
+                            [
+                                sys.executable,
+                                "-c",
+                                "from pathlib import Path; Path('setup_marker.txt').write_text('sandbox-ready', encoding='utf-8')",
+                            ]
+                        ],
                         "expectation": {
                             "passed": True,
                             "outcome": "passed_cleanly",
@@ -138,8 +147,38 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
     assert "## 诊断标签" in summary_text
     assert "## 运行明细" in summary_text
 
-    run_dirs = list((eval_dir / "runs").iterdir())
+    run_dirs = sorted((eval_dir / "runs").iterdir())
     assert len(run_dirs) == 2
+    assert not (repo_root / "agent_notes.md").exists()
+    assert not (repo_root / "setup_marker.txt").exists()
+
+    run_dir_by_task = {
+        item["task_name"]: Path(item["run_dir"])
+        for item in summary_data["runs"]
+    }
+    first_run_dir = run_dir_by_task["general_scaffold"]
+    first_snapshot = json.loads((first_run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
+    assert first_snapshot["workspace_mode"] == "per_task_sandbox"
+    assert first_snapshot["source_repo_root"] == str(repo_root.resolve())
+    sandbox_repo_root = Path(first_snapshot["repo_root"])
+    assert sandbox_repo_root.exists()
+    assert (sandbox_repo_root / "agent_notes.md").exists()
+    assert (sandbox_repo_root / "setup_marker.txt").read_text(encoding="utf-8") == "sandbox-ready"
+    assert Path(first_snapshot["sandbox_dir"]).exists()
+
+    first_trace_events = [
+        json.loads(line)
+        for line in (first_run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    workspace_payload = next(event["payload"] for event in first_trace_events if event["event_type"] == "workspace_prepared")
+    assert workspace_payload["workspace_mode"] == "per_task_sandbox"
+    assert workspace_payload["source_repo_root"] == str(repo_root.resolve())
+    setup_result_payload = next(event["payload"] for event in first_trace_events if event["event_type"] == "task_setup_result")
+    assert setup_result_payload["ok"] is True
+    cleanup_payload = next(event["payload"] for event in first_trace_events if event["event_type"] == "sandbox_cleanup_result")
+    assert cleanup_payload["kept"] is True
+    assert cleanup_payload["retention_policy"] == "always_keep"
 
 
 def test_eval_batch_result_distinguishes_clean_pass_warning_pass_and_failure() -> None:
@@ -362,6 +401,42 @@ def test_expectation_can_check_steps_tool_calls_and_failing_checks() -> None:
 
     matched = _load_expectation_spec(expectation.to_dict())
     assert matched == expectation
+
+
+def test_load_eval_task_specs_supports_sandbox_and_setup_fields(tmp_path: Path) -> None:
+    task_file = tmp_path / "task_file.json"
+    task_file.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "name": "sandbox_bug_fix",
+                        "task": "修复 sandbox 中的问题",
+                        "task_type": "bug_fix",
+                        "repo_subdir": "packages/api",
+                        "workspace_mode": "per_task_sandbox",
+                        "sandbox_retention": "always_delete",
+                        "setup_commands": [["python", "-V"], ["python", "-c", "print('setup')"]],
+                        "verify_commands": [["python", "-m", "pytest", "-q"]],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    specs = load_eval_task_specs(task_file)
+
+    assert len(specs) == 1
+    assert specs[0].name == "sandbox_bug_fix"
+    assert specs[0].repo_subdir == "packages/api"
+    assert specs[0].workspace_mode == "per_task_sandbox"
+    assert specs[0].sandbox_retention == "always_delete"
+    assert specs[0].setup_commands == [["python", "-V"], ["python", "-c", "print('setup')"]]
+    assert specs[0].verify_commands == [["python", "-m", "pytest", "-q"]]
 
 
 def test_failure_taxonomy_tags_keep_all_failure_dimensions() -> None:

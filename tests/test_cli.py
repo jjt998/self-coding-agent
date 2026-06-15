@@ -183,9 +183,76 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "## 工具调用摘要" in report_text
     assert "## 验证结果" in report_text
     assert "## Memory 写入" in report_text
+    assert "## Sandbox 清理" in report_text
     assert "写入状态：已写入" in report_text
     assert "验证状态：通过" in report_text
     assert "`apply_patch`：成功" in report_text
+
+
+def test_cli_deletes_sandbox_after_success_by_default(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text(
+        "# 项目说明\n\n这里用于验证 sandbox 默认清理策略。\n",
+        encoding="utf-8",
+    )
+
+    eval_task_file = tmp_path / "eval_batch.json"
+    eval_task_file.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "name": "sandbox_cleanup_default",
+                        "task": "创建脚手架",
+                        "task_type": "general",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--eval-task-file",
+        str(eval_task_file),
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    summary_data = json.loads((output_root / "eval-eval_batch" / "summary.json").read_text(encoding="utf-8"))
+    run_dir = Path(summary_data["runs"][0]["run_dir"])
+    snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
+    sandbox_dir = Path(snapshot["sandbox_dir"])
+    assert not sandbox_dir.exists()
+
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    cleanup_payload = next(event["payload"] for event in trace_events if event["event_type"] == "sandbox_cleanup_result")
+    assert cleanup_payload["attempted"] is True
+    assert cleanup_payload["kept"] is False
+    assert cleanup_payload["retention_policy"] == "delete_on_success"
+
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "保留策略：`delete_on_success`" in report_text
+    assert "清理结果：已删除" in report_text
 
 
 def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path) -> None:

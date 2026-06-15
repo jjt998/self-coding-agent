@@ -39,7 +39,9 @@ class TraceWriter:
     def initialize(self, config_snapshot: dict[str, Any]) -> None:
         """初始化本次 run 的目录、配置快照、trace 文件和报告文件。"""
         # 初始化时把 run 目录的一组基础产物一次性落齐，后面每次运行都能保持同样的目录形态。
-        self.run_dir.mkdir(parents=True, exist_ok=False)
+        # Phase 9 开始后，sandbox 工作区可能会先于 trace 初始化被准备出来，因此这里改成
+        # “目录存在也可继续初始化”，但仍然保持配置快照、trace 和报告文件由这里统一落盘。
+        self.run_dir.mkdir(parents=True, exist_ok=True)
         self.config_snapshot_path.write_text(
             json.dumps(config_snapshot, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",

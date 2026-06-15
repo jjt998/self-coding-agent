@@ -23,16 +23,8 @@
   - `naive_recent_context` 相比 `file_recall_context` 在现有固定任务集上没有拉开差异，说明这批任务还不足以区分两种 context 策略。
   - `memory_off` 相比默认 memory 策略保留了同样的成功率，但把 `warning_rate` 从 `1.0` 降到了 `0.0`，同时把 `clean_pass_rate` 从 `0.0` 提升到 `1.0`，当前默认 memory 在这批任务上主要带来了冲突/污染类诊断噪声。
   - `verify_failure_only_reflect` 相比默认 reflect 策略没有降低成功率，但把平均步数从 `8` 降到 `7`，把平均 reflect 次数从 `1` 降到 `0`，说明“observe 无进展就反思”在当前任务集上更像额外开销。
-- `Phase 8` 交付时新增与保留的 comparison / experiment / task set 回归测试已通过；在本轮 `Phase 9` 补齐 schema 与 sandbox 后，当前全量 `python -m pytest -q` 结果为 `22 passed`。
+- 新增与保留的 comparison / experiment / task set 回归测试已通过，当前 `python -m pytest -q` 结果为 `21 passed`。
 - 当前已经具备“固定任务集上的策略实验外壳”，但还不具备“真实代码任务求解闭环”；现有 `loop`、`tools`、`verify` 仍以 stub 演示链路为主。
-- `Phase 9` 第一块缺口已开始落地：现已支持在 eval task schema 中声明 `repo_subdir`、`workspace_mode`、`setup_commands`、`verify_commands`，并默认按“每题独立 sandbox 目录”执行 eval task。
-- 当前 sandbox 工作区会在更短的临时目录下创建，避免 experiment suite 多层目录叠加后触发 Windows `cwd` 路径过长问题。
-- 当前 `run_started` / `workspace_prepared` / `task_setup_started` / `task_setup_result` 已进入 trace，可回看每题原始仓库、实际执行仓库和准备命令结果。
-- 当前 eval batch 已验证：任务内文件修改与 setup 产物会留在 sandbox 内，不再污染源仓库。
-- 当前已补上 sandbox 清理/保留策略：支持 `always_keep`、`delete_on_success`、`always_delete` 三种模式，默认使用 `delete_on_success`。
-- 当前默认行为已改为“验证通过就删除 sandbox，验证失败则保留 sandbox”，兼顾磁盘占用与失败复盘。
-- 当前 `sandbox_cleanup_result` 已进入 trace，运行报告中也会明确展示 sandbox 的保留策略、清理结果和目录位置。
-- 本轮回归测试已通过，当前 `python -m pytest -q` 结果为 `23 passed`。
 
 ## 已完成
 
@@ -54,16 +46,16 @@
 
 - 缺少真实任务决策内核：当前 `src/loop.py` 仍是 `_run_stub_state`，`plan`、`act`、`observe` 还没有进入“按任务自主读代码、改代码、再验证”的真实求解闭环。
 - 缺少真实任务验证机制：当前 `src/verify.py` 主要验证 `agent_notes.md`、固定工具顺序和演示型 diff，不足以判断 bug fix、重构、测试补全等真实任务是否完成。
-- 真实任务 task schema 已补上第一版最小字段，但还缺“通过条件”的结构化解释与任务级 verify 实际执行。
-- 任务级隔离/重置能力已补上第一版：当前固定采用“每题绑定一个独立 sandbox 目录”的方案，并补上了基础清理/保留策略；后续可继续补配额控制与更精细的保留规则。
+- 缺少真实任务 task schema：现有 eval task 更像“任务描述 + expectation”，还没有把 repo 子目录、sandbox 目录、准备步骤、验证命令、通过条件这些真实实验必需字段结构化下来。
+- 缺少任务级隔离/重置能力：后续固定采用“每题绑定一个独立 sandbox 目录”的方案，避免任务之间互相污染，并保证批量实验可复现。
 - 缺少真实模型驱动的决策层：当前策略对比主要比较 context / memory / reflect 外壳，还没有接入真正的任务级模型决策与工具选择回路。
 
 ## 下一步明确动作
 
-- 把 `verify_commands` 和“通过条件”真正接入 `verify`，让验证从“字段占位”变成“真实任务检查”。
-- 在 sandbox 中补任务级准备步骤之后的真实执行/失败收口，让 setup 失败、verify 失败都能沉淀为结构化 stop reason。
+- 先定义真实任务最小 schema，补齐任务文本之外的实验字段，至少覆盖 sandbox 目录、准备步骤、验证命令、通过标准和作用范围。
+- 落地“每题独立 sandbox 目录”执行模式，让单题运行和 batch eval 都能在隔离目录中完成。
 - 重写 `verify`，让验证从“演示链路检查”切换为“按任务定义执行真实验证”。
-- 在不破坏现有 trace / summary / comparison 结构的前提下，把 `loop` 从 stub 链路逐步替换成真实任务求解链路，并接入真实模型/策略决策层。
+- 在不破坏现有 trace / summary / comparison 结构的前提下，把 `loop` 从 stub 链路逐步替换成真实任务求解链路。
 
 ## 当前阻塞
 
@@ -77,4 +69,4 @@
 3. 阅读 `docs/PHASE_PROGRESS.md`
 4. 优先查看 `src/loop.py`、`src/tools.py`、`src/verify.py`、`src/runner.py`
 5. 再查看 `src/eval_runner.py`、`src/experiment_runner.py`、`eval_tasks/sample_batch.json`
-6. 从“verify_commands 真正接入 verify + 真实模型/策略决策层 + stub loop 替换”继续推进
+6. 从“真实任务最小 schema + 每题独立 sandbox 目录 + 真实 verify”继续推进

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 
 from config import RunSettings
 from loop import LoopOrchestrator, RuntimeState
@@ -18,10 +21,22 @@ class MemoryWriteResult:
     reason: str
 
 
+@dataclass(slots=True)
+class SandboxCleanupResult:
+    """记录本次 run 结束后 sandbox 是保留还是清理。"""
+
+    attempted: bool
+    kept: bool
+    sandbox_dir: str
+    retention_policy: str
+    reason: str
+
+
 def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
     """初始化单次 run，并执行最小 stub 状态机流程。"""
     # 这里继续沿用 Phase 1 的 run 初始化逻辑，再把 Phase 2 的最小 loop 接在后面。
     run_dir = Path(settings.output_root) / settings.run_id
+    _prepare_execution_workspace(settings=settings, run_dir=run_dir)
     trace_writer = TraceWriter(run_dir=run_dir)
 
     snapshot = settings.to_dict()
@@ -35,9 +50,23 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
                 "run_id": settings.run_id,
                 "task_type": settings.task_type,
                 "repo_root": settings.repo_root,
+                "source_repo_root": settings.source_repo_root,
+                "workspace_mode": settings.workspace_mode,
             },
         )
     )
+    trace_writer.write_event(
+        TraceEvent(
+            event_type="workspace_prepared",
+            payload={
+                "workspace_mode": settings.workspace_mode,
+                "source_repo_root": settings.source_repo_root,
+                "execution_repo_root": settings.repo_root,
+                "sandbox_dir": settings.sandbox_dir,
+            },
+        )
+    )
+    _run_task_setup_commands(settings=settings, trace_writer=trace_writer)
     runtime_state = LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=config_data)
     memory_entry_written_payload = None
     if runtime_state.verification_result and runtime_state.verification_result.passed:
@@ -63,21 +92,168 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
             },
         )
     )
+    sandbox_cleanup_result = _cleanup_sandbox_if_needed(
+        settings=settings,
+        runtime_state=runtime_state,
+        trace_writer=trace_writer,
+    )
     trace_writer.write_report(
         _build_phase_4_report(
             settings=settings,
             runtime_state=runtime_state,
             memory_write_result=memory_write_result,
+            sandbox_cleanup_result=sandbox_cleanup_result,
         )
     )
 
     return run_dir
 
 
+def _prepare_execution_workspace(settings: RunSettings, run_dir: Path) -> None:
+    """按运行模式准备真正执行任务的工作目录。"""
+    source_repo_root = Path(settings.source_repo_root or settings.repo_root).resolve()
+    settings.source_repo_root = str(source_repo_root)
+    settings.repo_root = str(source_repo_root)
+    settings.sandbox_dir = ""
+
+    if settings.workspace_mode != "per_task_sandbox":
+        return
+
+    sandbox_root = Path(tempfile.mkdtemp(prefix=f"{settings.run_id}-self-coding-agent-"))
+    sandbox_repo_root = sandbox_root / "repo"
+    shutil.copytree(
+        source_repo_root,
+        sandbox_repo_root,
+        ignore=_build_sandbox_ignore(
+            source_repo_root=source_repo_root,
+            output_root=Path(settings.output_root).resolve(),
+        ),
+    )
+    settings.repo_root = str(sandbox_repo_root.resolve())
+    settings.sandbox_dir = str(sandbox_root.resolve())
+
+
+def _build_sandbox_ignore(source_repo_root: Path, output_root: Path):
+    """生成 sandbox 复制时的忽略规则，避免把运行产物和缓存目录再卷进去。"""
+    ignored_names = {
+        ".git",
+        ".agent_sandboxes",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+    }
+    try:
+        relative_output_root = output_root.relative_to(source_repo_root)
+    except ValueError:
+        relative_output_root = None
+    if relative_output_root and relative_output_root.parts:
+        # 这里忽略 output_root 在仓库内的顶层目录名，避免复制 sandbox 时把 runs 再递归带进去。
+        ignored_names.add(relative_output_root.parts[0])
+
+    def _ignore(_current_dir: str, names: list[str]) -> set[str]:
+        return {name for name in names if name in ignored_names}
+
+    return _ignore
+
+
+def _run_task_setup_commands(settings: RunSettings, trace_writer: TraceWriter) -> None:
+    """在真正进入 loop 前先执行任务自带的准备命令，让 sandbox 输入态可复现。"""
+    for index, command in enumerate(settings.setup_commands, start=1):
+        trace_writer.write_event(
+            TraceEvent(
+                event_type="task_setup_started",
+                payload={
+                    "index": index,
+                    "command": list(command),
+                    "cwd": settings.repo_root,
+                },
+            )
+        )
+        completed = subprocess.run(
+            command,
+            cwd=settings.repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        trace_writer.write_event(
+            TraceEvent(
+                event_type="task_setup_result",
+                payload={
+                    "index": index,
+                    "command": list(command),
+                    "cwd": settings.repo_root,
+                    "ok": completed.returncode == 0,
+                    "returncode": completed.returncode,
+                    "stdout": completed.stdout,
+                    "stderr": completed.stderr,
+                },
+            )
+        )
+
+
+def _cleanup_sandbox_if_needed(
+    settings: RunSettings,
+    runtime_state: RuntimeState,
+    trace_writer: TraceWriter,
+) -> SandboxCleanupResult:
+    """按保留策略决定是否删除本次 run 的 sandbox，并把结果写进 trace。"""
+    if settings.workspace_mode != "per_task_sandbox" or not settings.sandbox_dir:
+        result = SandboxCleanupResult(
+            attempted=False,
+            kept=False,
+            sandbox_dir=settings.sandbox_dir,
+            retention_policy=settings.sandbox_retention,
+            reason="当前运行未使用 per-task sandbox，无需清理。",
+        )
+        trace_writer.write_event(TraceEvent(event_type="sandbox_cleanup_result", payload=asdict(result)))
+        return result
+
+    verification_passed = bool(runtime_state.verification_result and runtime_state.verification_result.passed)
+    should_keep, reason = _decide_sandbox_retention(
+        retention_policy=settings.sandbox_retention,
+        verification_passed=verification_passed,
+    )
+    if should_keep:
+        result = SandboxCleanupResult(
+            attempted=False,
+            kept=True,
+            sandbox_dir=settings.sandbox_dir,
+            retention_policy=settings.sandbox_retention,
+            reason=reason,
+        )
+        trace_writer.write_event(TraceEvent(event_type="sandbox_cleanup_result", payload=asdict(result)))
+        return result
+
+    sandbox_path = Path(settings.sandbox_dir)
+    shutil.rmtree(sandbox_path, ignore_errors=False)
+    result = SandboxCleanupResult(
+        attempted=True,
+        kept=False,
+        sandbox_dir=settings.sandbox_dir,
+        retention_policy=settings.sandbox_retention,
+        reason=reason,
+    )
+    trace_writer.write_event(TraceEvent(event_type="sandbox_cleanup_result", payload=asdict(result)))
+    return result
+
+
+def _decide_sandbox_retention(retention_policy: str, verification_passed: bool) -> tuple[bool, str]:
+    """根据保留策略和验证结果判断 sandbox 应保留还是删除。"""
+    if retention_policy == "always_keep":
+        return True, "当前策略要求始终保留 sandbox。"
+    if retention_policy == "always_delete":
+        return False, "当前策略要求始终删除 sandbox。"
+    if verification_passed:
+        return False, "当前策略为 delete_on_success，且本次验证通过。"
+    return True, "当前策略为 delete_on_success，且本次验证未通过。"
+
+
 def _build_phase_4_report(
     settings: RunSettings,
     runtime_state: RuntimeState,
     memory_write_result: MemoryWriteResult,
+    sandbox_cleanup_result: SandboxCleanupResult,
 ) -> str:
     """把状态流、工具摘要和验证结果整理成当前阶段可读报告。"""
     stop_reason = runtime_state.stop_reason
@@ -104,6 +280,7 @@ def _build_phase_4_report(
             verification_lines.append(f"- {check.name}：{check_status}。{check.detail}")
     verification_details = "\n".join(verification_lines) if verification_lines else "- 暂无验证检查项。"
     memory_write_status = "已写入" if memory_write_result.written else "未写入"
+    sandbox_status = "已保留" if sandbox_cleanup_result.kept else "已删除"
 
     context_lines = []
     if context_snapshot:
@@ -192,6 +369,12 @@ def _build_phase_4_report(
         f"- 写入状态：{memory_write_status}\n"
         f"- 说明：{memory_write_result.reason}\n"
         f"- 存储位置：`{memory_write_result.store_path}`\n"
+        f"\n## Sandbox 清理\n\n"
+        f"- 工作区模式：`{settings.workspace_mode}`\n"
+        f"- 保留策略：`{settings.sandbox_retention}`\n"
+        f"- 清理结果：{sandbox_status}\n"
+        f"- 说明：{sandbox_cleanup_result.reason}\n"
+        f"- sandbox 目录：`{sandbox_cleanup_result.sandbox_dir or '无'}`\n"
     )
 
 
