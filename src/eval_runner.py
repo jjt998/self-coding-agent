@@ -12,6 +12,8 @@ from runner import execute_initial_run
 
 @dataclass(slots=True)
 class EvalExpectationSpec:
+    """保存单条 eval 任务对结果和过程的预期约束。"""
+
     passed: bool | None = None
     outcome: str | None = None
     min_step_count: int | None = None
@@ -25,27 +27,34 @@ class EvalExpectationSpec:
     failure_taxonomy: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        """把 expectation 对象转成普通字典，便于写入 summary。"""
         return asdict(self)
 
 
 @dataclass(slots=True)
 class EvalExpectationAssessment:
+    """保存一次实际运行和 expectation 对照后的命中结果。"""
+
     defined: bool = False
     matched: bool = True
     failed_fields: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        """把 expectation 对照结果转成普通字典。"""
         return asdict(self)
 
 
 @dataclass(slots=True)
 class EvalTaskSpec:
+    """描述一条批量评测任务，包括任务文本、类型和可选 expectation。"""
+
     name: str
     task: str
     task_type: str = "general"
     expectation: EvalExpectationSpec | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        """把任务定义转成普通字典，便于落盘或调试。"""
         data = asdict(self)
         data["expectation"] = self.expectation.to_dict() if self.expectation else None
         return data
@@ -53,6 +62,8 @@ class EvalTaskSpec:
 
 @dataclass(slots=True)
 class EvalRunResult:
+    """保存单条 eval task 实际跑出来的结果、过程指标和诊断信息。"""
+
     task_name: str
     run_id: str
     run_dir: str
@@ -79,6 +90,7 @@ class EvalRunResult:
     memory_strategy: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        """把单条运行结果转成普通字典，供 summary.json 直接使用。"""
         data = asdict(self)
         data["expectation"] = self.expectation.to_dict() if self.expectation else None
         data["expectation_result"] = self.expectation_result.to_dict() if self.expectation_result else None
@@ -87,6 +99,8 @@ class EvalRunResult:
 
 @dataclass(slots=True)
 class EvalBatchResult:
+    """保存一批 eval tasks 聚合后的结果、过程和诊断指标。"""
+
     eval_name: str
     task_count: int
     success_count: int
@@ -121,6 +135,7 @@ class EvalBatchResult:
     runs: list[EvalRunResult] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        """把 batch 结果转成普通字典，并把每条 run 一并展开。"""
         data = asdict(self)
         data["runs"] = [run.to_dict() for run in self.runs]
         return data
@@ -128,6 +143,8 @@ class EvalBatchResult:
 
 @dataclass(slots=True)
 class StrategySpec:
+    """描述一次策略对比中某个候选策略的关键维度。"""
+
     name: str
     config_name: str
     context_strategy: str
@@ -136,16 +153,20 @@ class StrategySpec:
     memory_strategy: str
 
     def to_dict(self) -> dict[str, Any]:
+        """把策略定义转成普通字典。"""
         return asdict(self)
 
 
 @dataclass(slots=True)
 class StrategyComparisonRun:
+    """把单个策略及其对应的 eval 汇总结果绑在一起。"""
+
     strategy: StrategySpec
     eval_dir: str
     summary: EvalBatchResult
 
     def to_dict(self) -> dict[str, Any]:
+        """把单个策略运行结果转成普通字典。"""
         return {
             "strategy": self.strategy.to_dict(),
             "eval_dir": self.eval_dir,
@@ -155,6 +176,8 @@ class StrategyComparisonRun:
 
 @dataclass(slots=True)
 class StrategyComparisonResult:
+    """保存整次策略对比的聚合结果、delta 和 task-level 差异。"""
+
     comparison_name: str
     task_file: str
     baseline_strategy: str
@@ -163,6 +186,7 @@ class StrategyComparisonResult:
     task_deltas: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, Any]:
+        """把策略对比结果转成普通字典。"""
         return {
             "comparison_name": self.comparison_name,
             "task_file": self.task_file,
@@ -174,6 +198,7 @@ class StrategyComparisonResult:
 
 
 def load_eval_task_specs(task_file: Path) -> list[EvalTaskSpec]:
+    """读取 eval 任务文件，并把原始 JSON 解析成结构化任务列表。"""
     raw_data = json.loads(task_file.read_text(encoding="utf-8"))
     raw_tasks = raw_data.get("tasks", [])
     if not isinstance(raw_tasks, list):
@@ -200,6 +225,7 @@ def load_eval_task_specs(task_file: Path) -> list[EvalTaskSpec]:
 
 
 def load_strategy_specs(strategy_names: list[str]) -> list[StrategySpec]:
+    """读取一组策略名，并补齐 comparison 里要展示的策略元数据。"""
     strategy_specs: list[StrategySpec] = []
     for raw_name in strategy_names:
         config_name = str(raw_name).strip()
@@ -225,6 +251,7 @@ def run_eval_batch(
     output_root: str,
     config_name: str,
 ) -> Path:
+    """按同一份任务文件批量执行 run，并产出 eval 级别的 JSON/Markdown 汇总。"""
     task_specs = load_eval_task_specs(task_file)
     eval_name = task_file.stem
     eval_dir = Path(output_root) / f"eval-{eval_name}"
@@ -235,6 +262,7 @@ def run_eval_batch(
     run_results: list[EvalRunResult] = []
     config_data = load_named_config(config_dir=Path("configs"), config_name=config_name)
     for task_spec in task_specs:
+        # 这里每条任务都走一遍统一 run 内核，避免 eval 和真实运行两套逻辑慢慢漂移。
         settings = build_settings(
             task=task_spec.task,
             task_type=task_spec.task_type,
@@ -263,6 +291,7 @@ def run_strategy_comparison(
     output_root: str,
     strategy_specs: list[StrategySpec],
 ) -> Path:
+    """对同一批任务重复执行多套策略，并产出 comparison 级别汇总。"""
     if not strategy_specs:
         raise ValueError("at least one strategy is required for comparison")
 
@@ -274,6 +303,7 @@ def run_strategy_comparison(
 
     strategy_runs: list[StrategyComparisonRun] = []
     for strategy in strategy_specs:
+        # 每个策略都单独跑自己的 eval 目录，这样后面做回放或追查差异时不会串在一起。
         strategy_root = strategies_root / strategy.name
         eval_dir = run_eval_batch(
             task_file=task_file,
@@ -307,9 +337,11 @@ def run_strategy_comparison(
 
 
 def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path) -> EvalRunResult:
+    """从单次 run 产物里回收过程证据，并整理成一条结构化 eval 结果。"""
     trace_events = _load_trace_events(run_dir / "trace.jsonl")
     config_snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
 
+    # 先把这次 run 里最关键的几个事件摘出来，后面的指标都从这里往下推导。
     verification_payload = _find_last_payload(trace_events, "verification_result")
     run_finished_payload = _find_last_payload(trace_events, "run_finished")
     context_snapshot_payload = _find_last_payload(trace_events, "context_snapshot")
@@ -327,6 +359,8 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
     stop_reason = str(stop_reason_dict.get("code", "unknown")).strip() or "unknown"
     stop_reason_details = stop_reason_dict.get("details", {})
     step_count = _normalize_optional_int((run_finished_payload or {}).get("step_count")) or 0
+
+    # 这些过程指标都不额外存一份，而是直接从 trace 事件里现算，保证口径一致。
     tool_call_count = sum(1 for event in trace_events if event.get("event_type") == "tool_called")
     verify_count = sum(
         1
@@ -344,20 +378,15 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
     reflect_triggered = bool(stop_reason_details.get("reflect_triggered")) or reflect_count > 0
     passed = bool((verification_payload or {}).get("passed"))
     verification_summary = str((verification_payload or {}).get("summary", "")).strip()
-    failure_taxonomy = _build_failure_taxonomy(
-        outcome=_classify_eval_outcome(
-            passed=passed,
-            stop_reason=stop_reason,
-            diagnostic_labels=diagnostic_labels,
-            failing_checks=failing_checks,
-        ),
-        stop_reason=stop_reason,
-        failing_checks=failing_checks,
-    )
     outcome = _classify_eval_outcome(
         passed=passed,
         stop_reason=stop_reason,
         diagnostic_labels=diagnostic_labels,
+        failing_checks=failing_checks,
+    )
+    failure_taxonomy = _build_failure_taxonomy(
+        outcome=outcome,
+        stop_reason=stop_reason,
         failing_checks=failing_checks,
     )
     expectation_result = _assess_expectation(
@@ -406,6 +435,7 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
 
 
 def _build_eval_batch_result(eval_name: str, run_results: list[EvalRunResult]) -> EvalBatchResult:
+    """把多条 run 结果聚合成一份 batch summary，供 JSON 和 Markdown 共用。"""
     task_count = len(run_results)
     success_count = sum(1 for item in run_results if item.passed)
     clean_pass_count = sum(1 for item in run_results if item.outcome == "passed_cleanly")
@@ -413,12 +443,15 @@ def _build_eval_batch_result(eval_name: str, run_results: list[EvalRunResult]) -
     verification_failure_count = sum(1 for item in run_results if item.outcome == "failed_verification")
     reflect_trigger_count = sum(1 for item in run_results if item.reflect_triggered)
 
+    # 这里按“结果层、expectation 层、诊断层”分别聚合，后面看 summary 时比较不容易混。
     outcome_counts = _count_values([item.outcome for item in run_results if item.outcome])
     expectation_defined_count = sum(
         1 for item in run_results if item.expectation_result and item.expectation_result.defined
     )
     expectation_matched_count = sum(
-        1 for item in run_results if item.expectation_result and item.expectation_result.defined and item.expectation_result.matched
+        1
+        for item in run_results
+        if item.expectation_result and item.expectation_result.defined and item.expectation_result.matched
     )
     expectation_failure_counts = _count_values(
         [
@@ -483,6 +516,7 @@ def _build_eval_batch_result(eval_name: str, run_results: list[EvalRunResult]) -
 
 
 def _build_eval_summary_markdown(task_file: Path, batch_result: EvalBatchResult) -> str:
+    """把 batch 结果整理成便于人直接阅读的 Markdown 汇总。"""
     run_lines: list[str] = []
     for item in batch_result.runs:
         line = (
@@ -549,6 +583,7 @@ def _build_strategy_comparison_result(
     task_file: Path,
     strategy_runs: list[StrategyComparisonRun],
 ) -> StrategyComparisonResult:
+    """把多套策略的 eval 汇总拼成一份 comparison 结果。"""
     if not strategy_runs:
         raise ValueError("strategy_runs cannot be empty")
 
@@ -556,6 +591,7 @@ def _build_strategy_comparison_result(
     deltas: list[dict[str, Any]] = []
     task_deltas: list[dict[str, Any]] = []
     for candidate in strategy_runs[1:]:
+        # comparison 一律相对首个 baseline 来算，避免两两互比后口径越来越乱。
         deltas.append(_build_strategy_delta(baseline, candidate))
         task_deltas.append(_build_strategy_task_delta(baseline, candidate))
 
@@ -573,6 +609,7 @@ def _build_strategy_delta(
     baseline: StrategyComparisonRun,
     candidate: StrategyComparisonRun,
 ) -> dict[str, Any]:
+    """计算 candidate 相对 baseline 的聚合指标差值。"""
     baseline_summary = baseline.summary
     candidate_summary = candidate.summary
     return {
@@ -616,6 +653,7 @@ def _build_strategy_delta(
 
 
 def _build_strategy_comparison_markdown(comparison_result: StrategyComparisonResult) -> str:
+    """把 comparison 结果整理成面向人的 Markdown 摘要。"""
     strategy_lines = [
         (
             f"- `{item.strategy.name}`"
@@ -693,6 +731,7 @@ def _build_strategy_task_delta(
     baseline: StrategyComparisonRun,
     candidate: StrategyComparisonRun,
 ) -> dict[str, Any]:
+    """把同名任务在两套策略下的差异展开成 task-level delta。"""
     baseline_runs = {item.task_name: item for item in baseline.summary.runs}
     candidate_runs = {item.task_name: item for item in candidate.summary.runs}
     task_names = sorted(set(baseline_runs) | set(candidate_runs))
@@ -704,6 +743,7 @@ def _build_strategy_task_delta(
         if not _task_delta_changed(baseline_run, candidate_run):
             continue
 
+        # 这里只保留真正发生变化的任务，避免 task_delta 被“全量重复抄写”淹没。
         tasks.append(
             {
                 "task_name": task_name,
@@ -756,6 +796,7 @@ def _build_strategy_task_delta(
 
 
 def _load_eval_batch_result(summary_path: Path) -> EvalBatchResult:
+    """从已经落盘的 summary.json 里恢复一份结构化 batch 结果。"""
     raw_data = json.loads(summary_path.read_text(encoding="utf-8"))
     run_results = [_load_eval_run_result(item) for item in raw_data.get("runs", [])]
     return EvalBatchResult(
@@ -795,6 +836,7 @@ def _load_eval_batch_result(summary_path: Path) -> EvalBatchResult:
 
 
 def _load_eval_run_result(raw_run: Any) -> EvalRunResult:
+    """把 summary.json 里的单条 run 记录恢复成 EvalRunResult。"""
     if not isinstance(raw_run, dict):
         raise ValueError("run item must be an object")
     return EvalRunResult(
@@ -826,12 +868,14 @@ def _load_eval_run_result(raw_run: Any) -> EvalRunResult:
 
 
 def _build_markdown_count_lines(counts: dict[str, int], empty_text: str) -> str:
+    """把计数型字典整理成 Markdown 列表。"""
     if not counts:
         return empty_text
     return "\n".join(f"- `{key}`: `{value}`" for key, value in sorted(counts.items()))
 
 
 def _build_verification_failure_lines(counts: dict[str, int]) -> str:
+    """把验证失败检查项整理成更适合人读的 Markdown 行。"""
     if not counts:
         return "- no verification failures"
     return "\n".join(f"- 失败检查 `{key}`: `{value}`" for key, value in sorted(counts.items()))
@@ -843,6 +887,7 @@ def _classify_eval_outcome(
     diagnostic_labels: list[str] | Any,
     failing_checks: list[str],
 ) -> str:
+    """给单条 run 一个稳定 outcome，便于后续聚合和 comparison。"""
     normalized_labels = _normalize_string_list(diagnostic_labels)
     if passed and not normalized_labels:
         return "passed_cleanly"
@@ -856,6 +901,7 @@ def _classify_eval_outcome(
 
 
 def _build_failure_taxonomy(outcome: str, stop_reason: str, failing_checks: list[str]) -> str | None:
+    """把失败进一步压成主 taxonomy key，方便做聚合统计。"""
     if outcome == "failed_verification":
         primary_check = failing_checks[0] if failing_checks else "unknown_check"
         return f"verification:{primary_check}"
@@ -872,6 +918,7 @@ def _build_failure_taxonomy_tags(
     failing_checks: list[str],
     diagnostic_labels: list[str],
 ) -> list[str]:
+    """把失败拆成多维标签，避免只看一个主 taxonomy 丢掉诊断细节。"""
     if outcome in {"passed_cleanly", "passed_with_warnings"}:
         return []
 
@@ -886,6 +933,7 @@ def _build_failure_taxonomy_tags(
 
 
 def _load_expectation_spec(raw_expectation: Any) -> EvalExpectationSpec | None:
+    """把任务文件里的 expectation 字段解析成结构化对象。"""
     if not isinstance(raw_expectation, dict):
         return None
     return EvalExpectationSpec(
@@ -904,6 +952,7 @@ def _load_expectation_spec(raw_expectation: Any) -> EvalExpectationSpec | None:
 
 
 def _load_expectation_assessment(raw_assessment: Any) -> EvalExpectationAssessment | None:
+    """把已经落盘的 expectation 对照结果恢复成结构化对象。"""
     if not isinstance(raw_assessment, dict):
         return None
     return EvalExpectationAssessment(
@@ -914,6 +963,7 @@ def _load_expectation_assessment(raw_assessment: Any) -> EvalExpectationAssessme
 
 
 def _normalize_string_list(raw_value: Any) -> list[str]:
+    """把任意输入收敛成干净字符串列表，避免 summary 里混入空值。"""
     if not isinstance(raw_value, list):
         return []
     normalized: list[str] = []
@@ -925,6 +975,7 @@ def _normalize_string_list(raw_value: Any) -> list[str]:
 
 
 def _normalize_optional_string(raw_value: Any) -> str | None:
+    """把可选字符串字段收敛成稳定值，不合法时返回 None。"""
     if raw_value is None or isinstance(raw_value, bool):
         return None
     text = str(raw_value).strip()
@@ -932,6 +983,7 @@ def _normalize_optional_string(raw_value: Any) -> str | None:
 
 
 def _normalize_optional_int(raw_value: Any) -> int | None:
+    """把可选整数断言收敛成 int，避免字符串和脏值直接流入逻辑。"""
     if raw_value is None or isinstance(raw_value, bool):
         return None
     if isinstance(raw_value, int):
@@ -945,6 +997,7 @@ def _normalize_optional_int(raw_value: Any) -> int | None:
 
 
 def _normalize_count_dict(raw_value: Any) -> dict[str, int]:
+    """把 summary.json 里的计数字典清洗成 `str -> int` 结构。"""
     if not isinstance(raw_value, dict):
         return {}
     normalized: dict[str, int] = {}
@@ -969,6 +1022,7 @@ def _assess_expectation(
     diagnostic_labels: list[str],
     failure_taxonomy: str | None,
 ) -> EvalExpectationAssessment:
+    """比较实际结果和 expectation，产出一份最小但够用的失配说明。"""
     if not expectation:
         return EvalExpectationAssessment(defined=False, matched=True)
 
@@ -988,6 +1042,7 @@ def _assess_expectation(
     if expectation.failure_taxonomy and expectation.failure_taxonomy != (failure_taxonomy or ""):
         failed_fields.append("failure_taxonomy")
 
+    # 这里把“必须出现”和“禁止出现”拆开判断，后面看 failed_fields 时更容易知道问题方向。
     failing_check_set = set(failing_checks)
     if any(check not in failing_check_set for check in expectation.required_failing_checks):
         failed_fields.append("required_failing_checks")
@@ -1008,6 +1063,7 @@ def _assess_expectation(
 
 
 def _extract_context_strategy(config_data: dict[str, Any]) -> str:
+    """从 config 中提取 context 策略名，缺省时回退到默认值。"""
     context_config = config_data.get("context", {})
     if not isinstance(context_config, dict):
         return "file_recall_context"
@@ -1016,6 +1072,7 @@ def _extract_context_strategy(config_data: dict[str, Any]) -> str:
 
 
 def _extract_reflect_strategy(config_data: dict[str, Any]) -> str:
+    """从 config 中提取 reflect 策略名，缺省时回退到默认值。"""
     reflect_config = config_data.get("reflect", {})
     if not isinstance(reflect_config, dict):
         return "low_progress_plus_verify_reflect"
@@ -1024,6 +1081,7 @@ def _extract_reflect_strategy(config_data: dict[str, Any]) -> str:
 
 
 def _extract_memory_enabled(config_data: dict[str, Any]) -> bool:
+    """从 config 中提取 memory 是否启用。"""
     memory_config = config_data.get("memory", {})
     if not isinstance(memory_config, dict):
         return False
@@ -1031,10 +1089,12 @@ def _extract_memory_enabled(config_data: dict[str, Any]) -> bool:
 
 
 def _extract_memory_strategy(config_data: dict[str, Any]) -> str:
+    """把 memory 开关收敛成 comparison 里更容易看的策略名。"""
     return "structured_memory_on" if _extract_memory_enabled(config_data) else "memory_off"
 
 
 def _build_count_delta(baseline_counts: dict[str, int], candidate_counts: dict[str, int]) -> dict[str, int]:
+    """计算两个计数字典的差值，只保留真正有变化的键。"""
     all_keys = sorted(set(baseline_counts) | set(candidate_counts))
     delta: dict[str, int] = {}
     for key in all_keys:
@@ -1045,12 +1105,14 @@ def _build_count_delta(baseline_counts: dict[str, int], candidate_counts: dict[s
 
 
 def _format_count_delta(count_delta: dict[str, int]) -> str:
+    """把计数差值格式化成一行短文本，方便塞进 Markdown summary。"""
     if not count_delta:
         return "none"
     return ", ".join(f"{key}: {value:+d}" for key, value in sorted(count_delta.items()))
 
 
 def _count_values(values: list[str]) -> dict[str, int]:
+    """统计字符串列表里每个值出现的次数。"""
     counts: dict[str, int] = {}
     for value in values:
         counts[value] = counts.get(value, 0) + 1
@@ -1058,6 +1120,7 @@ def _count_values(values: list[str]) -> dict[str, int]:
 
 
 def _task_delta_changed(baseline_run: EvalRunResult | None, candidate_run: EvalRunResult | None) -> bool:
+    """判断某条任务在两套策略下是否真的发生了值得展示的变化。"""
     if baseline_run is None or candidate_run is None:
         return True
     return any(
@@ -1077,6 +1140,7 @@ def _task_delta_changed(baseline_run: EvalRunResult | None, candidate_run: EvalR
 
 
 def _load_trace_events(trace_path: Path) -> list[dict[str, Any]]:
+    """读取 trace.jsonl，并按事件列表返回。"""
     if not trace_path.exists():
         return []
     events: list[dict[str, Any]] = []
@@ -1089,6 +1153,7 @@ def _load_trace_events(trace_path: Path) -> list[dict[str, Any]]:
 
 
 def _find_last_payload(events: list[dict[str, Any]], event_type: str) -> dict[str, Any]:
+    """从事件列表里倒序找最后一个同类型事件的 payload。"""
     for event in reversed(events):
         if event.get("event_type") == event_type:
             payload = event.get("payload", {})

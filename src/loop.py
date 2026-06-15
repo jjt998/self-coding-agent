@@ -13,7 +13,7 @@ from verify import VerificationResult, build_phase_4_verification
 
 
 class AgentState(str, Enum):
-    """定义基线状态机里会经过的核心状态。"""
+    """定义最小状态机里会经过的核心阶段，方便 trace 和控制流共享同一套名字。"""
 
     INGEST = "ingest"
     ANALYZE = "analyze"
@@ -35,14 +35,14 @@ class StopReasonCode(str, Enum):
 
 @dataclass(slots=True)
 class StopReason:
-    """保存一次 run 结束原因及补充说明。"""
+    """保存一次 run 为什么结束，以及补充说明细节。"""
 
     code: StopReasonCode
     message: str
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """把停止原因转换成便于写入 trace 的字典。"""
+        """把停止原因转成普通字典，方便写进 trace。"""
         data = asdict(self)
         data["code"] = self.code.value
         return data
@@ -50,7 +50,7 @@ class StopReason:
 
 @dataclass(slots=True)
 class RuntimeState:
-    """保存状态机运行中的阶段、步数和停止信息。"""
+    """保存状态机运行过程中的进度、上下文、工具结果和最终验证结果。"""
 
     task: str
     task_type: str
@@ -66,21 +66,21 @@ class RuntimeState:
     stop_reason: StopReason | None = None
 
     def mark_completed(self, state: AgentState) -> None:
-        """记录某个状态已经完成，并推进步数。"""
+        """记录某个状态已经执行完，并推进总步数。"""
         self.completed_states.append(state.value)
         self.current_state = state.value
         self.step_count += 1
 
 
 class LoopOrchestrator:
-    """按固定顺序驱动最小状态机 loop 的执行。"""
+    """按固定顺序驱动最小状态机，让一次 run 能留下完整可检查的过程证据。"""
 
     def __init__(self, trace_writer: TraceWriter) -> None:
-        """接收 trace writer，供 loop 过程持续记证。"""
+        """接收 trace writer，保证 loop 每个关键节点都能落进 trace。"""
         self.trace_writer = trace_writer
 
     def run(self, settings: RunSettings, config_data: dict[str, Any]) -> RuntimeState:
-        """执行一条最小 stub 状态链路并返回最终运行态。"""
+        """执行一条最小 stub 状态链路，并返回最终运行态。"""
         runtime_state = RuntimeState(task=settings.task, task_type=settings.task_type)
         reflect_strategy = self._get_reflect_strategy(config_data=config_data)
         context_builder = ContextBuilder(
@@ -127,6 +127,7 @@ class LoopOrchestrator:
                 )
             )
 
+            # 每次状态完成后都检查一次是否需要补插 reflect，这样不同策略只改这里一处就够了。
             self._maybe_schedule_reflect(
                 state=state,
                 runtime_state=runtime_state,
@@ -193,12 +194,13 @@ class LoopOrchestrator:
             and not runtime_state.verification_result.passed
             and reflect_strategy in {"verify_failure_only_reflect", "low_progress_plus_verify_reflect"}
         ):
+            # 这里把“验证失败后补反思”单独收口，便于比较不同 reflect 策略的代价和收益。
             runtime_state.reflect_triggered = True
             runtime_state.reflect_trigger_reason = "verification_failed"
             planned_states.insert(insert_at, AgentState.REFLECT)
 
     def _transition(self, runtime_state: RuntimeState, to_state: AgentState, reason: str) -> None:
-        """写入状态迁移事件，并更新当前状态指针。"""
+        """写入状态迁移事件，并同步更新当前状态指针。"""
         self.trace_writer.write_event(
             TraceEvent(
                 event_type="state_transitioned",
@@ -220,8 +222,8 @@ class LoopOrchestrator:
         memory_manager: RuntimeMemoryManager,
         tool_runner: CoreToolRunner,
     ) -> dict[str, Any]:
-        """为当前阶段生成占位结果，先把控制面和 trace 结构跑通。"""
-        # 这里故意把每个状态的产出写成结构化占位结果，后面接模型和工具时可以渐进替换。
+        """执行当前阶段的最小占位逻辑，重点是把过程证据写完整。"""
+        # 这里故意把每个阶段都写成结构化返回值，后面替换成真实 agent 行为时不必重做 trace 结构。
         if state is AgentState.INGEST:
             return {
                 "summary": "已接收任务输入。",
@@ -275,6 +277,7 @@ class LoopOrchestrator:
                         },
                     )
                 )
+
             runtime_state.context_snapshot = context_builder.build_context_snapshot(
                 task=runtime_state.task,
                 task_type=runtime_state.task_type,
@@ -322,8 +325,8 @@ class LoopOrchestrator:
             }
         if state is AgentState.REFLECT:
             return {
-                "summary": "因无进展触发一次占位 reflect。",
-                "trigger": "no_progress_after_observe",
+                "summary": "已按策略插入一次 reflect。",
+                "trigger": runtime_state.reflect_trigger_reason or "unknown",
             }
         if state is AgentState.VERIFY:
             verification_result = build_phase_4_verification(runtime_state.tool_executions)
@@ -346,7 +349,7 @@ class LoopOrchestrator:
         }
 
     def _run_phase_3_tools(self, tool_runner: CoreToolRunner, task: str) -> list[ToolExecution]:
-        """执行 Phase 3 的受控工具序列，并把调用前后都写入 trace。"""
+        """执行 Phase 3 的受控工具序列，并把调用前后都写进 trace。"""
         executions: list[ToolExecution] = []
         for tool_name, tool_input in build_phase_3_tool_sequence(task=task):
             self.trace_writer.write_event(
