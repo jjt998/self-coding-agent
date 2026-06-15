@@ -59,12 +59,13 @@
     - `candidate_run_dir`
   - comparison markdown 中的 `Task Delta` 展示
   - `src/eval_runner.py` 重建与回归恢复
-  - 实验套件 runner 与 CLI `--experiment-suite-file`
-  - `experiment_suites/first_batch.json` 首批实验清单
-  - `eval_tasks/sample_batch.json` 已升级为覆盖五类任务的固定研究任务集
-  - 自动化验收：`python -m pytest -q` 通过，结果为 `21 passed`
+  - 自动化验收：`python -m pytest -q` 通过，结果为 `18 passed`
 
 ## 下一步
 
-- 直接执行 `experiment_suites/first_batch.json`，沉淀首批真实实验结果。
+- 开始执行第一批真实策略实验，沉淀首批基线结果。
+- 优先实验：
+  - `naive_recent_context` vs `file_recall_context`
+  - `memory_off` vs `structured_memory_on`
+  - `verify_failure_only_reflect` vs `low_progress_plus_verify_reflect`
 - 根据实验结果决定下一轮要不要继续细化 comparison 指标或扩展新策略维度。

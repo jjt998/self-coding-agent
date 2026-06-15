@@ -1,8 +1,8 @@
 {
   "tasks": [
     {
-      "name": "general_scaffold",
-      "task": "创建脚手架",
+      "name": "general_run_artifact_audit",
+      "task": "梳理最小运行链路，确认 run 目录、trace、report 和 config snapshot 这些基础产物是否完整可查。",
       "task_type": "general",
       "expectation": {
         "passed": true,
@@ -17,9 +17,46 @@
       }
     },
     {
-      "name": "bug_fix_fail",
-      "task": "修复 fail 错误",
+      "name": "bug_fix_fail_regression",
+      "task": "定位并修复 fail to load data 相关问题，优先检查 app.py、tests/test_app.py 和验证链路之间的关系。",
       "task_type": "bug_fix",
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "max_step_count": 12,
+        "max_tool_call_count": 8
+      }
+    },
+    {
+      "name": "code_understanding_context_flow",
+      "task": "解释 analyze 阶段如何构建 context_snapshot，并说明这份上下文如何进入 trace 和最终 report。",
+      "task_type": "code_understanding",
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_step_count": 1,
+        "min_tool_call_count": 1,
+        "forbidden_diagnostic_labels": [
+          "memory_conflict",
+          "memory_pollution"
+        ]
+      }
+    },
+    {
+      "name": "test_generation_comparison_guard",
+      "task": "为策略对比或实验套件补一个聚焦测试，优先覆盖 summary 字段、任务级 delta 或路径解析边界。",
+      "task_type": "test_generation",
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "max_step_count": 12,
+        "min_tool_call_count": 1
+      }
+    },
+    {
+      "name": "refactor_eval_summary_cleanup",
+      "task": "在不改变行为和 summary 字段的前提下整理 eval 或 comparison 汇总代码，减少重复并保持输出稳定。",
+      "task_type": "refactor",
       "expectation": {
         "passed": true,
         "outcome": "passed_cleanly",

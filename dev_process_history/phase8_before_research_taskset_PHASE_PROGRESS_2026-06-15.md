@@ -61,10 +61,10 @@
   - `src/eval_runner.py` 重建与回归恢复
   - 实验套件 runner 与 CLI `--experiment-suite-file`
   - `experiment_suites/first_batch.json` 首批实验清单
-  - `eval_tasks/sample_batch.json` 已升级为覆盖五类任务的固定研究任务集
-  - 自动化验收：`python -m pytest -q` 通过，结果为 `21 passed`
+  - 自动化验收：`python -m pytest -q` 通过，结果为 `20 passed`
 
 ## 下一步
 
 - 直接执行 `experiment_suites/first_batch.json`，沉淀首批真实实验结果。
+- 为第一批实验补充更稳定、更多样的固定任务集。
 - 根据实验结果决定下一轮要不要继续细化 comparison 指标或扩展新策略维度。

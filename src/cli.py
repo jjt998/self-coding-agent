@@ -5,6 +5,7 @@ from pathlib import Path
 
 from config import build_settings, load_named_config
 from eval_runner import load_strategy_specs, run_eval_batch, run_strategy_comparison
+from experiment_runner import run_experiment_suite
 from runner import execute_initial_run
 
 
@@ -21,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", default="runs", help="运行产物输出目录。")
     parser.add_argument("--config-name", default="default", help="configs 目录下使用的配置名。")
     parser.add_argument("--eval-task-file", help="批量评测任务文件路径。")
+    parser.add_argument("--experiment-suite-file", help="实验套件文件路径，用于一键执行一组策略对比。")
     parser.add_argument(
         "--compare-strategies",
         help="按逗号分隔的 config 名列表；提供后会对同一批任务执行策略对比。",
@@ -33,6 +35,16 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     config_dir = Path("configs")
+
+    if args.experiment_suite_file:
+        # 实验套件入口用于执行一组固定实验，避免每次都手工拼三四条 comparison 命令。
+        suite_dir = run_experiment_suite(
+            suite_file=Path(args.experiment_suite_file),
+            repo_root=args.repo_root,
+            output_root=args.output_root,
+        )
+        print(f"已完成实验套件运行，产物目录：{suite_dir}")
+        return 0
 
     if args.eval_task_file:
         if args.compare_strategies:
@@ -58,7 +70,7 @@ def main() -> int:
         return 0
 
     if not args.task:
-        parser.error("未提供 --task 时，必须提供 --eval-task-file。")
+        parser.error("未提供 --task 时，必须提供 --eval-task-file 或 --experiment-suite-file。")
 
     # 先把 CLI 输入整理成统一 settings，避免单次 run 入口和后续调用层耦合得过深。
     settings = build_settings(
