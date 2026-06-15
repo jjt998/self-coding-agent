@@ -7,14 +7,8 @@
     "max_steps": 1,
     "trace_level": "standard"
   },
-  "context": {
-    "strategy": "file_recall_context"
-  },
-  "reflect": {
-    "strategy": "low_progress_plus_verify_reflect"
-  },
   "memory": {
-    "enabled": true,
+    "enabled": false,
     "weak_conflict_penalty": 3,
     "summary_max_length": 80
   }

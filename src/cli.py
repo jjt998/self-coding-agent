@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from config import build_settings, load_named_config
-from eval_runner import run_eval_batch
+from eval_runner import load_strategy_specs, run_eval_batch, run_strategy_comparison
 from runner import execute_initial_run
 
 
@@ -21,6 +21,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", default="runs", help="run 产物输出目录。")
     parser.add_argument("--config-name", default="default", help="configs 目录下使用的配置名。")
     parser.add_argument("--eval-task-file", help="批量评测任务文件路径。")
+    parser.add_argument(
+        "--compare-strategies",
+        help="按逗号分隔的 config 名列表；提供后会对同一批任务执行策略对比。",
+    )
     return parser
 
 
@@ -31,6 +35,17 @@ def main() -> int:
     config_dir = Path("configs")
 
     if args.eval_task_file:
+        if args.compare_strategies:
+            strategy_specs = load_strategy_specs(args.compare_strategies.split(","))
+            comparison_dir = run_strategy_comparison(
+                task_file=Path(args.eval_task_file),
+                repo_root=args.repo_root,
+                output_root=args.output_root,
+                strategy_specs=strategy_specs,
+            )
+            print(f"已完成最小 strategy comparison，产物目录：{comparison_dir}")
+            return 0
+
         eval_dir = run_eval_batch(
             task_file=Path(args.eval_task_file),
             repo_root=args.repo_root,

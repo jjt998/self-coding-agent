@@ -258,6 +258,125 @@ def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path)
     assert "写入状态：已写入" in report_text
 
 
+def test_cli_does_not_trigger_reflect_when_strategy_is_verify_failure_only(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text(
+        "# 项目说明\n\n这里用于验证 reflect 触发策略。\n",
+        encoding="utf-8",
+    )
+    (repo_root / "app.py").write_text(
+        "def helper():\n    return 'ok'\n",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--task",
+        "检查 reflect 策略",
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+        "--config-name",
+        "verify_failure_only_reflect",
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    run_dir = list(output_root.iterdir())[0]
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    transition_targets = [
+        event["payload"]["to_state"]
+        for event in trace_events
+        if event["event_type"] == "state_transitioned"
+    ]
+    assert transition_targets == [
+        "ingest",
+        "analyze",
+        "plan",
+        "act",
+        "observe",
+        "verify",
+        "finalize",
+    ]
+
+    run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
+    assert run_finished_payload["stop_reason"]["details"]["reflect_triggered"] is False
+    assert run_finished_payload["stop_reason"]["details"]["reflect_trigger_reason"] == ""
+
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "reflect：未触发" in report_text
+
+
+def test_cli_uses_naive_recent_context_strategy_from_config(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    file_specs = [
+        ("README.md", "# 项目说明\n\n最早写入的说明文件。\n", 1_700_000_001),
+        ("app.py", "def helper():\n    return 'app'\n", 1_700_000_002),
+        ("notes.md", "# 临时笔记\n\n第二新的文本文件。\n", 1_700_000_003),
+        ("latest.txt", "这是最后更新的文件。\n", 1_700_000_004),
+    ]
+    for file_name, content, timestamp in file_specs:
+        file_path = repo_root / file_name
+        file_path.write_text(content, encoding="utf-8")
+        os.utime(file_path, (timestamp, timestamp))
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--task",
+        "查看最近改动的上下文文件",
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+        "--config-name",
+        "naive_recent_context",
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    run_dir = list(output_root.iterdir())[0]
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
+    assert context_payload["repo_context"]["recall_strategy"] == "优先最近修改的文本文件（naive_recent_context）"
+
+    selected_files = context_payload["repo_context"]["selected_files"]
+    selected_paths = [item["path"] for item in selected_files]
+    assert selected_paths == ["latest.txt", "notes.md", "app.py"]
+    assert "README.md" not in selected_paths
+    assert selected_files[0]["reason"] == "当前使用 naive recent context，按最近修改时间选中第 1 个文件。"
+    assert selected_files[1]["reason"] == "当前使用 naive recent context，按最近修改时间选中第 2 个文件。"
+    assert selected_files[2]["reason"] == "当前使用 naive recent context，按最近修改时间选中第 3 个文件。"
+
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "优先最近修改的文本文件（naive_recent_context）" in report_text
+    assert "`latest.txt`" in report_text
+    assert "`notes.md`" in report_text
+    assert "`app.py`" in report_text
+
+
 def test_cli_reads_long_term_memory_with_task_type_keyword_and_path_filters(tmp_path: Path) -> None:
     output_root = tmp_path / "runs"
     repo_root = tmp_path / "repo"

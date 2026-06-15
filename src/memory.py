@@ -94,6 +94,8 @@ class RuntimeMemoryManager:
         self.repo_root = Path(repo_root).resolve()
         self.long_term_store = LongTermMemoryStore(repo_root=str(self.repo_root))
         self.strategy_config = strategy_config or {}
+        # Phase 8 先补最小策略开关，让 eval 可以直接比较 memory on/off。
+        self.enabled = bool(self.strategy_config.get("enabled", True))
         self.weak_conflict_penalty = int(self.strategy_config.get("weak_conflict_penalty", 3))
         self.summary_max_length = int(self.strategy_config.get("summary_max_length", 80))
 
@@ -105,6 +107,9 @@ class RuntimeMemoryManager:
 
     def search(self, task: str, task_type: str) -> MemorySearchResult:
         """返回运行时规则和长期 memory 的组合结果。"""
+        if not self.enabled:
+            return MemorySearchResult()
+
         normalized_task_type = task_type.strip().lower() or "general"
         runtime_entries: list[MemoryEntry] = []
 

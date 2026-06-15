@@ -59,6 +59,7 @@ class RuntimeState:
     step_count: int = 0
     no_progress_count: int = 0
     reflect_triggered: bool = False
+    reflect_trigger_reason: str = ""
     context_snapshot: ContextSnapshot | None = None
     tool_executions: list[ToolExecution] = field(default_factory=list)
     verification_result: VerificationResult | None = None
@@ -81,7 +82,11 @@ class LoopOrchestrator:
     def run(self, settings: RunSettings, config_data: dict[str, Any]) -> RuntimeState:
         """执行一条最小 stub 状态链路并返回最终运行态。"""
         runtime_state = RuntimeState(task=settings.task, task_type=settings.task_type)
-        context_builder = ContextBuilder(repo_root=settings.repo_root)
+        reflect_strategy = self._get_reflect_strategy(config_data=config_data)
+        context_builder = ContextBuilder(
+            repo_root=settings.repo_root,
+            strategy_config=config_data.get("context", {}),
+        )
         memory_manager = RuntimeMemoryManager(
             repo_root=settings.repo_root,
             strategy_config=config_data.get("memory", {}),
@@ -122,11 +127,13 @@ class LoopOrchestrator:
                 )
             )
 
-            if state is AgentState.OBSERVE and not runtime_state.reflect_triggered:
-                # Phase 2 先用“observe 没看到真实进展”来触发一次 reflect，占住条件反思的控制面。
-                runtime_state.no_progress_count += 1
-                runtime_state.reflect_triggered = True
-                planned_states.insert(index + 1, AgentState.REFLECT)
+            self._maybe_schedule_reflect(
+                state=state,
+                runtime_state=runtime_state,
+                planned_states=planned_states,
+                insert_at=index + 1,
+                reflect_strategy=reflect_strategy,
+            )
 
             index += 1
 
@@ -136,6 +143,7 @@ class LoopOrchestrator:
             details={
                 "completed_states": runtime_state.completed_states,
                 "reflect_triggered": runtime_state.reflect_triggered,
+                "reflect_trigger_reason": runtime_state.reflect_trigger_reason,
                 "verification_passed": runtime_state.verification_result.passed if runtime_state.verification_result else False,
             },
         )
@@ -150,6 +158,44 @@ class LoopOrchestrator:
             )
         )
         return runtime_state
+
+    def _get_reflect_strategy(self, config_data: dict[str, Any]) -> str:
+        """从配置里读取当前 reflect 策略，缺省时回落到现有默认行为。"""
+        reflect_config = config_data.get("reflect", {})
+        if not isinstance(reflect_config, dict):
+            return "low_progress_plus_verify_reflect"
+        strategy = str(reflect_config.get("strategy", "low_progress_plus_verify_reflect")).strip()
+        return strategy or "low_progress_plus_verify_reflect"
+
+    def _maybe_schedule_reflect(
+        self,
+        state: AgentState,
+        runtime_state: RuntimeState,
+        planned_states: list[AgentState],
+        insert_at: int,
+        reflect_strategy: str,
+    ) -> None:
+        """根据当前 reflect 策略决定是否在后续流程中插入一次 reflect。"""
+        if runtime_state.reflect_triggered:
+            return
+
+        if state is AgentState.OBSERVE and reflect_strategy == "low_progress_plus_verify_reflect":
+            # 这里保留当前默认基线：当 observe 没看到真实进展时，先触发一次 reflect。
+            runtime_state.no_progress_count += 1
+            runtime_state.reflect_triggered = True
+            runtime_state.reflect_trigger_reason = "no_progress_after_observe"
+            planned_states.insert(insert_at, AgentState.REFLECT)
+            return
+
+        if (
+            state is AgentState.VERIFY
+            and runtime_state.verification_result
+            and not runtime_state.verification_result.passed
+            and reflect_strategy in {"verify_failure_only_reflect", "low_progress_plus_verify_reflect"}
+        ):
+            runtime_state.reflect_triggered = True
+            runtime_state.reflect_trigger_reason = "verification_failed"
+            planned_states.insert(insert_at, AgentState.REFLECT)
 
     def _transition(self, runtime_state: RuntimeState, to_state: AgentState, reason: str) -> None:
         """写入状态迁移事件，并更新当前状态指针。"""

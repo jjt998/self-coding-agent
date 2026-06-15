@@ -8,10 +8,7 @@
     "trace_level": "standard"
   },
   "context": {
-    "strategy": "file_recall_context"
-  },
-  "reflect": {
-    "strategy": "low_progress_plus_verify_reflect"
+    "strategy": "naive_recent_context"
   },
   "memory": {
     "enabled": true,

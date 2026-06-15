@@ -11,7 +11,7 @@
     "strategy": "file_recall_context"
   },
   "reflect": {
-    "strategy": "low_progress_plus_verify_reflect"
+    "strategy": "verify_failure_only_reflect"
   },
   "memory": {
     "enabled": true,

@@ -134,9 +134,11 @@ class ContextSnapshot:
 class ContextBuilder:
     """根据任务和仓库内容构建当前阶段可检查的最小上下文快照。"""
 
-    def __init__(self, repo_root: str) -> None:
+    def __init__(self, repo_root: str, strategy_config: dict[str, Any] | None = None) -> None:
         """绑定仓库根目录，后面统一从这里做文件召回。"""
         self.repo_root = Path(repo_root).resolve()
+        self.strategy_config = strategy_config or {}
+        self.strategy_name = str(self.strategy_config.get("strategy", "file_recall_context")).strip() or "file_recall_context"
         # 第一版先把裁剪规则固定成简单常量，后面更换策略时只改这里即可。
         self.original_line_limit = 40
         self.summary_line_limit = 8
@@ -203,6 +205,9 @@ class ContextBuilder:
 
     def _select_repo_files(self, task_keywords: list[str], task_type: str) -> tuple[list[FileContext], int]:
         """按最小规则从仓库里挑出值得放进上下文的文件。"""
+        if self.strategy_name == "naive_recent_context":
+            return self._select_recent_repo_files()
+
         candidate_files: list[FileContext] = []
         candidate_count = 0
         for path in sorted(self.repo_root.rglob("*")):
@@ -241,6 +246,44 @@ class ContextBuilder:
 
         candidate_files.sort(key=lambda item: (-item.score, item.path))
         return candidate_files[:3], candidate_count
+
+    def _select_recent_repo_files(self) -> tuple[list[FileContext], int]:
+        """按最近修改时间挑出文件，作为第一版 `naive_recent_context` 对照策略。"""
+        candidate_paths: list[Path] = []
+        for path in self.repo_root.rglob("*"):
+            if _is_text_file(path):
+                candidate_paths.append(path)
+
+        selected_files: list[FileContext] = []
+        sorted_paths = sorted(
+            candidate_paths,
+            key=lambda item: (-item.stat().st_mtime_ns, item.relative_to(self.repo_root).as_posix()),
+        )
+        for rank, path in enumerate(sorted_paths[:3], start=1):
+            relative_path = path.relative_to(self.repo_root).as_posix()
+            content = path.read_text(encoding="utf-8")
+            line_count = len(content.splitlines())
+            pseudo_score = 4 if line_count <= self.original_line_limit else 3
+            injection_mode = self._choose_injection_mode(content=content, score=pseudo_score)
+            injection_content, included_line_count, was_clipped = self._build_injection_content(
+                relative_path=relative_path,
+                content=content,
+                injection_mode=injection_mode,
+            )
+            selected_files.append(
+                FileContext(
+                    path=relative_path,
+                    injection_mode=injection_mode,
+                    reason=f"当前使用 naive recent context，按最近修改时间选中第 {rank} 个文件。",
+                    injection_content=injection_content,
+                    content_preview=self._build_content_preview(content=content),
+                    score=max(1, 4 - rank),
+                    total_line_count=line_count,
+                    included_line_count=included_line_count,
+                    was_clipped=was_clipped,
+                )
+            )
+        return selected_files, len(candidate_paths)
 
     def _score_file(
         self,
@@ -331,6 +374,9 @@ class ContextBuilder:
 
     def _describe_recall_strategy(self, task_type: str) -> str:
         """用一句白话说明当前任务类型使用的召回倾向。"""
+        if self.strategy_name == "naive_recent_context":
+            return "优先最近修改的文本文件（naive_recent_context）"
+
         normalized_task_type = task_type.lower()
         if normalized_task_type == "bug_fix":
             return "优先测试文件和相关代码文件"
