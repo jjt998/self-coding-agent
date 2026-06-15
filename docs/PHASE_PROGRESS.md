@@ -62,9 +62,11 @@
   - 实验套件 runner 与 CLI `--experiment-suite-file`
   - `experiment_suites/first_batch.json` 首批实验清单
   - `eval_tasks/sample_batch.json` 已升级为覆盖五类任务的固定研究任务集
+  - 已完成 `experiment_suites/first_batch.json` 首次实跑，产出第一版 baseline 结果目录
   - 自动化验收：`python -m pytest -q` 通过，结果为 `21 passed`
 
 ## 下一步
 
-- 直接执行 `experiment_suites/first_batch.json`，沉淀首批真实实验结果。
-- 根据实验结果决定下一轮要不要继续细化 comparison 指标或扩展新策略维度。
+- 基于首批结果补第二版固定任务集，重点增强 context 策略区分度。
+- 评估是否需要收紧默认 memory / reflect baseline，减少当前已暴露出的稳定噪声和额外步骤。
+- 根据第二轮实验结果决定下一轮要不要继续细化 comparison 指标或扩展新策略维度。
