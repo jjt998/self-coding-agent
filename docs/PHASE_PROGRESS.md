@@ -77,12 +77,14 @@
   - `src/loop.py` 仍依赖 `_run_stub_state`
   - `src/tools.py` 仍依赖固定 `build_phase_3_tool_sequence()`
   - `src/verify.py` 仍是 `agent_notes.md` 演示验证
+  - 当前还缺少真实模型/策略决策层本体，尚未接入真正的任务级模型决策、工具选择与步骤推进回路
   - eval task schema 尚未承载 sandbox / setup / verify / pass criteria
 - 下一步实现顺序建议：
   1. 定义真实任务最小 schema。
   2. 落地每题独立 sandbox 目录。
-  3. 重写任务级 verify。
-  4. 把 loop 从 stub 逐步替换为真实求解链路。
+ 3. 接入真实模型/策略决策层本体。
+ 4. 重写任务级 verify。
+ 5. 把 loop 从 stub 逐步替换为真实求解链路。
 
 ## 下一步
 
