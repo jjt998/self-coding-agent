@@ -1,0 +1,31 @@
+{
+  "tasks": [
+    {
+      "name": "general_scaffold",
+      "task": "创建脚手架",
+      "task_type": "general",
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_step_count": 1,
+        "min_tool_call_count": 1,
+        "forbidden_diagnostic_labels": [
+          "memory_conflict_warning",
+          "memory_conflict",
+          "memory_pollution"
+        ]
+      }
+    },
+    {
+      "name": "bug_fix_fail",
+      "task": "修复 fail 错误",
+      "task_type": "bug_fix",
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "max_step_count": 12,
+        "max_tool_call_count": 8
+      }
+    }
+  ]
+}

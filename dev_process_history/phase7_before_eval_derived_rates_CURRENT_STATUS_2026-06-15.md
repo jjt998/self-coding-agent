@@ -70,8 +70,6 @@
 - 已把 failure taxonomy 从单一 primary key 扩展成多维 `failure_taxonomy_tags`，当前会保留 outcome、stop reason、失败检查项数量、每个失败检查项与诊断标签等维度。
 - batch summary 现在会同时输出 `failure_taxonomy_counts` 和 `failure_taxonomy_tag_counts`，既保留兼容用的主分类，也能按细粒度标签聚合排查。
 - Markdown summary 已增加 `Failure Taxonomy Tags` 小节，运行明细里也会展示单条 run 的 taxonomy tags。
-- 已增加 eval 批量派生指标，当前 summary 会直接输出 `failure_rate`、`clean_pass_rate`、`warning_rate`、`verification_failure_rate` 与 `expectation_miss_rate`。
-- Markdown summary 现在会展示失败率、干净成功率、警告率、验证失败率和 expectation 失配率，便于快速判断一批任务的健康度。
 
 ## 已完成
 
@@ -166,19 +164,16 @@
 - 完成 failure taxonomy tags 第一版多维分类。
 - 完成多维 taxonomy 聚合统计与 Markdown summary 展示。
 - 完成 `Phase 7` 的第五轮 eval taxonomy 自动化测试扩展。
-- 完成 eval 批量派生 rate 指标。
-- 完成派生 rate 指标的 JSON summary 与 Markdown summary 展示。
-- 完成 `Phase 7` 的第六轮 eval derived metrics 自动化测试扩展。
 
 ## 进行中
 
-- 继续推进 `Phase 7`，下一步评估是否把 taxonomy tags 按 result/process/diagnostic 分组展示，或开始进入 `Phase 8` 策略对比准备。
+- 继续推进 `Phase 7`，下一步评估是否补 warning rate、verification failure rate 等批量派生指标。
 
 ## 下一步明确动作
 
 - 评估是否需要让 expectation 继续支持验证通过检查项、stop reason 或 warning rate 等更细断言。
+- 评估是否需要增加 warning rate、verification failure rate 等更细的批量指标。
 - 评估是否需要把 taxonomy tags 按 result/process/diagnostic 三类分组展示，避免 summary 后续过长。
-- 评估 `Phase 7` 是否已经满足 MVP 验收，可以开始 `Phase 8` strategy configs。
 
 ## 当前阻塞
 

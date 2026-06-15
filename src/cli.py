@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from config import build_settings, load_named_config
+from eval_runner import run_eval_batch
 from runner import execute_initial_run
 
 
@@ -14,11 +15,12 @@ def build_parser() -> argparse.ArgumentParser:
         prog="self-coding-agent",
         description="运行 self-coding-agent 的最小状态机实验流程。",
     )
-    parser.add_argument("--task", required=True, help="本次 run 的任务描述。")
+    parser.add_argument("--task", help="本次 run 的任务描述。")
     parser.add_argument("--task-type", default="general", help="任务类型标签。")
     parser.add_argument("--repo-root", default=".", help="目标仓库根目录。")
     parser.add_argument("--output-root", default="runs", help="run 产物输出目录。")
     parser.add_argument("--config-name", default="default", help="configs 目录下使用的配置名。")
+    parser.add_argument("--eval-task-file", help="批量评测任务文件路径。")
     return parser
 
 
@@ -26,6 +28,20 @@ def main() -> int:
     """解析命令行参数并启动一次最小 agent run。"""
     parser = build_parser()
     args = parser.parse_args()
+    config_dir = Path("configs")
+
+    if args.eval_task_file:
+        eval_dir = run_eval_batch(
+            task_file=Path(args.eval_task_file),
+            repo_root=args.repo_root,
+            output_root=args.output_root,
+            config_name=args.config_name,
+        )
+        print(f"已完成最小 eval 运行，产物目录：{eval_dir}")
+        return 0
+
+    if not args.task:
+        parser.error("未提供 --task 时，必须提供 --eval-task-file。")
 
     # 先把命令行参数整理成结构化 settings，后面扩展字段时可以少改调用链。
     settings = build_settings(
@@ -35,7 +51,6 @@ def main() -> int:
         output_root=args.output_root,
         config_name=args.config_name,
     )
-    config_dir = Path("configs")
     config_data = load_named_config(config_dir=config_dir, config_name=args.config_name)
     run_dir = execute_initial_run(settings=settings, config_data=config_data)
 

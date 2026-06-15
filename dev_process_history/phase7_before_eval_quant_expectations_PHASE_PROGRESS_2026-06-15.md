@@ -2,7 +2,7 @@
 
 ## 总览
 
-- 最后更新时间：2026-06-15
+- 最后更新时间：2026-06-14
 - 当前激活阶段：`Phase 7：Eval`
 - 补充说明：`docs/SESSION_ENTRY.md` 已增加项目级行为约束，后续会话默认按第一性原理、根因优先和高信号输出执行。
 
@@ -171,22 +171,15 @@
   - 为单条 run 增加 `expectation_result`，记录 expectation 是否命中以及失配字段
   - 在 eval summary 中增加 expectation 定义数、命中数、失配数与失配字段统计
   - 更新 `eval_tasks/sample_batch.json`，提供 expectation 写法样例
-  - 扩展 expectation 断言范围，支持步数区间、工具调用区间、必需/禁止失败检查项
-  - 修正 expectation 可选字符串字段的解析边界，避免 `None` 被收敛成字符串
-  - 扩展 failure taxonomy，新增 `failure_taxonomy_tags` 多维标签
-  - 在 eval summary 中增加 `failure_taxonomy_tag_counts` 聚合与 `Failure Taxonomy Tags` 展示
-  - 增加批量派生 rate 指标：`failure_rate`、`clean_pass_rate`、`warning_rate`、`verification_failure_rate`、`expectation_miss_rate`
-  - 在 JSON summary 与 Markdown summary 中展示派生 rate 指标
 - 剩余：
-  - 评估是否把 expectation 继续扩展到验证通过检查项、stop reason 或 warning rate
-  - 评估是否把 taxonomy tags 按 result/process/diagnostic 分组展示
-  - 评估是否进入 `Phase 8` 策略对比准备
+  - 评估是否把当前 failure taxonomy 从首个失败检查项扩展到多维组合
+  - 评估是否把 expectation 扩展到步数、工具调用数或验证检查级别
 - 验收：
   - 固定任务集可以批量运行，并输出聚合指标。
 - 备注：
   - 必须同时覆盖 result、process、diagnostic 三类指标。
-  - 当前 diagnostics 已能区分“干净成功”“带警告成功”和“真正失败”，taxonomy 已从单一主分类扩展为主分类加多维标签。
-  - 当前 expectation 已能覆盖部分过程指标，但仍以轻量规则断言为主，不追求复杂 DSL。
+  - 当前 diagnostics 已能区分“干净成功”“带警告成功”和“真正失败”，但 taxonomy 仍保持 MVP 级简化。
+  - 当前 expectation 先聚焦结果层对照，不直接断言中间过程细节。
 
 ## Phase 8：策略对比
 

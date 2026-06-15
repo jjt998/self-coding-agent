@@ -1,0 +1,23 @@
+{
+  "task": "跑整个阶段七",
+  "task_type": "general",
+  "repo_root": "D:\\1technical_stack_study\\agent_study\\agent_projects\\self-coding-agent",
+  "output_root": "runs",
+  "config_name": "default",
+  "run_id": "run-20260615-144101-0453b686",
+  "created_at": "2026-06-15T06:41:01+00:00",
+  "config": {
+    "model": {
+      "provider": "stub",
+      "name": "phase-1-placeholder"
+    },
+    "runtime": {
+      "max_steps": 1,
+      "trace_level": "standard"
+    },
+    "memory": {
+      "weak_conflict_penalty": 3,
+      "summary_max_length": 80
+    }
+  }
+}

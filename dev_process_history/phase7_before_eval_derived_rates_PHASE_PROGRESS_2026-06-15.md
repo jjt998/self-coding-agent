@@ -175,12 +175,10 @@
   - 修正 expectation 可选字符串字段的解析边界，避免 `None` 被收敛成字符串
   - 扩展 failure taxonomy，新增 `failure_taxonomy_tags` 多维标签
   - 在 eval summary 中增加 `failure_taxonomy_tag_counts` 聚合与 `Failure Taxonomy Tags` 展示
-  - 增加批量派生 rate 指标：`failure_rate`、`clean_pass_rate`、`warning_rate`、`verification_failure_rate`、`expectation_miss_rate`
-  - 在 JSON summary 与 Markdown summary 中展示派生 rate 指标
 - 剩余：
   - 评估是否把 expectation 继续扩展到验证通过检查项、stop reason 或 warning rate
+  - 评估是否增加 warning rate、verification failure rate 等批量派生指标
   - 评估是否把 taxonomy tags 按 result/process/diagnostic 分组展示
-  - 评估是否进入 `Phase 8` 策略对比准备
 - 验收：
   - 固定任务集可以批量运行，并输出聚合指标。
 - 备注：

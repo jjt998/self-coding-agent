@@ -67,11 +67,6 @@
 - 已把 expectation 扩展到更细粒度断言，当前支持 `min_step_count`、`max_step_count`、`min_tool_call_count`、`max_tool_call_count`、`required_failing_checks` 与 `forbidden_failing_checks`。
 - eval task 现在不只可断言“结果像不像”，也能断言“过程有没有落在合理区间内”，例如步数过多、工具调用过多或失败检查项不符合预期时会直接记为 expectation miss。
 - 已修正 expectation 解析边界，当前不会再把空值或 `None` 错误收敛成字符串。
-- 已把 failure taxonomy 从单一 primary key 扩展成多维 `failure_taxonomy_tags`，当前会保留 outcome、stop reason、失败检查项数量、每个失败检查项与诊断标签等维度。
-- batch summary 现在会同时输出 `failure_taxonomy_counts` 和 `failure_taxonomy_tag_counts`，既保留兼容用的主分类，也能按细粒度标签聚合排查。
-- Markdown summary 已增加 `Failure Taxonomy Tags` 小节，运行明细里也会展示单条 run 的 taxonomy tags。
-- 已增加 eval 批量派生指标，当前 summary 会直接输出 `failure_rate`、`clean_pass_rate`、`warning_rate`、`verification_failure_rate` 与 `expectation_miss_rate`。
-- Markdown summary 现在会展示失败率、干净成功率、警告率、验证失败率和 expectation 失配率，便于快速判断一批任务的健康度。
 
 ## 已完成
 
@@ -163,22 +158,16 @@
 - 完成 expectation 第二版细粒度断言：步数、工具调用数、失败检查项。
 - 完成 expectation 解析边界修正，避免 `None` 被错误解析成字符串。
 - 完成 `Phase 7` 的第四轮 eval expectation 自动化测试扩展。
-- 完成 failure taxonomy tags 第一版多维分类。
-- 完成多维 taxonomy 聚合统计与 Markdown summary 展示。
-- 完成 `Phase 7` 的第五轮 eval taxonomy 自动化测试扩展。
-- 完成 eval 批量派生 rate 指标。
-- 完成派生 rate 指标的 JSON summary 与 Markdown summary 展示。
-- 完成 `Phase 7` 的第六轮 eval derived metrics 自动化测试扩展。
 
 ## 进行中
 
-- 继续推进 `Phase 7`，下一步评估是否把 taxonomy tags 按 result/process/diagnostic 分组展示，或开始进入 `Phase 8` 策略对比准备。
+- 继续推进 `Phase 7`，下一步评估是否要把 failure taxonomy 从单键扩展成更系统的多维分类。
 
 ## 下一步明确动作
 
+- 评估是否需要把当前 failure taxonomy 从“首个失败检查项”扩展成多维分类键，避免复杂失败被过度压缩。
 - 评估是否需要让 expectation 继续支持验证通过检查项、stop reason 或 warning rate 等更细断言。
-- 评估是否需要把 taxonomy tags 按 result/process/diagnostic 三类分组展示，避免 summary 后续过长。
-- 评估 `Phase 7` 是否已经满足 MVP 验收，可以开始 `Phase 8` strategy configs。
+- 评估是否需要增加 warning rate、verification failure rate 等更细的批量指标。
 
 ## 当前阻塞
 
@@ -193,4 +182,4 @@
 2. 阅读 `docs/CURRENT_STATUS.md`。
 3. 阅读 `docs/PHASE_PROGRESS.md`。
 4. 检查 `src/context.py`、`src/tools.py`、`src/verify.py`、`src/loop.py`、`src/runner.py` 与 `tests/` 当前实现。
-5. 优先查看 `src/eval_runner.py`、`tests/test_eval.py` 与 `eval_tasks/sample_batch.json`，从批量派生指标或 taxonomy tags 分组展示开始继续。
+5. 优先查看 `src/eval_runner.py`、`tests/test_eval.py` 与 `eval_tasks/sample_batch.json`，从 failure taxonomy 多维化或更细粒度 expectation 开始继续。

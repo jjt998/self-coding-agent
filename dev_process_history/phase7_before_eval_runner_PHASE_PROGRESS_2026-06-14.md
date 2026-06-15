@@ -2,8 +2,8 @@
 
 ## 总览
 
-- 最后更新时间：2026-06-15
-- 当前激活阶段：`Phase 7：Eval`
+- 最后更新时间：2026-06-14
+- 当前激活阶段：`Phase 6：Memory`
 - 补充说明：`docs/SESSION_ENTRY.md` 已增加项目级行为约束，后续会话默认按第一性原理、根因优先和高信号输出执行。
 
 ## Phase 1：脚手架与控制面
@@ -153,40 +153,20 @@
 
 ## Phase 7：Eval
 
-- 状态：`in_progress`
+- 状态：`not_started`
 - 目标：支持可重复评测与对比。
 - 已完成：
   - Eval 结构与指标已经定义。
-  - 实现最小 eval task schema，当前使用 `{"tasks": [...]}` 承载批量任务
-  - 实现最小 eval runner，复用现有单次 run 内核批量执行任务
-  - 实现 metrics 收集：成功率、平均步数、平均工具调用数
-  - 实现最小 diagnostics 汇总：失败分布、memory 诊断标签计数
-  - 实现 batch summary report：`summary.json`、`summary.md`
-  - 提供 `eval_tasks/sample_batch.json` 示例任务文件
-  - 扩充 CLI 测试，验证 eval batch 产物与聚合指标
-  - 实现单条 run 结果分层：`passed_cleanly`、`passed_with_warnings`、`failed_verification`、`stopped_early`、`failed_unknown`
-  - 在 eval summary 中增加干净成功数、带警告成功数、failure taxonomy 与验证失败检查项统计
-  - 扩充 eval 测试，验证 diagnostics 分层、failure taxonomy 与 Markdown summary 输出
-  - 为 eval task schema 增加最小 `expectation` 字段，支持 `passed`、`outcome`、必需/禁止诊断标签与 `failure_taxonomy`
-  - 为单条 run 增加 `expectation_result`，记录 expectation 是否命中以及失配字段
-  - 在 eval summary 中增加 expectation 定义数、命中数、失配数与失配字段统计
-  - 更新 `eval_tasks/sample_batch.json`，提供 expectation 写法样例
-  - 扩展 expectation 断言范围，支持步数区间、工具调用区间、必需/禁止失败检查项
-  - 修正 expectation 可选字符串字段的解析边界，避免 `None` 被收敛成字符串
-  - 扩展 failure taxonomy，新增 `failure_taxonomy_tags` 多维标签
-  - 在 eval summary 中增加 `failure_taxonomy_tag_counts` 聚合与 `Failure Taxonomy Tags` 展示
-  - 增加批量派生 rate 指标：`failure_rate`、`clean_pass_rate`、`warning_rate`、`verification_failure_rate`、`expectation_miss_rate`
-  - 在 JSON summary 与 Markdown summary 中展示派生 rate 指标
 - 剩余：
-  - 评估是否把 expectation 继续扩展到验证通过检查项、stop reason 或 warning rate
-  - 评估是否把 taxonomy tags 按 result/process/diagnostic 分组展示
-  - 评估是否进入 `Phase 8` 策略对比准备
+  - 实现 task spec schema
+  - 实现 eval runner
+  - 实现 metrics 收集
+  - 实现 diagnostics 流程
+  - 实现 batch summary report
 - 验收：
   - 固定任务集可以批量运行，并输出聚合指标。
 - 备注：
   - 必须同时覆盖 result、process、diagnostic 三类指标。
-  - 当前 diagnostics 已能区分“干净成功”“带警告成功”和“真正失败”，taxonomy 已从单一主分类扩展为主分类加多维标签。
-  - 当前 expectation 已能覆盖部分过程指标，但仍以轻量规则断言为主，不追求复杂 DSL。
 
 ## Phase 8：策略对比
 

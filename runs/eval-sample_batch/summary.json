@@ -1,0 +1,99 @@
+{
+  "eval_name": "sample_batch",
+  "task_count": 2,
+  "success_count": 2,
+  "success_rate": 1.0,
+  "failure_rate": 0.0,
+  "average_steps": 8,
+  "average_tool_calls": 5,
+  "clean_pass_count": 2,
+  "clean_pass_rate": 1.0,
+  "warning_pass_count": 0,
+  "warning_rate": 0.0,
+  "outcome_counts": {
+    "passed_cleanly": 2
+  },
+  "expectation_defined_count": 2,
+  "expectation_matched_count": 2,
+  "expectation_miss_count": 0,
+  "expectation_miss_rate": 0.0,
+  "verification_failure_rate": 0.0,
+  "expectation_failure_counts": {},
+  "failure_distribution": {},
+  "failure_taxonomy_counts": {},
+  "failure_taxonomy_tag_counts": {},
+  "verification_failure_counts": {},
+  "diagnostic_label_counts": {},
+  "runs": [
+    {
+      "task_name": "general_scaffold",
+      "run_id": "run-20260615-144111-7fe025ce",
+      "run_dir": "runs\\eval-sample_batch\\runs\\run-20260615-144111-7fe025ce",
+      "passed": true,
+      "step_count": 8,
+      "tool_call_count": 5,
+      "stop_reason": "completed",
+      "diagnostic_labels": [],
+      "outcome": "passed_cleanly",
+      "verification_summary": "验证通过：本次 run 已写入说明文件，并保留了可检查的工具结果。",
+      "failing_checks": [],
+      "failure_taxonomy": null,
+      "failure_taxonomy_tags": [],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_step_count": 1,
+        "max_step_count": null,
+        "min_tool_call_count": 1,
+        "max_tool_call_count": null,
+        "required_failing_checks": [],
+        "forbidden_failing_checks": [],
+        "required_diagnostic_labels": [],
+        "forbidden_diagnostic_labels": [
+          "memory_conflict_warning",
+          "memory_conflict",
+          "memory_pollution"
+        ],
+        "failure_taxonomy": null
+      },
+      "expectation_result": {
+        "defined": true,
+        "matched": true,
+        "failed_fields": []
+      }
+    },
+    {
+      "task_name": "bug_fix_fail",
+      "run_id": "run-20260615-144114-c1332532",
+      "run_dir": "runs\\eval-sample_batch\\runs\\run-20260615-144114-c1332532",
+      "passed": true,
+      "step_count": 8,
+      "tool_call_count": 5,
+      "stop_reason": "completed",
+      "diagnostic_labels": [],
+      "outcome": "passed_cleanly",
+      "verification_summary": "验证通过：本次 run 已写入说明文件，并保留了可检查的工具结果。",
+      "failing_checks": [],
+      "failure_taxonomy": null,
+      "failure_taxonomy_tags": [],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_step_count": null,
+        "max_step_count": 12,
+        "min_tool_call_count": null,
+        "max_tool_call_count": 8,
+        "required_failing_checks": [],
+        "forbidden_failing_checks": [],
+        "required_diagnostic_labels": [],
+        "forbidden_diagnostic_labels": [],
+        "failure_taxonomy": null
+      },
+      "expectation_result": {
+        "defined": true,
+        "matched": true,
+        "failed_fields": []
+      }
+    }
+  ]
+}
