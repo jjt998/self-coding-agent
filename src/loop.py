@@ -108,6 +108,7 @@ class LoopOrchestrator:
             self._transition(runtime_state, to_state=state, reason="baseline_loop")
             state_payload = self._run_stub_state(
                 state=state,
+                settings=settings,
                 runtime_state=runtime_state,
                 config_data=config_data,
                 context_builder=context_builder,
@@ -216,6 +217,7 @@ class LoopOrchestrator:
     def _run_stub_state(
         self,
         state: AgentState,
+        settings: RunSettings,
         runtime_state: RuntimeState,
         config_data: dict[str, Any],
         context_builder: ContextBuilder,
@@ -329,7 +331,10 @@ class LoopOrchestrator:
                 "trigger": runtime_state.reflect_trigger_reason or "unknown",
             }
         if state is AgentState.VERIFY:
-            verification_result = build_phase_4_verification(runtime_state.tool_executions)
+            verification_result = build_phase_4_verification(
+                settings=settings,
+                tool_executions=runtime_state.tool_executions,
+            )
             runtime_state.verification_result = verification_result
             self.trace_writer.write_event(
                 TraceEvent(

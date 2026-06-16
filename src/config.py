@@ -29,6 +29,7 @@ class RunSettings:
     sandbox_retention: str = "delete_on_success"
     setup_commands: list[list[str]] = field(default_factory=list)
     verify_commands: list[list[str]] = field(default_factory=list)
+    verify_rules: list[dict[str, Any]] = field(default_factory=list)
     # run_id 里同时带时间和短随机串，既方便人眼排查，也能降低同秒运行时的重名概率。
     run_id: str = field(default_factory=lambda: f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:8]}")
     created_at: str = field(default_factory=utc_now_iso)
@@ -49,6 +50,7 @@ def build_settings(
     sandbox_retention: str = "delete_on_success",
     setup_commands: list[list[str]] | None = None,
     verify_commands: list[list[str]] | None = None,
+    verify_rules: list[dict[str, Any]] | None = None,
 ) -> RunSettings:
     """根据 CLI 输入构建标准化后的运行配置。"""
     # 这里先把 repo_root 和 source_repo_root 都规范成绝对路径，后面看 trace 时就能同时知道
@@ -66,6 +68,7 @@ def build_settings(
         sandbox_retention=sandbox_retention,
         setup_commands=list(setup_commands or []),
         verify_commands=list(verify_commands or []),
+        verify_rules=list(verify_rules or []),
     )
 
 

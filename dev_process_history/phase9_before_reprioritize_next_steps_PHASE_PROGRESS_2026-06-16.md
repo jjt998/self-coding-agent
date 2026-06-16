@@ -99,13 +99,13 @@
   - 回归测试新增覆盖：负向命令输出检查、文件不存在检查、文件行数上下界检查，以及对应 task spec 字段解析
   - 分项自动化验收通过：`tests/test_verify.py`、`tests/test_eval.py`、`tests/test_cli.py`、`tests/test_loop.py`
 - 下一步实现顺序建议：
-  1. 接入真实模型/策略决策层本体。
-  2. 把 loop 从 stub 逐步替换为真实求解链路。
-  3. 继续扩展 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义，把任务级 verify 做成更完整、更可复用的验证 schema。
-  4. 把 setup / verify 失败都收口为结构化 stop reason 与更稳定的 failure taxonomy。
+  1. 继续扩展 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义，把任务级 verify 做成更完整、更可复用的验证 schema。
+  2. 接入真实模型/策略决策层本体。
+  3. 把 loop 从 stub 逐步替换为真实求解链路。
+  4. 把 setup / verify 失败都收口为结构化 stop reason 与 failure taxonomy。
 
 ## 下一步
 
-- 先围绕真实任务实验优先补“决策层 + loop + 更强真实 verify”三件套。
+- 先围绕真实任务实验补“更强的真实 verify + 决策层 + loop”三件套。
 - 在保留现有 comparison / experiment 外壳的前提下，把真实任务执行链路继续接深。
 - 等最小闭环跑通后，再重新设计第二批更能区分 context 策略的研究任务集。

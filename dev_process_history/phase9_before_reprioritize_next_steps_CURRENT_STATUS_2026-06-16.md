@@ -67,10 +67,9 @@
 
 ## 下一步明确动作
 
-- 接入真实模型/策略决策层，让当前 harness 先具备真实任务级决策入口。
-- 在不破坏现有 trace / summary / comparison 结构的前提下，把 `loop` 从 stub 链路逐步替换成真实任务求解链路。
+- 在 sandbox 中补任务级准备步骤之后的真实执行/失败收口，让 setup 失败、verify 失败都能沉淀为结构化 stop reason。
 - 继续扩展任务级 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义，把“通过条件更可解释的结构化验证”做成更完整 schema。
-- 在 sandbox 中补任务级准备步骤之后的真实执行/失败收口，让 setup 失败、verify 失败都能沉淀为结构化 stop reason，并进一步稳定 failure taxonomy。
+- 在不破坏现有 trace / summary / comparison 结构的前提下，把 `loop` 从 stub 链路逐步替换成真实任务求解链路，并接入真实模型/策略决策层。
 
 ## 当前阻塞
 

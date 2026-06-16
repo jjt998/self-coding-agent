@@ -17,7 +17,7 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
 
-    def fake_verification(_tool_executions):
+    def fake_verification(*, settings, tool_executions):
         return VerificationResult(
             passed=False,
             summary="验证失败：至少有一项关键检查未通过。",

@@ -56,6 +56,7 @@ class EvalTaskSpec:
     sandbox_retention: str = "delete_on_success"
     setup_commands: list[list[str]] = field(default_factory=list)
     verify_commands: list[list[str]] = field(default_factory=list)
+    verify_rules: list[dict[str, Any]] = field(default_factory=list)
     expectation: EvalExpectationSpec | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -228,6 +229,7 @@ def load_eval_task_specs(task_file: Path) -> list[EvalTaskSpec]:
                 sandbox_retention=_normalize_sandbox_retention(raw_task.get("sandbox_retention")),
                 setup_commands=_normalize_command_matrix(raw_task.get("setup_commands")),
                 verify_commands=_normalize_command_matrix(raw_task.get("verify_commands")),
+                verify_rules=_normalize_verify_rules(raw_task.get("verify_rules")),
                 expectation=_load_expectation_spec(raw_task.get("expectation")),
             )
         )
@@ -285,6 +287,7 @@ def run_eval_batch(
             sandbox_retention=task_spec.sandbox_retention,
             setup_commands=task_spec.setup_commands,
             verify_commands=task_spec.verify_commands,
+            verify_rules=task_spec.verify_rules,
         )
         run_dir = execute_initial_run(settings=settings, config_data=config_data)
         run_results.append(_collect_eval_run_result(task_spec=task_spec, run_id=settings.run_id, run_dir=run_dir))
@@ -1056,6 +1059,54 @@ def _normalize_command_matrix(raw_value: Any) -> list[list[str]]:
         if normalized_command:
             commands.append(normalized_command)
     return commands
+
+
+def _normalize_verify_rules(raw_value: Any) -> list[dict[str, Any]]:
+    """把 verify_rules 清洗成稳定对象列表，避免脏字段直接进入验证链路。"""
+    if not isinstance(raw_value, list):
+        return []
+
+    rules: list[dict[str, Any]] = []
+    for item in raw_value:
+        if not isinstance(item, dict):
+            continue
+        rule_type = _normalize_optional_string(item.get("type"))
+        if not rule_type:
+            continue
+
+        normalized_rule: dict[str, Any] = {"type": rule_type}
+        name = _normalize_optional_string(item.get("name"))
+        if name:
+            normalized_rule["name"] = name
+
+        path = _normalize_optional_string(item.get("path"))
+        if path:
+            normalized_rule["path"] = path.replace("\\", "/")
+
+        expected_returncode = _normalize_optional_int(item.get("expected_returncode"))
+        if expected_returncode is not None:
+            normalized_rule["expected_returncode"] = expected_returncode
+
+        for field_name in ["min_line_count", "max_line_count"]:
+            numeric_value = _normalize_optional_int(item.get(field_name))
+            if numeric_value is not None:
+                normalized_rule[field_name] = numeric_value
+
+        for field_name in [
+            "command_index",
+            "contains",
+            "not_contains",
+            "stdout_contains",
+            "stdout_not_contains",
+            "stderr_contains",
+            "stderr_not_contains",
+        ]:
+            value = _normalize_optional_string(item.get(field_name))
+            if value:
+                normalized_rule[field_name] = value
+
+        rules.append(normalized_rule)
+    return rules
 
 
 def _normalize_sandbox_retention(raw_value: Any) -> str:

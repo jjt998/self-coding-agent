@@ -68,6 +68,13 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
                         "name": "bug_fix_fail",
                         "task": "修复 fail 错误",
                         "task_type": "bug_fix",
+                        "verify_commands": [
+                            [
+                                sys.executable,
+                                "-c",
+                                "from pathlib import Path; raise SystemExit(0 if Path('app.py').exists() else 1)",
+                            ]
+                        ],
                         "expectation": {
                             "passed": True,
                             "outcome": "passed_cleanly",
@@ -179,6 +186,19 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
     cleanup_payload = next(event["payload"] for event in first_trace_events if event["event_type"] == "sandbox_cleanup_result")
     assert cleanup_payload["kept"] is True
     assert cleanup_payload["retention_policy"] == "always_keep"
+
+    second_run_dir = run_dir_by_task["bug_fix_fail"]
+    second_trace_events = [
+        json.loads(line)
+        for line in (second_run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    second_verification_payload = next(
+        event["payload"] for event in second_trace_events if event["event_type"] == "verification_result"
+    )
+    assert second_verification_payload["passed"] is True
+    assert second_verification_payload["details"]["verification_mode"] == "task_verify_commands"
+    assert second_verification_payload["checks"][0]["name"] == "verify_command_1"
 
 
 def test_eval_batch_result_distinguishes_clean_pass_warning_pass_and_failure() -> None:
@@ -418,6 +438,14 @@ def test_load_eval_task_specs_supports_sandbox_and_setup_fields(tmp_path: Path) 
                         "sandbox_retention": "always_delete",
                         "setup_commands": [["python", "-V"], ["python", "-c", "print('setup')"]],
                         "verify_commands": [["python", "-m", "pytest", "-q"]],
+                        "verify_rules": [
+                            {"type": "file_exists", "path": "tests/test_api.py"},
+                            {"type": "command_stdout_contains", "command_index": 1, "contains": "passed"},
+                            {"type": "command_stdout_not_contains", "command_index": 1, "not_contains": "failed"},
+                            {"type": "file_not_exists", "path": "tmp/debug.log"},
+                            {"type": "file_line_count_at_least", "path": "tests/test_api.py", "min_line_count": 3},
+                            {"type": "file_line_count_at_most", "path": "tests/test_api.py", "max_line_count": 50},
+                        ],
                     }
                 ]
             },
@@ -437,6 +465,14 @@ def test_load_eval_task_specs_supports_sandbox_and_setup_fields(tmp_path: Path) 
     assert specs[0].sandbox_retention == "always_delete"
     assert specs[0].setup_commands == [["python", "-V"], ["python", "-c", "print('setup')"]]
     assert specs[0].verify_commands == [["python", "-m", "pytest", "-q"]]
+    assert specs[0].verify_rules == [
+        {"type": "file_exists", "path": "tests/test_api.py"},
+        {"type": "command_stdout_contains", "command_index": "1", "contains": "passed"},
+        {"type": "command_stdout_not_contains", "command_index": "1", "not_contains": "failed"},
+        {"type": "file_not_exists", "path": "tmp/debug.log"},
+        {"type": "file_line_count_at_least", "path": "tests/test_api.py", "min_line_count": 3},
+        {"type": "file_line_count_at_most", "path": "tests/test_api.py", "max_line_count": 50},
+    ]
 
 
 def test_failure_taxonomy_tags_keep_all_failure_dimensions() -> None:

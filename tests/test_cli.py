@@ -255,6 +255,82 @@ def test_cli_deletes_sandbox_after_success_by_default(tmp_path: Path) -> None:
     assert "清理结果：已删除" in report_text
 
 
+def test_cli_keeps_sandbox_after_failed_verify_command_under_default_policy(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text(
+        "# 项目说明\n\n这里用于验证失败后保留 sandbox。\n",
+        encoding="utf-8",
+    )
+
+    eval_task_file = tmp_path / "eval_batch.json"
+    eval_task_file.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "name": "sandbox_keep_on_failed_verify",
+                        "task": "创建脚手架",
+                        "task_type": "general",
+                        "verify_commands": [[sys.executable, "-c", "raise SystemExit(1)"]],
+                        "expectation": {
+                            "passed": False,
+                            "outcome": "failed_verification",
+                        },
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--eval-task-file",
+        str(eval_task_file),
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    summary_data = json.loads((output_root / "eval-eval_batch" / "summary.json").read_text(encoding="utf-8"))
+    assert summary_data["success_count"] == 0
+    assert summary_data["outcome_counts"] == {"failed_verification": 1}
+
+    run_dir = Path(summary_data["runs"][0]["run_dir"])
+    snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
+    sandbox_dir = Path(snapshot["sandbox_dir"])
+    assert sandbox_dir.exists()
+
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    verification_payload = next(event["payload"] for event in trace_events if event["event_type"] == "verification_result")
+    assert verification_payload["passed"] is False
+    assert verification_payload["details"]["verification_mode"] == "task_verify_commands"
+    cleanup_payload = next(event["payload"] for event in trace_events if event["event_type"] == "sandbox_cleanup_result")
+    assert cleanup_payload["attempted"] is False
+    assert cleanup_payload["kept"] is True
+    assert cleanup_payload["retention_policy"] == "delete_on_success"
+
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "清理结果：已保留" in report_text
+
+
 def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path) -> None:
     output_root = tmp_path / "runs"
     repo_root = tmp_path / "repo"

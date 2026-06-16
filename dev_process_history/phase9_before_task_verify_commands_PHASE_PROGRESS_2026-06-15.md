@@ -76,9 +76,9 @@
 - 当前已识别缺口：
   - `src/loop.py` 仍依赖 `_run_stub_state`
   - `src/tools.py` 仍依赖固定 `build_phase_3_tool_sequence()`
+  - `src/verify.py` 仍是 `agent_notes.md` 演示验证
   - 当前还缺少真实模型/策略决策层本体，尚未接入真正的任务级模型决策、工具选择与步骤推进回路
-  - `src/verify.py` 已支持 `verify_commands`，但当前通过条件仍主要等价于“命令退出码是否成功”
-  - eval task schema 已承载 `repo_subdir` / `workspace_mode` / `setup_commands` / `verify_commands`，后续还需继续增强 richer verify schema
+  - eval task schema 已承载 `repo_subdir` / `workspace_mode` / `setup_commands` / `verify_commands`，但 `verify_commands` 还未真正驱动任务级 verify
 - 本轮已完成：
   - `src/config.py` 补齐 `source_repo_root`、`workspace_mode`、`sandbox_dir`、`setup_commands`、`verify_commands`
   - `src/eval_runner.py` 补齐真实任务最小 schema 第一版，并默认让 eval task 走 `per_task_sandbox`
@@ -89,23 +89,15 @@
   - 当前支持 `always_keep`、`delete_on_success`、`always_delete` 三种 sandbox 生命周期策略，默认 `delete_on_success`
   - `sandbox_cleanup_result` 已进入 trace，报告中已新增 `Sandbox 清理` 小节
   - 回归测试新增覆盖：默认成功后删除 sandbox、显式保留 sandbox
-  - `src/verify.py` 已支持“真实 verify command 优先、stub verify 回退”的双轨验证
-  - `src/loop.py` 已接上 `RunSettings.verify_commands` 驱动的任务级验证
-  - 回归测试新增覆盖：真实 verify command 成功、失败后保留 sandbox、stub verify 回退
-  - `src/config.py` / `src/eval_runner.py` / `src/verify.py` 已补齐 `verify_rules` 第一版，支持把任务级通过条件结构化声明到 task schema
-  - 当前 `verify_rules` 已支持首批规则类型：命令 stdout/stderr 包含检查、指定命令返回码检查、文件存在检查、文件包含/不包含文本检查
-  - 回归测试新增覆盖：`verify_rules` 成功、`verify_rules` 失败、task spec 中 `verify_rules` 字段解析
-  - 当前 `verify_rules` 第二版已补齐一批更贴近真实任务的断言：命令 stdout/stderr 不包含检查、文件不存在检查、文件最小/最大行数检查
-  - 回归测试新增覆盖：负向命令输出检查、文件不存在检查、文件行数上下界检查，以及对应 task spec 字段解析
-  - 分项自动化验收通过：`tests/test_verify.py`、`tests/test_eval.py`、`tests/test_cli.py`、`tests/test_loop.py`
+  - 自动化验收：`python -m pytest -q` 通过，结果为 `23 passed`
 - 下一步实现顺序建议：
-  1. 接入真实模型/策略决策层本体。
-  2. 把 loop 从 stub 逐步替换为真实求解链路。
-  3. 继续扩展 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义，把任务级 verify 做成更完整、更可复用的验证 schema。
-  4. 把 setup / verify 失败都收口为结构化 stop reason 与更稳定的 failure taxonomy。
+  1. 把 `verify_commands` 和通过条件真正接入任务级 verify。
+  2. 接入真实模型/策略决策层本体。
+  3. 把 loop 从 stub 逐步替换为真实求解链路。
+  4. 把 setup / verify 失败都收口为结构化 stop reason 与 failure taxonomy。
 
 ## 下一步
 
-- 先围绕真实任务实验优先补“决策层 + loop + 更强真实 verify”三件套。
+- 先围绕真实任务实验补“真实 verify + 决策层 + loop”三件套。
 - 在保留现有 comparison / experiment 外壳的前提下，把真实任务执行链路继续接深。
 - 等最小闭环跑通后，再重新设计第二批更能区分 context 策略的研究任务集。
