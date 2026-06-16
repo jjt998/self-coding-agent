@@ -320,6 +320,7 @@ def test_cli_keeps_sandbox_after_failed_verify_command_under_default_policy(tmp_
     summary_data = json.loads((output_root / "eval-eval_batch" / "summary.json").read_text(encoding="utf-8"))
     assert summary_data["success_count"] == 0
     assert summary_data["outcome_counts"] == {"failed_verification": 1}
+    assert summary_data["failure_taxonomy_counts"] == {"verification:verify_command_returncode": 1}
 
     run_dir = Path(summary_data["runs"][0]["run_dir"])
     snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
@@ -334,6 +335,9 @@ def test_cli_keeps_sandbox_after_failed_verify_command_under_default_policy(tmp_
     verification_payload = next(event["payload"] for event in trace_events if event["event_type"] == "verification_result")
     assert verification_payload["passed"] is False
     assert verification_payload["details"]["verification_mode"] == "task_verify_commands"
+    run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
+    assert run_finished_payload["stop_reason"]["code"] == "verification_failed"
+    assert run_finished_payload["stop_reason"]["details"]["verification_failure"]["failed_commands"][0]["returncode"] == 1
     cleanup_payload = next(event["payload"] for event in trace_events if event["event_type"] == "sandbox_cleanup_result")
     assert cleanup_payload["attempted"] is False
     assert cleanup_payload["kept"] is True
@@ -341,6 +345,73 @@ def test_cli_keeps_sandbox_after_failed_verify_command_under_default_policy(tmp_
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "清理结果：已保留" in report_text
+
+
+def test_cli_stops_with_structured_setup_failure(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    eval_task_file = tmp_path / "eval_batch.json"
+    eval_task_file.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "name": "setup_failure",
+                        "task": "准备失败时停止",
+                        "task_type": "general",
+                        "setup_commands": [[sys.executable, "-c", "raise SystemExit(7)"]],
+                        "expectation": {
+                            "passed": False,
+                            "outcome": "failed_setup",
+                        },
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--eval-task-file",
+        str(eval_task_file),
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    summary_data = json.loads((output_root / "eval-eval_batch" / "summary.json").read_text(encoding="utf-8"))
+    assert summary_data["success_count"] == 0
+    assert summary_data["outcome_counts"] == {"failed_setup": 1}
+    assert summary_data["failure_taxonomy_counts"] == {"setup:command_returncode": 1}
+
+    run_dir = Path(summary_data["runs"][0]["run_dir"])
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    setup_payload = next(event["payload"] for event in trace_events if event["event_type"] == "task_setup_result")
+    assert setup_payload["ok"] is False
+    assert setup_payload["returncode"] == 7
+    run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
+    assert run_finished_payload["stop_reason"]["code"] == "setup_failed"
+    assert run_finished_payload["stop_reason"]["details"]["failed_setup_commands"][0]["returncode"] == 7
+    assert [event["event_type"] for event in trace_events].count("model_decision") == 0
 
 
 def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path) -> None:

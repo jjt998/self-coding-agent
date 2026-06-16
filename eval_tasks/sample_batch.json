@@ -2,8 +2,28 @@
   "tasks": [
     {
       "name": "general_run_artifact_audit",
-      "task": "梳理最小运行链路，确认 run 目录、trace、report 和 config snapshot 这些基础产物是否完整可查。",
+      "task": "整理最小运行链路，确认 run 目录、trace、report 和 config snapshot 这些基础产物是否完整可查。",
       "task_type": "general",
+      "verify_commands": [
+        [
+          "python",
+          "-c",
+          "from pathlib import Path; raise SystemExit(0 if Path('agent_notes.md').exists() else 1)"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "file_contains",
+          "name": "agent notes contains heading",
+          "path": "agent_notes.md",
+          "contains": "# Agent Notes"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "diff records agent notes",
+          "path": "agent_notes.md"
+        }
+      ],
       "expectation": {
         "passed": true,
         "outcome": "passed_cleanly",
@@ -31,6 +51,22 @@
       "name": "code_understanding_context_flow",
       "task": "解释 analyze 阶段如何构建 context_snapshot，并说明这份上下文如何进入 trace 和最终 report。",
       "task_type": "code_understanding",
+      "verify_commands": [
+        [
+          "python",
+          "-c",
+          "from pathlib import Path; raise SystemExit(0 if Path('agent_notes.md').read_text(encoding='utf-8').startswith('# Agent Notes') else 1)"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "files_matching_count_at_least",
+          "name": "markdown notes exist",
+          "glob": "*.md",
+          "contains": "# Agent Notes",
+          "min_count": 1
+        }
+      ],
       "expectation": {
         "passed": true,
         "outcome": "passed_cleanly",

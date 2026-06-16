@@ -31,6 +31,8 @@ class StopReasonCode(str, Enum):
 
     COMPLETED = "completed"
     MAX_STEPS_REACHED = "max_steps_reached"
+    SETUP_FAILED = "setup_failed"
+    VERIFICATION_FAILED = "verification_failed"
     INTERNAL_ERROR = "internal_error"
     MODEL_ERROR = "model_error"
 
@@ -64,6 +66,8 @@ class RuntimeState:
     reflect_trigger_reason: str = ""
     reflect_count: int = 0
     reflect_trigger_reasons: list[str] = field(default_factory=list)
+    reflect_feedback: dict[str, Any] = field(default_factory=dict)
+    reflect_feedback_history: list[dict[str, Any]] = field(default_factory=list)
     current_iteration: int = 0
     iteration_count: int = 0
     max_steps: int = 1
@@ -173,6 +177,9 @@ class LoopOrchestrator:
                 stop_code = StopReasonCode.COMPLETED
                 stop_message = "最小多轮求解链路已验证通过。"
                 break
+            if runtime_state.verification_result and not runtime_state.verification_result.passed:
+                stop_code = StopReasonCode.VERIFICATION_FAILED
+                stop_message = "验证失败，run 已停止。"
 
             has_next_iteration = iteration < runtime_state.max_steps
             if has_next_iteration and not reflected_this_iteration and self._should_reflect_after_verify(
@@ -267,9 +274,11 @@ class LoopOrchestrator:
             "reflect_count": runtime_state.reflect_count,
             "reflect_trigger_reasons": list(runtime_state.reflect_trigger_reasons),
             "verification_passed": verification_passed,
+            "verification_failure": self._build_verification_failure_details(runtime_state=runtime_state),
             "progress_made": runtime_state.progress_made,
             "changed_files": runtime_state.changed_files,
             "failed_tool_count": runtime_state.failed_tool_count,
+            "reflect_feedback": dict(runtime_state.reflect_feedback),
         }
 
     def _get_max_steps(self, config_data: dict[str, Any]) -> int:
@@ -377,6 +386,7 @@ class LoopOrchestrator:
                 "summary": runtime_state.observation_summary,
             },
             "previous_verification": verification_payload,
+            "previous_reflect_feedback": dict(runtime_state.reflect_feedback),
             "recent_tool_results": [
                 self._summarize_tool_execution(execution)
                 for execution in runtime_state.recent_tool_executions
@@ -542,10 +552,11 @@ class LoopOrchestrator:
         if state is AgentState.OBSERVE:
             return self._observe_progress(runtime_state=runtime_state)
         if state is AgentState.REFLECT:
-            return {
-                "summary": "已按策略插入一次 reflect。",
-                "trigger": runtime_state.reflect_trigger_reason or "unknown",
-            }
+            reflect_feedback = self._build_reflect_feedback(runtime_state=runtime_state)
+            runtime_state.reflect_feedback = reflect_feedback
+            runtime_state.reflect_feedback_history.append(reflect_feedback)
+            self.trace_writer.write_event(TraceEvent(event_type="reflect_feedback", payload=reflect_feedback))
+            return reflect_feedback
         if state is AgentState.VERIFY:
             verification_result = build_phase_4_verification(
                 settings=settings,
@@ -698,3 +709,87 @@ class LoopOrchestrator:
             f"未观察到文件变更或成功编辑进展；"
             f"成功工具 {len(successful_tools)} 个，失败工具 {failed_tool_count} 个。"
         )
+
+    def _build_verification_failure_details(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """Extract stable details from the latest failed verification result."""
+        verification_result = runtime_state.verification_result
+        if not verification_result or verification_result.passed:
+            return {}
+
+        checks = [check.to_dict() for check in verification_result.checks]
+        failing_checks = [check for check in checks if not bool(check.get("passed"))]
+        verify_command_results = verification_result.details.get("verify_command_results", [])
+        failed_commands = [
+            item
+            for item in verify_command_results
+            if isinstance(item, dict) and not bool(item.get("ok"))
+        ]
+        failed_rule_types = self._extract_failed_verify_rule_types(
+            failing_checks=failing_checks,
+            verify_command_count=int(verification_result.details.get("verify_command_count", 0) or 0),
+        )
+        return {
+            "summary": verification_result.summary,
+            "failing_checks": failing_checks,
+            "failing_check_names": [
+                str(check.get("name", "")).strip()
+                for check in failing_checks
+                if str(check.get("name", "")).strip()
+            ],
+            "failed_commands": failed_commands,
+            "failed_rule_types": failed_rule_types,
+            "verification_mode": verification_result.details.get("verification_mode", ""),
+            "verify_command_count": verification_result.details.get("verify_command_count", 0),
+            "verify_rule_count": verification_result.details.get("verify_rule_count", 0),
+        }
+
+    def _extract_failed_verify_rule_types(
+        self,
+        failing_checks: list[dict[str, Any]],
+        verify_command_count: int,
+    ) -> list[str]:
+        """Classify failed verify checks by stable rule family for stop reason details."""
+        rule_types: list[str] = []
+        for check in failing_checks:
+            name = str(check.get("name", "")).strip()
+            if name.startswith("verify_command_"):
+                continue
+            if not name:
+                continue
+            # The rule type is not stored on checks yet; preserve a stable generic class.
+            rule_types.append("verify_rule")
+        return rule_types
+
+    def _build_reflect_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """Build structured reflect feedback for the next planning round."""
+        verification_failure = self._build_verification_failure_details(runtime_state=runtime_state)
+        failed_tool_summaries = [
+            self._summarize_tool_execution(execution)
+            for execution in runtime_state.recent_tool_executions
+            if execution.tool_output.get("ok") is False
+            or (execution.tool_name == "run_command" and execution.tool_output.get("returncode", 0) != 0)
+        ]
+        suggested_focus: list[str] = []
+        if not runtime_state.progress_made:
+            suggested_focus.append("需要产生可观察的文件变更或成功编辑。")
+        if verification_failure.get("failing_check_names"):
+            suggested_focus.append("需要优先修复未通过的验证检查。")
+        if failed_tool_summaries:
+            suggested_focus.append("需要修复失败工具调用或命令返回码。")
+        if not suggested_focus:
+            suggested_focus.append("根据上一轮证据调整工具计划。")
+
+        return {
+            "summary": "已生成结构化 reflect 反馈。",
+            "iteration": runtime_state.current_iteration,
+            "trigger": runtime_state.reflect_trigger_reason or "unknown",
+            "observation": {
+                "progress_made": runtime_state.progress_made,
+                "changed_files": list(runtime_state.changed_files),
+                "failed_tool_count": runtime_state.failed_tool_count,
+                "summary": runtime_state.observation_summary,
+            },
+            "verification_failure": verification_failure,
+            "failed_tools": failed_tool_summaries,
+            "suggested_focus": suggested_focus,
+        }

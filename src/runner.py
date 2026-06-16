@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 
 from config import RunSettings
-from loop import LoopOrchestrator, RuntimeState
+from loop import LoopOrchestrator, RuntimeState, StopReason, StopReasonCode
 from memory import LongTermMemoryEntry, LongTermMemoryStore, _extract_keywords, _normalize_file_paths
 from trace import TraceEvent, TraceWriter
 
@@ -30,6 +30,19 @@ class SandboxCleanupResult:
     sandbox_dir: str
     retention_policy: str
     reason: str
+
+
+@dataclass(slots=True)
+class SetupCommandResult:
+    """记录任务 setup 命令执行结果，供 setup_failed stop reason 复用。"""
+
+    index: int
+    command: list[str]
+    cwd: str
+    ok: bool
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
@@ -66,8 +79,15 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
             },
         )
     )
-    _run_task_setup_commands(settings=settings, trace_writer=trace_writer)
-    runtime_state = LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=config_data)
+    setup_results = _run_task_setup_commands(settings=settings, trace_writer=trace_writer)
+    if any(not result.ok for result in setup_results):
+        runtime_state = _build_setup_failed_runtime_state(
+            settings=settings,
+            setup_results=setup_results,
+            trace_writer=trace_writer,
+        )
+    else:
+        runtime_state = LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=config_data)
     memory_entry_written_payload = None
     if runtime_state.verification_result and runtime_state.verification_result.passed:
         memory_entry_written_payload = _build_memory_entry_written_payload(
@@ -156,8 +176,9 @@ def _build_sandbox_ignore(source_repo_root: Path, output_root: Path):
     return _ignore
 
 
-def _run_task_setup_commands(settings: RunSettings, trace_writer: TraceWriter) -> None:
+def _run_task_setup_commands(settings: RunSettings, trace_writer: TraceWriter) -> list[SetupCommandResult]:
     """在真正进入 loop 前先执行任务自带的准备命令，让 sandbox 输入态可复现。"""
+    setup_results: list[SetupCommandResult] = []
     for index, command in enumerate(settings.setup_commands, start=1):
         trace_writer.write_event(
             TraceEvent(
@@ -176,20 +197,53 @@ def _run_task_setup_commands(settings: RunSettings, trace_writer: TraceWriter) -
             text=True,
             check=False,
         )
+        setup_result = SetupCommandResult(
+            index=index,
+            command=list(command),
+            cwd=settings.repo_root,
+            ok=completed.returncode == 0,
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+        setup_results.append(setup_result)
         trace_writer.write_event(
             TraceEvent(
                 event_type="task_setup_result",
-                payload={
-                    "index": index,
-                    "command": list(command),
-                    "cwd": settings.repo_root,
-                    "ok": completed.returncode == 0,
-                    "returncode": completed.returncode,
-                    "stdout": completed.stdout,
-                    "stderr": completed.stderr,
-                },
+                payload=asdict(setup_result),
             )
         )
+    return setup_results
+
+
+def _build_setup_failed_runtime_state(
+    settings: RunSettings,
+    setup_results: list[SetupCommandResult],
+    trace_writer: TraceWriter,
+) -> RuntimeState:
+    """在 setup 失败时构造最小 runtime_state，并写入结构化 run_finished。"""
+    runtime_state = RuntimeState(task=settings.task, task_type=settings.task_type)
+    failed_setups = [result for result in setup_results if not result.ok]
+    runtime_state.stop_reason = StopReason(
+        code=StopReasonCode.SETUP_FAILED,
+        message="任务准备失败，run 已停止。",
+        details={
+            "setup_command_count": len(setup_results),
+            "failed_setup_commands": [asdict(result) for result in failed_setups],
+            "setup_results": [asdict(result) for result in setup_results],
+        },
+    )
+    trace_writer.write_event(
+        TraceEvent(
+            event_type="run_finished",
+            payload={
+                "final_state": runtime_state.current_state,
+                "step_count": runtime_state.step_count,
+                "stop_reason": runtime_state.stop_reason.to_dict(),
+            },
+        )
+    )
+    return runtime_state
 
 
 def _cleanup_sandbox_if_needed(

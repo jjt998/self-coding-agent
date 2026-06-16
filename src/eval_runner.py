@@ -407,6 +407,7 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
         outcome=outcome,
         stop_reason=stop_reason,
         failing_checks=failing_checks,
+        stop_reason_details=stop_reason_details,
     )
     expectation_result = _assess_expectation(
         expectation=task_spec.expectation,
@@ -908,20 +909,42 @@ def _classify_eval_outcome(
 ) -> str:
     """给单条 run 一个稳定 outcome，便于后续聚合和 comparison。"""
     normalized_labels = _normalize_string_list(diagnostic_labels)
+    if stop_reason == "setup_failed":
+        return "failed_setup"
     if passed and not normalized_labels:
         return "passed_cleanly"
     if passed:
         return "passed_with_warnings"
-    if failing_checks:
+    if stop_reason == "verification_failed" or failing_checks:
         return "failed_verification"
     if stop_reason != "completed":
         return "stopped_early"
     return "failed_unknown"
 
 
-def _build_failure_taxonomy(outcome: str, stop_reason: str, failing_checks: list[str]) -> str | None:
+def _build_failure_taxonomy(
+    outcome: str,
+    stop_reason: str,
+    failing_checks: list[str],
+    stop_reason_details: dict[str, Any] | None = None,
+) -> str | None:
     """把失败进一步压成主 taxonomy key，方便做聚合统计。"""
+    details = stop_reason_details if isinstance(stop_reason_details, dict) else {}
+    if outcome == "failed_setup":
+        failed_setup_commands = details.get("failed_setup_commands", [])
+        if isinstance(failed_setup_commands, list) and failed_setup_commands:
+            return "setup:command_returncode"
+        return "setup:unknown"
     if outcome == "failed_verification":
+        verification_failure = details.get("verification_failure", {})
+        if isinstance(verification_failure, dict):
+            failed_commands = verification_failure.get("failed_commands", [])
+            if isinstance(failed_commands, list) and failed_commands:
+                return "verification:verify_command_returncode"
+            failed_rule_types = verification_failure.get("failed_rule_types", [])
+            if isinstance(failed_rule_types, list) and failed_rule_types:
+                primary_check = failing_checks[0] if failing_checks else "unknown_check"
+                return f"verification:verify_rule:{primary_check}"
         primary_check = failing_checks[0] if failing_checks else "unknown_check"
         return f"verification:{primary_check}"
     if outcome == "stopped_early":
@@ -942,6 +965,8 @@ def _build_failure_taxonomy_tags(
         return []
 
     tags = [f"outcome:{outcome}", f"stop_reason:{stop_reason}"]
+    if outcome == "failed_setup":
+        tags.append("setup_failure")
     if failing_checks:
         tags.append(f"verification_check_count:{len(failing_checks)}")
         for check in failing_checks:

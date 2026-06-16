@@ -574,3 +574,46 @@ def test_failure_taxonomy_tags_keep_all_failure_dimensions() -> None:
         "verification_check:命令检查通过",
         "diagnostic_label:memory_pollution",
     ]
+
+def test_eval_batch_result_counts_structured_setup_and_verify_taxonomy() -> None:
+    run_results = [
+        EvalRunResult(
+            task_name="setup_failed",
+            run_id="run-setup",
+            run_dir="runs/run-setup",
+            passed=False,
+            step_count=0,
+            tool_call_count=0,
+            stop_reason="setup_failed",
+            outcome="failed_setup",
+            failure_taxonomy="setup:command_returncode",
+            failure_taxonomy_tags=["outcome:failed_setup", "stop_reason:setup_failed", "setup_failure"],
+        ),
+        EvalRunResult(
+            task_name="verify_failed",
+            run_id="run-verify",
+            run_dir="runs/run-verify",
+            passed=False,
+            step_count=8,
+            tool_call_count=5,
+            stop_reason="verification_failed",
+            outcome="failed_verification",
+            failing_checks=["verify_command_1"],
+            failure_taxonomy="verification:verify_command_returncode",
+            failure_taxonomy_tags=[
+                "outcome:failed_verification",
+                "stop_reason:verification_failed",
+                "verification_check_count:1",
+                "verification_check:verify_command_1",
+            ],
+        ),
+    ]
+
+    batch_result = _build_eval_batch_result(eval_name="structured_failures", run_results=run_results)
+
+    assert batch_result.outcome_counts == {"failed_setup": 1, "failed_verification": 1}
+    assert batch_result.failure_distribution == {"setup_failed": 1, "verification_failed": 1}
+    assert batch_result.failure_taxonomy_counts == {
+        "setup:command_returncode": 1,
+        "verification:verify_command_returncode": 1,
+    }

@@ -124,18 +124,3 @@
 1. 把 setup / verify 失败收口成结构化 stop reason 和更稳定的 failure taxonomy。
 2. 继续把 `reflect` 从占位记录替换成能辅助重规划的真实反思链路。
 3. 视真实任务需要继续扩展更高阶的 `verify_rules`。
-
-## Phase 9 本轮新增进展：结构化失败收口与 reflect feedback
-
-- setup command 失败现在会在进入 loop 前停止 run，并写入 `stop_reason.code = setup_failed`；`stop_reason.details` 包含全部 setup 结果和失败命令，不再把 setup 失败混入普通模型/验证流程。
-- verify 最终失败现在会以 `stop_reason.code = verification_failed` 收口，并继续执行 `finalize` 写完整报告；details 中包含失败检查名、失败 verify command、失败规则类别和 verify mode。
-- eval outcome / failure taxonomy 已补稳定分类：setup 失败归为 `failed_setup` / `setup:command_returncode`，verify command 失败归为 `failed_verification` / `verification:verify_command_returncode`，verify rule 失败归为 `verification:verify_rule:<check>`。
-- reflect 现在会生成 `reflect_feedback` trace 事件，并把上一轮 observation、verify failure、失败工具摘要、建议关注点传入下一轮 `runtime_feedback.previous_reflect_feedback`。
-- `eval_tasks/sample_batch.json` 已升级为 UTF-8 可读任务集，并给两个样例任务加入真实 `verify_commands` 与已实现的结构化 `verify_rules`。
-- 本轮仍不新增 CLI 单次 verify 参数，不放开默认 `runtime.max_steps=2`。
-
-## Phase 9 下一步顺序更新
-
-1. 继续把 reflect feedback 从“结构化建议”接到更真实的模型提示/策略约束，减少重复失败计划。
-2. 基于升级后的 sample batch 做一轮 eval/comparison smoke，观察新 taxonomy 和 reflect feedback 在报告里的可读性。
-3. 只有在真实任务暴露需求后，再补 regex、JSON key/length、diff text 等更高阶 `verify_rules`。

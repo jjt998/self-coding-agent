@@ -91,7 +91,8 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
     assert runtime_state.reflect_trigger_reason == "verification_failed"
     assert runtime_state.reflect_count == 1
     assert runtime_state.stop_reason is not None
-    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MAX_STEPS_REACHED
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.VERIFICATION_FAILED
+    assert runtime_state.stop_reason.details["verification_failure"]["failing_check_names"] == ["说明文件可读"]
     assert runtime_state.completed_states == [
         "ingest",
         "analyze",
@@ -254,7 +255,7 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
     assert runtime_state.reflect_count == 2
     assert runtime_state.reflect_trigger_reasons == ["no_progress_after_observe", "no_progress_after_observe"]
     assert runtime_state.stop_reason is not None
-    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MAX_STEPS_REACHED
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.VERIFICATION_FAILED
     assert runtime_state.completed_states == [
         "ingest",
         "analyze",
@@ -442,7 +443,18 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
     assert feedbacks[1]["iteration"] == 2
     assert feedbacks[1]["previous_observation"]["progress_made"] is True
     assert feedbacks[1]["previous_verification"]["passed"] is False
+    assert feedbacks[1]["previous_reflect_feedback"]["trigger"] == "verification_failed"
+    assert feedbacks[1]["previous_reflect_feedback"]["verification_failure"]["failing_check_names"] == ["fake_verify"]
     assert feedbacks[1]["recent_tool_results"][0]["tool_name"] == "apply_patch"
+
+    trace_events = [
+        json.loads(line)
+        for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback")
+    assert reflect_payload["trigger"] == "verification_failed"
+    assert reflect_payload["verification_failure"]["failing_check_names"] == ["fake_verify"]
 
 
 def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, monkeypatch) -> None:
