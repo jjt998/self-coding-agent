@@ -109,18 +109,3 @@
 4. 优先查看 `src/loop.py`、`src/tools.py`、`src/verify.py`、`src/runner.py`
 5. 再查看 `src/eval_runner.py`、`src/experiment_runner.py`、`eval_tasks/sample_batch.json`
 6. 从“结构化任务级 verify 增强 + 真实模型/策略决策层 + stub loop 替换”继续推进
-
-## Phase 9 本轮新增进展：第三批 verify_rules
-
-- `src/verify.py` 已扩展第三批任务级 `verify_rules`，支持 JSON、diff、多文件聚合三类更贴近真实任务的断言。
-- JSON 规则新增 `json_file_value_equals`，使用简单点号路径语法，例如 `a.b.0.name`，严格比较 `expected_value` 的原始 JSON 类型和值。
-- diff 规则新增 `diff_changed_file_count_at_least`、`diff_changed_file_count_at_most`、`diff_contains_file`，只消费本次 run 已有的 `git_diff` 工具结果；没有 `git_diff` 时规则失败，不在 verify 阶段隐式重新生成 diff。
-- 多文件聚合规则新增 `files_matching_count_at_least`、`files_matching_count_at_most`，支持 `glob`、`contains`、`not_contains`、`min_count`、`max_count`，并且只统计 repo root 内可按 UTF-8 读取的文本文件。
-- `src/eval_runner.py` 的 task schema 清洗已保留 `json_path`、`expected_value`、`glob`、`min_count`、`max_count`；其中 `expected_value` 不被字符串化，保留字符串、数字、布尔、对象、数组等原始 JSON 类型。
-- 本轮未修改 loop、CLI 单次 verify 参数、setup/verify failure taxonomy，也未删除 `build_phase_3_tool_sequence()`。
-
-## Phase 9 下一步顺序
-
-1. 把 setup / verify 失败收口成结构化 stop reason 和更稳定的 failure taxonomy。
-2. 继续把 `reflect` 从占位记录替换成能辅助重规划的真实反思链路。
-3. 视真实任务需要继续扩展更高阶的 `verify_rules`。

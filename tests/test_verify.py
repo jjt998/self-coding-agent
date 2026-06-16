@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -125,6 +126,177 @@ def test_verify_supports_negative_command_output_and_line_count_failures(tmp_pat
 
     assert result.passed is False
     assert [check.passed for check in result.checks[1:]] == [False, False, False]
+
+
+def test_verify_supports_json_file_value_equals(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "result.json").write_text(
+        json.dumps({"status": "ok", "items": [{"name": "alpha", "count": 2}], "enabled": True}),
+        encoding="utf-8",
+    )
+
+    settings = build_settings(
+        task="verify json",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_commands=[[sys.executable, "-c", "pass"]],
+        verify_rules=[
+            {"type": "json_file_value_equals", "name": "json status", "path": "result.json", "json_path": "status", "expected_value": "ok"},
+            {"type": "json_file_value_equals", "name": "json nested number", "path": "result.json", "json_path": "items.0.count", "expected_value": 2},
+            {"type": "json_file_value_equals", "name": "json bool", "path": "result.json", "json_path": "enabled", "expected_value": True},
+        ],
+    )
+
+    result = build_phase_4_verification(settings=settings, tool_executions=[])
+
+    assert result.passed is True
+    assert [check.passed for check in result.checks[1:]] == [True, True, True]
+
+
+def test_verify_json_file_value_equals_failures(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "invalid.json").write_text("{invalid", encoding="utf-8")
+    (repo_root / "result.json").write_text(json.dumps({"status": "fail", "items": []}), encoding="utf-8")
+
+    settings = build_settings(
+        task="verify json failures",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_commands=[[sys.executable, "-c", "pass"]],
+        verify_rules=[
+            {"type": "json_file_value_equals", "name": "missing file", "path": "missing.json", "json_path": "status", "expected_value": "ok"},
+            {"type": "json_file_value_equals", "name": "invalid json", "path": "invalid.json", "json_path": "status", "expected_value": "ok"},
+            {"type": "json_file_value_equals", "name": "missing path", "path": "result.json", "json_path": "items.0.name", "expected_value": "alpha"},
+            {"type": "json_file_value_equals", "name": "value mismatch", "path": "result.json", "json_path": "status", "expected_value": "ok"},
+        ],
+    )
+
+    result = build_phase_4_verification(settings=settings, tool_executions=[])
+
+    assert result.passed is False
+    assert [check.name for check in result.checks[1:]] == ["missing file", "invalid json", "missing path", "value mismatch"]
+    assert [check.passed for check in result.checks[1:]] == [False, False, False, False]
+
+
+def test_verify_supports_diff_rules_from_existing_git_diff_result(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    settings = build_settings(
+        task="verify diff",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_commands=[[sys.executable, "-c", "pass"]],
+        verify_rules=[
+            {"type": "diff_changed_file_count_at_least", "name": "diff min", "min_count": 2},
+            {"type": "diff_changed_file_count_at_most", "name": "diff max", "max_count": 3},
+            {"type": "diff_contains_file", "name": "diff contains", "path": "src/app.py"},
+        ],
+    )
+    tool_executions = [
+        ToolExecution(
+            "git_diff",
+            {"paths": None},
+            {
+                "changed_file_count": 2,
+                "diffs": [
+                    {"path": "src/app.py", "diff": "demo"},
+                    {"path": "tests/test_app.py", "diff": "demo"},
+                ],
+            },
+        )
+    ]
+
+    result = build_phase_4_verification(settings=settings, tool_executions=tool_executions)
+
+    assert result.passed is True
+    assert [check.passed for check in result.checks[1:]] == [True, True, True]
+
+
+def test_verify_diff_rules_fail_without_matching_git_diff_result(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    settings = build_settings(
+        task="verify diff failures",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_commands=[[sys.executable, "-c", "pass"]],
+        verify_rules=[
+            {"type": "diff_changed_file_count_at_least", "name": "no diff", "min_count": 1},
+            {"type": "diff_changed_file_count_at_most", "name": "too many", "max_count": 1},
+            {"type": "diff_contains_file", "name": "missing file", "path": "src/app.py"},
+        ],
+    )
+
+    result_without_diff = build_phase_4_verification(settings=settings, tool_executions=[])
+    result_with_diff = build_phase_4_verification(
+        settings=settings,
+        tool_executions=[
+            ToolExecution(
+                "git_diff",
+                {"paths": None},
+                {"changed_file_count": 2, "diffs": [{"path": "README.md", "diff": "demo"}]},
+            )
+        ],
+    )
+
+    assert result_without_diff.passed is False
+    assert [check.passed for check in result_without_diff.checks[1:]] == [False, False, False]
+    assert result_with_diff.passed is False
+    assert [check.passed for check in result_with_diff.checks[1:]] == [True, False, False]
+
+
+def test_verify_supports_files_matching_count_rules(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    docs_dir = repo_root / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "a.md").write_text("status=ok\n", encoding="utf-8")
+    (docs_dir / "b.md").write_text("status=ok\n", encoding="utf-8")
+    (docs_dir / "debug.md").write_text("status=ok\nDEBUG\n", encoding="utf-8")
+    (docs_dir / "binary.md").write_bytes(b"\xff\xfe\x00")
+
+    settings = build_settings(
+        task="verify file aggregation",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_commands=[[sys.executable, "-c", "pass"]],
+        verify_rules=[
+            {
+                "type": "files_matching_count_at_least",
+                "name": "ok docs min",
+                "glob": "docs/*.md",
+                "contains": "status=ok",
+                "not_contains": "DEBUG",
+                "min_count": 2,
+            },
+            {
+                "type": "files_matching_count_at_most",
+                "name": "ok docs max",
+                "glob": "docs/*.md",
+                "contains": "status=ok",
+                "not_contains": "DEBUG",
+                "max_count": 1,
+            },
+        ],
+    )
+
+    result = build_phase_4_verification(settings=settings, tool_executions=[])
+
+    assert result.passed is False
+    assert [check.passed for check in result.checks[1:]] == [True, False]
+    assert "skipped=1" in result.checks[1].detail
 
 
 def test_verify_falls_back_to_stub_tool_chain_when_no_verify_commands() -> None:

@@ -475,6 +475,89 @@ def test_load_eval_task_specs_supports_sandbox_and_setup_fields(tmp_path: Path) 
     ]
 
 
+def test_load_eval_task_specs_preserves_structured_verify_rule_fields(tmp_path: Path) -> None:
+    task_file = tmp_path / "task_file.json"
+    task_file.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "name": "structured_verify_rules",
+                        "task": "check structured outputs",
+                        "verify_commands": [["python", "-c", "pass"]],
+                        "verify_rules": [
+                            {
+                                "type": "json_file_value_equals",
+                                "path": "result.json",
+                                "json_path": "items.0.enabled",
+                                "expected_value": True,
+                            },
+                            {
+                                "type": "json_file_value_equals",
+                                "path": "metrics.json",
+                                "json_path": "score",
+                                "expected_value": 3,
+                            },
+                            {
+                                "type": "json_file_value_equals",
+                                "path": "payload.json",
+                                "json_path": "data",
+                                "expected_value": {"labels": ["ok"], "count": 1},
+                            },
+                            {
+                                "type": "files_matching_count_at_least",
+                                "glob": "docs/*.md",
+                                "contains": "status=ok",
+                                "not_contains": "DEBUG",
+                                "min_count": "2",
+                            },
+                            {
+                                "type": "diff_changed_file_count_at_most",
+                                "max_count": 4,
+                            },
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    specs = load_eval_task_specs(task_file)
+
+    assert specs[0].verify_rules == [
+        {
+            "type": "json_file_value_equals",
+            "path": "result.json",
+            "json_path": "items.0.enabled",
+            "expected_value": True,
+        },
+        {
+            "type": "json_file_value_equals",
+            "path": "metrics.json",
+            "json_path": "score",
+            "expected_value": 3,
+        },
+        {
+            "type": "json_file_value_equals",
+            "path": "payload.json",
+            "json_path": "data",
+            "expected_value": {"labels": ["ok"], "count": 1},
+        },
+        {
+            "type": "files_matching_count_at_least",
+            "min_count": 2,
+            "contains": "status=ok",
+            "not_contains": "DEBUG",
+            "glob": "docs/*.md",
+        },
+        {"type": "diff_changed_file_count_at_most", "max_count": 4},
+    ]
+
+
 def test_failure_taxonomy_tags_keep_all_failure_dimensions() -> None:
     tags = _build_failure_taxonomy_tags(
         outcome="failed_verification",

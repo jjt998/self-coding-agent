@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import json
 from pathlib import Path
 import subprocess
 from typing import Any
@@ -57,7 +58,7 @@ class VerifyCommandResult:
 def build_phase_4_verification(settings: RunSettings, tool_executions: list[ToolExecution]) -> VerificationResult:
     """根据任务设置决定走真实 verify 还是旧的演示型 verify。"""
     if settings.verify_commands:
-        return _build_task_command_verification(settings=settings)
+        return _build_task_command_verification(settings=settings, tool_executions=tool_executions)
     return _build_stub_tool_verification(tool_executions=tool_executions)
 
 
@@ -136,7 +137,7 @@ def _build_stub_tool_verification(tool_executions: list[ToolExecution]) -> Verif
     )
 
 
-def _build_task_command_verification(settings: RunSettings) -> VerificationResult:
+def _build_task_command_verification(settings: RunSettings, tool_executions: list[ToolExecution]) -> VerificationResult:
     """按任务定义的 verify_commands 执行真实验证，并把结果收敛成统一结构。"""
     checks: list[VerificationCheck] = []
     command_results: list[VerifyCommandResult] = []
@@ -173,6 +174,7 @@ def _build_task_command_verification(settings: RunSettings) -> VerificationResul
         repo_root=settings.repo_root,
         verify_rules=settings.verify_rules,
         command_results=command_results,
+        tool_executions=tool_executions,
     )
     checks.extend(rule_checks)
 
@@ -199,6 +201,7 @@ def _build_verify_rule_checks(
     repo_root: str,
     verify_rules: list[dict[str, Any]],
     command_results: list[VerifyCommandResult],
+    tool_executions: list[ToolExecution],
 ) -> list[VerificationCheck]:
     """把 verify_rules 解释成结构化检查项，补足“退出码成功但任务没完成”的场景。"""
     checks: list[VerificationCheck] = []
@@ -238,6 +241,24 @@ def _build_verify_rule_checks(
             continue
         if rule_type == "file_line_count_at_most":
             checks.append(_check_file_line_count(rule_name, rule, repo_root, mode="at_most"))
+            continue
+        if rule_type == "json_file_value_equals":
+            checks.append(_check_json_file_value_equals(rule_name, rule, repo_root))
+            continue
+        if rule_type == "diff_changed_file_count_at_least":
+            checks.append(_check_diff_changed_file_count(rule_name, rule, tool_executions, mode="at_least"))
+            continue
+        if rule_type == "diff_changed_file_count_at_most":
+            checks.append(_check_diff_changed_file_count(rule_name, rule, tool_executions, mode="at_most"))
+            continue
+        if rule_type == "diff_contains_file":
+            checks.append(_check_diff_contains_file(rule_name, rule, tool_executions))
+            continue
+        if rule_type == "files_matching_count_at_least":
+            checks.append(_check_files_matching_count(rule_name, rule, repo_root, mode="at_least"))
+            continue
+        if rule_type == "files_matching_count_at_most":
+            checks.append(_check_files_matching_count(rule_name, rule, repo_root, mode="at_most"))
             continue
 
         checks.append(
@@ -414,6 +435,210 @@ def _check_file_text(rule_name: str, rule: dict[str, Any], repo_root: str, shoul
         passed=passed,
         detail=f"检查文件 `{file_path}` 是否{action_text} `{expected_text or '空'}`。",
     )
+
+
+def _check_json_file_value_equals(rule_name: str, rule: dict[str, Any], repo_root: str) -> VerificationCheck:
+    """Check a JSON file value selected by simple dot-path syntax."""
+    file_path = _resolve_rule_file_path(repo_root=repo_root, rule=rule)
+    json_path = str(rule.get("json_path", "")).strip()
+    if file_path is None:
+        return VerificationCheck(name=rule_name, passed=False, detail="verify rule missing a valid path.")
+    if not json_path:
+        return VerificationCheck(name=rule_name, passed=False, detail="verify rule missing json_path.")
+    if not file_path.exists():
+        return VerificationCheck(name=rule_name, passed=False, detail=f"JSON file does not exist: `{file_path}`.")
+
+    try:
+        data = json.loads(file_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return VerificationCheck(name=rule_name, passed=False, detail=f"JSON parse failed: {error}.")
+
+    found, actual_value, error_detail = _resolve_simple_json_path(data, json_path)
+    expected_value = rule.get("expected_value")
+    passed = found and actual_value == expected_value
+    detail = (
+        f"JSON path `{json_path}` actual value is {actual_value!r}; expected {expected_value!r}."
+        if found
+        else f"JSON path `{json_path}` was not found: {error_detail}."
+    )
+    return VerificationCheck(name=rule_name, passed=passed, detail=detail)
+
+
+def _resolve_simple_json_path(data: Any, json_path: str) -> tuple[bool, Any, str]:
+    """Resolve paths like `a.b.0.name` against dict/list JSON data."""
+    current = data
+    for segment in json_path.split("."):
+        if not segment:
+            return False, None, "empty path segment"
+        if isinstance(current, dict):
+            if segment not in current:
+                return False, None, f"missing object key `{segment}`"
+            current = current[segment]
+            continue
+        if isinstance(current, list):
+            try:
+                index = int(segment)
+            except ValueError:
+                return False, None, f"array index `{segment}` is not an integer"
+            if index < 0 or index >= len(current):
+                return False, None, f"array index `{index}` is out of range"
+            current = current[index]
+            continue
+        return False, None, f"value type `{type(current).__name__}` cannot resolve `{segment}`"
+    return True, current, ""
+
+
+def _check_diff_changed_file_count(
+    rule_name: str,
+    rule: dict[str, Any],
+    tool_executions: list[ToolExecution],
+    mode: str,
+) -> VerificationCheck:
+    """Check changed file count from an existing git_diff tool result."""
+    diff_output = _find_latest_git_diff_output(tool_executions)
+    if diff_output is None:
+        return VerificationCheck(name=rule_name, passed=False, detail="No git_diff tool result is available.")
+
+    changed_file_count = _normalize_int(diff_output.get("changed_file_count"))
+    if changed_file_count is None:
+        changed_file_count = len(_extract_diff_paths(diff_output))
+
+    if mode == "at_least":
+        threshold = _normalize_int(rule.get("min_count"))
+        passed = threshold is not None and changed_file_count >= threshold
+        detail = f"diff changed_file_count is {changed_file_count}; expected at least {threshold if threshold is not None else 'unset'}."
+    else:
+        threshold = _normalize_int(rule.get("max_count"))
+        passed = threshold is not None and changed_file_count <= threshold
+        detail = f"diff changed_file_count is {changed_file_count}; expected at most {threshold if threshold is not None else 'unset'}."
+    return VerificationCheck(name=rule_name, passed=passed, detail=detail)
+
+
+def _check_diff_contains_file(
+    rule_name: str,
+    rule: dict[str, Any],
+    tool_executions: list[ToolExecution],
+) -> VerificationCheck:
+    """Check that an existing git_diff result contains a target path."""
+    diff_output = _find_latest_git_diff_output(tool_executions)
+    if diff_output is None:
+        return VerificationCheck(name=rule_name, passed=False, detail="No git_diff tool result is available.")
+
+    expected_path = _normalize_relative_path_text(rule.get("path"))
+    changed_paths = _extract_diff_paths(diff_output)
+    passed = bool(expected_path) and expected_path in changed_paths
+    return VerificationCheck(
+        name=rule_name,
+        passed=passed,
+        detail=f"diff changed files are {changed_paths}; expected `{expected_path or 'unset'}`.",
+    )
+
+
+def _check_files_matching_count(
+    rule_name: str,
+    rule: dict[str, Any],
+    repo_root: str,
+    mode: str,
+) -> VerificationCheck:
+    """Count UTF-8 text files under repo root matching glob and content constraints."""
+    glob_pattern = str(rule.get("glob", "")).strip().replace("\\", "/")
+    if not glob_pattern:
+        return VerificationCheck(name=rule_name, passed=False, detail="verify rule missing glob.")
+    if Path(glob_pattern).is_absolute() or ".." in Path(glob_pattern).parts:
+        return VerificationCheck(name=rule_name, passed=False, detail="glob must stay inside repo root.")
+
+    base_path = Path(repo_root).resolve()
+    contains_text = _normalize_optional_rule_text(rule.get("contains"))
+    not_contains_text = _normalize_optional_rule_text(rule.get("not_contains"))
+    inspected_count = 0
+    skipped_count = 0
+    matched_paths: list[str] = []
+
+    for candidate_path in sorted(base_path.glob(glob_pattern)):
+        resolved_path = candidate_path.resolve()
+        try:
+            resolved_path.relative_to(base_path)
+        except ValueError:
+            skipped_count += 1
+            continue
+        if not resolved_path.is_file():
+            continue
+        try:
+            content = resolved_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            skipped_count += 1
+            continue
+        inspected_count += 1
+        contains_ok = contains_text is None or contains_text in content
+        not_contains_ok = not_contains_text is None or not_contains_text not in content
+        if contains_ok and not_contains_ok:
+            matched_paths.append(resolved_path.relative_to(base_path).as_posix())
+
+    matched_count = len(matched_paths)
+    if mode == "at_least":
+        threshold = _normalize_int(rule.get("min_count"))
+        passed = threshold is not None and matched_count >= threshold
+        compare_text = f"at least {threshold if threshold is not None else 'unset'}"
+    else:
+        threshold = _normalize_int(rule.get("max_count"))
+        passed = threshold is not None and matched_count <= threshold
+        compare_text = f"at most {threshold if threshold is not None else 'unset'}"
+
+    detail = (
+        f"glob `{glob_pattern}` matched={matched_count}, inspected={inspected_count}, "
+        f"skipped={skipped_count}; expected {compare_text}. matched_paths={matched_paths}"
+    )
+    return VerificationCheck(name=rule_name, passed=passed, detail=detail)
+
+
+def _find_latest_git_diff_output(tool_executions: list[ToolExecution]) -> dict[str, Any] | None:
+    """Return the latest git_diff output from already executed tools."""
+    for execution in reversed(tool_executions):
+        if execution.tool_name == "git_diff" and isinstance(execution.tool_output, dict):
+            return execution.tool_output
+    return None
+
+
+def _extract_diff_paths(diff_output: dict[str, Any]) -> list[str]:
+    """Extract normalized changed paths from git_diff output."""
+    raw_diffs = diff_output.get("diffs", [])
+    if not isinstance(raw_diffs, list):
+        return []
+    paths: list[str] = []
+    for item in raw_diffs:
+        if not isinstance(item, dict):
+            continue
+        path_text = _normalize_relative_path_text(item.get("path"))
+        if path_text:
+            paths.append(path_text)
+    return paths
+
+
+def _normalize_relative_path_text(raw_value: Any) -> str:
+    """Normalize paths to repo-relative slash form."""
+    return str(raw_value or "").strip().replace("\\", "/").strip("/")
+
+
+def _normalize_optional_rule_text(raw_value: Any) -> str | None:
+    """Normalize optional text constraints without treating missing values as assertions."""
+    if raw_value is None:
+        return None
+    text = str(raw_value)
+    return text if text else None
+
+
+def _normalize_int(raw_value: Any) -> int | None:
+    """Normalize integer thresholds used by verify rules."""
+    if raw_value is None or isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        return raw_value
+    if isinstance(raw_value, str) and raw_value.strip():
+        try:
+            return int(raw_value.strip())
+        except ValueError:
+            return None
+    return None
 
 
 def _find_command_result(rule: dict[str, Any], command_results: list[VerifyCommandResult]) -> VerifyCommandResult | None:
