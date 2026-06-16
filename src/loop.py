@@ -7,7 +7,7 @@ from typing import Any
 from context import ContextBuilder, ContextSnapshot
 from config import RunSettings
 from memory import RuntimeMemoryManager
-from model import ModelDecision, build_model_adapter
+from model import ModelDecision, ModelError, build_model_adapter
 from trace import TraceEvent, TraceWriter
 from tools import CoreToolRunner, ToolExecution
 from verify import VerificationResult, build_phase_4_verification
@@ -32,6 +32,7 @@ class StopReasonCode(str, Enum):
     COMPLETED = "completed"
     MAX_STEPS_REACHED = "max_steps_reached"
     INTERNAL_ERROR = "internal_error"
+    MODEL_ERROR = "model_error"
 
 
 @dataclass(slots=True)
@@ -93,7 +94,6 @@ class LoopOrchestrator:
             repo_root=settings.repo_root,
             strategy_config=config_data.get("memory", {}),
         )
-        model_adapter = build_model_adapter(config_data=config_data)
         tool_runner = CoreToolRunner(repo_root=settings.repo_root)
         planned_states = [
             AgentState.INGEST,
@@ -109,16 +109,21 @@ class LoopOrchestrator:
         while index < len(planned_states):
             state = planned_states[index]
             self._transition(runtime_state, to_state=state, reason="baseline_loop")
-            state_payload = self._run_stub_state(
-                state=state,
-                settings=settings,
-                runtime_state=runtime_state,
-                config_data=config_data,
-                context_builder=context_builder,
-                memory_manager=memory_manager,
-                model_adapter=model_adapter,
-                tool_runner=tool_runner,
-            )
+            try:
+                state_payload = self._run_stub_state(
+                    state=state,
+                    settings=settings,
+                    runtime_state=runtime_state,
+                    config_data=config_data,
+                    context_builder=context_builder,
+                    memory_manager=memory_manager,
+                    tool_runner=tool_runner,
+                )
+            except ModelError as error:
+                if state is not AgentState.PLAN:
+                    raise
+                self._finish_with_model_error(runtime_state=runtime_state, error=error)
+                return runtime_state
             runtime_state.mark_completed(state)
 
             self.trace_writer.write_event(
@@ -164,6 +169,31 @@ class LoopOrchestrator:
             )
         )
         return runtime_state
+
+    def _finish_with_model_error(self, runtime_state: RuntimeState, error: ModelError) -> None:
+        """把模型决策失败收口成稳定 stop reason，并立即结束 run。"""
+        payload = {
+            "provider": error.provider,
+            "model_name": error.model_name,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+        }
+        self.trace_writer.write_event(TraceEvent(event_type="model_decision_failed", payload=payload))
+        runtime_state.stop_reason = StopReason(
+            code=StopReasonCode.MODEL_ERROR,
+            message="模型决策失败，run 已停止。",
+            details=payload,
+        )
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="run_finished",
+                payload={
+                    "final_state": runtime_state.current_state,
+                    "step_count": runtime_state.step_count,
+                    "stop_reason": runtime_state.stop_reason.to_dict(),
+                },
+            )
+        )
 
     def _get_reflect_strategy(self, config_data: dict[str, Any]) -> str:
         """从配置里读取当前 reflect 策略，缺省时回落到现有默认行为。"""
@@ -226,7 +256,6 @@ class LoopOrchestrator:
         config_data: dict[str, Any],
         context_builder: ContextBuilder,
         memory_manager: RuntimeMemoryManager,
-        model_adapter,
         tool_runner: CoreToolRunner,
     ) -> dict[str, Any]:
         """执行当前阶段的最小占位逻辑，重点是把过程证据写完整。"""
@@ -314,6 +343,7 @@ class LoopOrchestrator:
                 ],
             }
         if state is AgentState.PLAN:
+            model_adapter = build_model_adapter(config_data=config_data)
             runtime_state.model_decision = model_adapter.decide(
                 task=runtime_state.task,
                 task_type=runtime_state.task_type,
@@ -337,7 +367,6 @@ class LoopOrchestrator:
             tool_calls = self._run_planned_tools(
                 tool_runner=tool_runner,
                 model_decision=runtime_state.model_decision,
-                task=runtime_state.task,
             )
             runtime_state.tool_executions = tool_calls
             return {
@@ -380,20 +409,11 @@ class LoopOrchestrator:
     def _run_planned_tools(
         self,
         tool_runner: CoreToolRunner,
-        model_decision: ModelDecision | None,
-        task: str,
+        model_decision: ModelDecision,
     ) -> list[ToolExecution]:
-        """执行决策层产出的工具计划；若计划缺失则回退到旧的 Phase 3 序列。"""
+        """执行决策层产出的工具计划；工具计划必须来自模型决策。"""
         executions: list[ToolExecution] = []
-        planned_tool_calls = (
-            [(item.tool_name, item.tool_input) for item in model_decision.tool_calls]
-            if model_decision and model_decision.tool_calls
-            else []
-        )
-        if not planned_tool_calls:
-            from tools import build_phase_3_tool_sequence
-
-            planned_tool_calls = build_phase_3_tool_sequence(task=task)
+        planned_tool_calls = [(item.tool_name, item.tool_input) for item in model_decision.tool_calls]
 
         for tool_name, tool_input in planned_tool_calls:
             self.trace_writer.write_event(

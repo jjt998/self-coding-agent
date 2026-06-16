@@ -2,7 +2,7 @@
 
 ## 总览
 
-- 最后更新时间：2026-06-16
+- 最后更新时间：2026-06-15
 - 当前激活阶段：`Phase 9：真实任务最小闭环`
 - 当前阶段状态：`in_progress`
 
@@ -75,8 +75,8 @@
   - 让批量实验具备任务级隔离，固定采用“每题独立 sandbox 目录”。
 - 当前已识别缺口：
   - `src/loop.py` 仍依赖 `_run_stub_state`
-  - `src/tools.py` 仍保留固定 `build_phase_3_tool_sequence()` 辅助函数，但 `loop` 不再把它作为模型决策回退路径
-  - 当前已接入第一版 OpenAI 兼容模型决策层，但尚未接入真正的多步任务求解推进回路
+  - `src/tools.py` 仍依赖固定 `build_phase_3_tool_sequence()`
+  - 当前已接入第一版规则驱动决策层接口，但尚未接入真正的任务级模型决策、工具选择与步骤推进回路
   - `src/verify.py` 已支持 `verify_commands`，但当前通过条件仍主要等价于“命令退出码是否成功”
   - eval task schema 已承载 `repo_subdir` / `workspace_mode` / `setup_commands` / `verify_commands`，后续还需继续增强 richer verify schema
 - 本轮已完成：
@@ -97,22 +97,19 @@
   - 回归测试新增覆盖：`verify_rules` 成功、`verify_rules` 失败、task spec 中 `verify_rules` 字段解析
   - 当前 `verify_rules` 第二版已补齐一批更贴近真实任务的断言：命令 stdout/stderr 不包含检查、文件不存在检查、文件最小/最大行数检查
   - 回归测试新增覆盖：负向命令输出检查、文件不存在检查、文件行数上下界检查，以及对应 task spec 字段解析
-  - 已重构 `src/model.py`，移除 `rule_based` adapter，当前只支持 `openai_compatible` 决策层
-  - 当前 OpenAI 兼容决策层会调用 `/chat/completions`，并要求模型返回 `summary`、`rationale`、`planned_actions`、`tool_calls` JSON
-  - 当前模型工具计划只允许 `search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`，且 `tool_input` 必须是对象
-  - `src/loop.py` 的 `plan` 阶段现已捕获模型配置、请求和响应异常，并以 `stop_reason.code = model_error` 结束 run
-  - `model_decision_failed` 已进入 trace，错误 details 包含 provider、model name、error type 和 error message，不记录 API key
-  - `_run_planned_tools()` 已移除旧 Phase 3 固定工具序列回退逻辑，工具执行必须来自模型返回的合法 `tool_calls`
-  - 所有 `configs/*.json` 已切到 `openai_compatible`，默认通过 `OPENAI_API_KEY` 读取密钥
-  - 已新增 `tests/test_model.py`，并更新 `tests/test_loop.py` / `tests/test_cli.py` 适配真实模型决策层
-  - 本轮语法级验收通过：工作区内置 Python 执行 `compileall src tests` 通过；当前环境缺少可用 pytest，未能执行 pytest 回归
+  - 已新增 `src/model.py`，把任务级决策层抽成独立接口，当前先落 `rule_based` 适配器承接 `provider` / `name` / `planned_actions` / `tool_calls`
+  - `src/loop.py` 的 `plan` 阶段现已产出 `model_decision` 并写入 trace，`act` 阶段现已优先执行 `model_decision.tool_calls`
+  - `configs/default.json` 已切到 `rule_based` / `phase9-rule-based-planner`，把默认 run 从“纯 stub plan”升级为“规则驱动决策层 + 旧工具链执行”
+  - 回归测试新增覆盖：`model_decision` trace 事件、默认决策层 provider/model name、按计划执行工具步骤
+  - 分项自动化验收通过：`tests/test_verify.py`、`tests/test_eval.py`、`tests/test_cli.py`、`tests/test_loop.py`
 - 下一步实现顺序建议：
-  1. 逐步把 loop 从 stub 替换成真实求解链路。
-  2. 继续扩展 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义。
-  3. 把 setup / verify 失败都收口为结构化 stop reason 与更稳定的 failure taxonomy。
+  1. 把 loop 从 stub 逐步替换为真实求解链路，并让 `model_decision` 开始驱动真实读代码/改代码步骤。
+  2. 继续把当前 `rule_based` 决策层推进到更真实的模型接口。
+  3. 继续扩展 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义，把任务级 verify 做成更完整、更可复用的验证 schema。
+  4. 把 setup / verify 失败都收口为结构化 stop reason 与更稳定的 failure taxonomy。
 
 ## 下一步
 
-- 先围绕真实任务实验优先补“真实 loop + 更强真实 verify + 结构化失败收口”三件套。
+- 先围绕真实任务实验优先补“真实 loop + 更像模型的决策层 + 更强真实 verify”三件套。
 - 在保留现有 comparison / experiment 外壳的前提下，把真实任务执行链路继续接深。
 - 等最小闭环跑通后，再重新设计第二批更能区分 context 策略的研究任务集。

@@ -1,10 +1,37 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import json
+import os
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from context import ContextSnapshot
-from tools import build_phase_3_tool_sequence
+
+
+ALLOWED_TOOL_NAMES = {"search_text", "read_file", "apply_patch", "run_command", "git_diff"}
+
+
+class ModelError(Exception):
+    """模型决策层异常基类，供 loop 统一收口成 model_error。"""
+
+    def __init__(self, message: str, provider: str = "", model_name: str = "") -> None:
+        super().__init__(message)
+        self.provider = provider
+        self.model_name = model_name
+
+
+class ModelConfigError(ModelError):
+    """模型配置不合法，例如缺少 provider、模型名或 API key。"""
+
+
+class ModelRequestError(ModelError):
+    """模型 HTTP 请求失败，例如网络错误或非 2xx 返回。"""
+
+
+class ModelResponseError(ModelError):
+    """模型响应不符合约定，例如不是合法 JSON 或工具计划非法。"""
 
 
 @dataclass(slots=True)
@@ -39,7 +66,10 @@ class ModelDecision:
 
 
 class ModelAdapter:
-    """抽象一次任务级决策接口，后续可替换成真实模型调用而不改 loop 骨架。"""
+    """抽象一次任务级决策接口，具体实现负责产出结构化工具计划。"""
+
+    provider: str
+    model_name: str
 
     def decide(
         self,
@@ -52,13 +82,31 @@ class ModelAdapter:
         raise NotImplementedError
 
 
-class RuleBasedModelAdapter(ModelAdapter):
-    """先用规则驱动方式承接决策层接口，逐步替代 plan/act 里的硬编码 stub。"""
+class OpenAICompatibleModelAdapter(ModelAdapter):
+    """通过 OpenAI 兼容 chat completions 接口获取任务级决策。"""
 
-    def __init__(self, provider: str, model_name: str) -> None:
-        """记录当前决策层使用的 provider 和 model 名称，方便 trace 对比。"""
+    def __init__(
+        self,
+        *,
+        provider: str,
+        model_name: str,
+        base_url: str,
+        api_key_env: str,
+        timeout_seconds: int,
+    ) -> None:
+        """记录模型连接配置，并在初始化时强制检查 API key。"""
         self.provider = provider
         self.model_name = model_name
+        self.base_url = base_url.rstrip("/")
+        self.api_key_env = api_key_env
+        self.timeout_seconds = timeout_seconds
+        self.api_key = os.environ.get(api_key_env, "").strip()
+        if not self.api_key:
+            raise ModelConfigError(
+                f"缺少模型 API key 环境变量：{api_key_env}",
+                provider=provider,
+                model_name=model_name,
+            )
 
     def decide(
         self,
@@ -67,35 +115,157 @@ class RuleBasedModelAdapter(ModelAdapter):
         context_snapshot: ContextSnapshot | None,
         config_data: dict[str, Any],
     ) -> ModelDecision:
-        """基于任务类型和上下文文件，给出一版最小但结构稳定的执行计划。"""
-        selected_files = []
-        if context_snapshot:
-            selected_files = [file_context.path for file_context in context_snapshot.repo_context.selected_files]
+        """调用模型并把返回内容解析成稳定的 ModelDecision。"""
+        request_payload = self._build_request_payload(
+            task=task,
+            task_type=task_type,
+            context_snapshot=context_snapshot,
+        )
+        response_payload = self._request_chat_completion(request_payload)
+        raw_decision = self._extract_decision_json(response_payload)
+        return self._parse_model_decision(raw_decision=raw_decision, task_type=task_type)
 
-        task_type_plan_map = {
-            "bug_fix": ["定位相关文件", "记录修复路径", "执行任务级验证"],
-            "code_understanding": ["阅读关键文件", "整理理解结论", "执行任务级验证"],
-            "test_generation": ["定位测试文件", "补充测试说明", "执行任务级验证"],
-            "refactor": ["定位目标文件", "记录重构意图", "执行任务级验证"],
+    def _build_request_payload(
+        self,
+        task: str,
+        task_type: str,
+        context_snapshot: ContextSnapshot | None,
+    ) -> dict[str, Any]:
+        """构造模型请求，只要求返回一份 JSON 决策对象。"""
+        context_payload = context_snapshot.to_dict() if context_snapshot else {}
+        return {
+            "model": self.model_name,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是本地代码任务 harness 的决策层。"
+                        "必须只返回 JSON 对象，不要 Markdown。"
+                        "JSON 字段必须包含 summary、rationale、planned_actions、tool_calls。"
+                        "tool_calls 里的 tool_name 只能是 search_text、read_file、apply_patch、run_command、git_diff，"
+                        "tool_input 必须是对象。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "task": task,
+                            "task_type": task_type,
+                            "context_snapshot": context_payload,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
         }
-        planned_actions = task_type_plan_map.get(task_type, ["定位相关文件", "记录任务处理结果", "执行任务级验证"])
 
-        # 这里先复用现有 Phase 3 工具序列，目的是先把“决策从 loop 中抽出来”，
-        # 再逐步把真正的读代码/改代码动作塞进来。
-        tool_calls = [
-            PlannedToolCall(tool_name=tool_name, tool_input=tool_input)
-            for tool_name, tool_input in build_phase_3_tool_sequence(task=task)
-        ]
-        if selected_files:
-            rationale = f"当前优先参考上下文文件：{', '.join(selected_files[:3])}。"
-        else:
-            rationale = "当前未选出明确上下文文件，先走最小受控工具链保留过程证据。"
+    def _request_chat_completion(self, request_payload: dict[str, Any]) -> dict[str, Any]:
+        """执行 HTTP 请求；测试可通过环境变量提供假响应但仍必须配置 API key。"""
+        fake_response = os.environ.get("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", "").strip()
+        if fake_response:
+            try:
+                return json.loads(fake_response)
+            except json.JSONDecodeError as error:
+                raise ModelResponseError(
+                    f"测试模型响应不是合法 JSON：{error}",
+                    provider=self.provider,
+                    model_name=self.model_name,
+                ) from error
 
+        request = Request(
+            url=f"{self.base_url}/chat/completions",
+            data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                response_text = response.read().decode("utf-8")
+        except HTTPError as error:
+            error_body = error.read().decode("utf-8", errors="replace")
+            raise ModelRequestError(
+                f"模型请求返回 HTTP {error.code}：{error_body[:300]}",
+                provider=self.provider,
+                model_name=self.model_name,
+            ) from error
+        except URLError as error:
+            raise ModelRequestError(
+                f"模型请求失败：{error.reason}",
+                provider=self.provider,
+                model_name=self.model_name,
+            ) from error
+        except TimeoutError as error:
+            raise ModelRequestError(
+                "模型请求超时。",
+                provider=self.provider,
+                model_name=self.model_name,
+            ) from error
+        except OSError as error:
+            raise ModelRequestError(
+                f"模型请求失败：{error}",
+                provider=self.provider,
+                model_name=self.model_name,
+            ) from error
+
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError as error:
+            raise ModelResponseError(
+                f"模型 HTTP 响应不是合法 JSON：{error}",
+                provider=self.provider,
+                model_name=self.model_name,
+            ) from error
+
+    def _extract_decision_json(self, response_payload: dict[str, Any]) -> dict[str, Any]:
+        """从 OpenAI 兼容响应中取出 message.content 并解析为决策 JSON。"""
+        try:
+            content = response_payload["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ModelResponseError(
+                "模型响应缺少 choices[0].message.content。",
+                provider=self.provider,
+                model_name=self.model_name,
+            ) from error
+        if not isinstance(content, str) or not content.strip():
+            raise ModelResponseError(
+                "模型响应 content 为空或不是字符串。",
+                provider=self.provider,
+                model_name=self.model_name,
+            )
+
+        try:
+            raw_decision = json.loads(content)
+        except json.JSONDecodeError as error:
+            raise ModelResponseError(
+                f"模型决策 content 不是合法 JSON：{error}",
+                provider=self.provider,
+                model_name=self.model_name,
+            ) from error
+        if not isinstance(raw_decision, dict):
+            raise ModelResponseError(
+                "模型决策 JSON 必须是对象。",
+                provider=self.provider,
+                model_name=self.model_name,
+            )
+        return raw_decision
+
+    def _parse_model_decision(self, raw_decision: dict[str, Any], task_type: str) -> ModelDecision:
+        """校验模型决策字段，并转换成内部数据结构。"""
+        summary = _required_string(raw_decision, "summary", self)
+        rationale = _required_string(raw_decision, "rationale", self)
+        planned_actions = _required_string_list(raw_decision, "planned_actions", self)
+        tool_calls = _required_tool_calls(raw_decision, self)
         return ModelDecision(
             provider=self.provider,
             model_name=self.model_name,
             task_type=task_type,
-            summary="已生成任务级结构化决策结果。",
+            summary=summary,
             rationale=rationale,
             planned_actions=planned_actions,
             tool_calls=tool_calls,
@@ -103,11 +273,118 @@ class RuleBasedModelAdapter(ModelAdapter):
 
 
 def build_model_adapter(config_data: dict[str, Any]) -> ModelAdapter:
-    """根据配置构建决策层适配器，先把 provider/name 两层接口稳定下来。"""
-    model_config = config_data.get("model", {})
+    """根据配置构建真实模型适配器；当前只接受 OpenAI 兼容 provider。"""
+    model_config = config_data.get("model")
     if not isinstance(model_config, dict):
-        model_config = {}
+        raise ModelConfigError("缺少 model 配置。")
 
-    provider = str(model_config.get("provider", "rule_based")).strip() or "rule_based"
-    model_name = str(model_config.get("name", "phase9-rule-based-planner")).strip() or "phase9-rule-based-planner"
-    return RuleBasedModelAdapter(provider=provider, model_name=model_name)
+    provider = str(model_config.get("provider", "")).strip()
+    if provider != "openai_compatible":
+        raise ModelConfigError(f"不支持的 model.provider：{provider or '空'}", provider=provider)
+
+    model_name = str(model_config.get("name", "")).strip()
+    if not model_name:
+        raise ModelConfigError("缺少 model.name。", provider=provider)
+
+    base_url = str(model_config.get("base_url", "https://api.openai.com/v1")).strip()
+    if not base_url:
+        base_url = "https://api.openai.com/v1"
+    api_key_env = str(model_config.get("api_key_env", "OPENAI_API_KEY")).strip() or "OPENAI_API_KEY"
+    timeout_seconds = _normalize_timeout_seconds(model_config.get("timeout_seconds"))
+    return OpenAICompatibleModelAdapter(
+        provider=provider,
+        model_name=model_name,
+        base_url=base_url,
+        api_key_env=api_key_env,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def _normalize_timeout_seconds(raw_value: Any) -> int:
+    """把模型超时配置收敛成正整数。"""
+    if isinstance(raw_value, int) and raw_value > 0:
+        return raw_value
+    if isinstance(raw_value, str) and raw_value.strip():
+        try:
+            parsed = int(raw_value.strip())
+        except ValueError:
+            return 30
+        return parsed if parsed > 0 else 30
+    return 30
+
+
+def _required_string(raw_decision: dict[str, Any], field_name: str, adapter: OpenAICompatibleModelAdapter) -> str:
+    """读取必填字符串字段。"""
+    value = raw_decision.get(field_name)
+    if not isinstance(value, str) or not value.strip():
+        raise ModelResponseError(
+            f"模型决策缺少必填字符串字段：{field_name}",
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+        )
+    return value.strip()
+
+
+def _required_string_list(
+    raw_decision: dict[str, Any],
+    field_name: str,
+    adapter: OpenAICompatibleModelAdapter,
+) -> list[str]:
+    """读取必填字符串列表字段。"""
+    value = raw_decision.get(field_name)
+    if not isinstance(value, list):
+        raise ModelResponseError(
+            f"模型决策字段必须是字符串列表：{field_name}",
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+        )
+    normalized = [str(item).strip() for item in value if str(item).strip()]
+    if not normalized:
+        raise ModelResponseError(
+            f"模型决策字段不能为空：{field_name}",
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+        )
+    return normalized
+
+
+def _required_tool_calls(raw_decision: dict[str, Any], adapter: OpenAICompatibleModelAdapter) -> list[PlannedToolCall]:
+    """读取并校验模型计划的工具调用。"""
+    value = raw_decision.get("tool_calls")
+    if not isinstance(value, list):
+        raise ModelResponseError(
+            "模型决策字段 tool_calls 必须是列表。",
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+        )
+    tool_calls: list[PlannedToolCall] = []
+    for index, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            raise ModelResponseError(
+                f"tool_calls[{index}] 必须是对象。",
+                provider=adapter.provider,
+                model_name=adapter.model_name,
+            )
+        tool_name = str(item.get("tool_name", "")).strip()
+        if tool_name not in ALLOWED_TOOL_NAMES:
+            raise ModelResponseError(
+                f"tool_calls[{index}] 使用了不支持的工具：{tool_name or '空'}",
+                provider=adapter.provider,
+                model_name=adapter.model_name,
+            )
+        tool_input = item.get("tool_input")
+        if not isinstance(tool_input, dict):
+            raise ModelResponseError(
+                f"tool_calls[{index}].tool_input 必须是对象。",
+                provider=adapter.provider,
+                model_name=adapter.model_name,
+            )
+        tool_calls.append(PlannedToolCall(tool_name=tool_name, tool_input=tool_input))
+
+    if not tool_calls:
+        raise ModelResponseError(
+            "模型决策至少需要包含一条 tool_call。",
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+        )
+    return tool_calls
