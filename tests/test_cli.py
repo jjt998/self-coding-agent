@@ -85,6 +85,15 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
         "git_diff",
     ]
 
+    model_decision_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision")
+    assert model_decision_payload["provider"] == "rule_based"
+    assert model_decision_payload["model_name"] == "phase9-rule-based-planner"
+    assert model_decision_payload["planned_actions"] == [
+        "定位相关文件",
+        "记录任务处理结果",
+        "执行任务级验证",
+    ]
+
     tool_results = [event["payload"] for event in trace_events if event["event_type"] == "tool_result"]
     assert len(tool_results) == 5
     assert tool_results[1]["tool_output"]["ok"] is True

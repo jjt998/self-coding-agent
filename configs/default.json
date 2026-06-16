@@ -1,7 +1,7 @@
 {
   "model": {
-    "provider": "stub",
-    "name": "phase-1-placeholder"
+    "provider": "rule_based",
+    "name": "phase9-rule-based-planner"
   },
   "runtime": {
     "max_steps": 1,

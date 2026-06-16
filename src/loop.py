@@ -7,8 +7,9 @@ from typing import Any
 from context import ContextBuilder, ContextSnapshot
 from config import RunSettings
 from memory import RuntimeMemoryManager
+from model import ModelDecision, build_model_adapter
 from trace import TraceEvent, TraceWriter
-from tools import CoreToolRunner, ToolExecution, build_phase_3_tool_sequence
+from tools import CoreToolRunner, ToolExecution
 from verify import VerificationResult, build_phase_4_verification
 
 
@@ -61,6 +62,7 @@ class RuntimeState:
     reflect_triggered: bool = False
     reflect_trigger_reason: str = ""
     context_snapshot: ContextSnapshot | None = None
+    model_decision: ModelDecision | None = None
     tool_executions: list[ToolExecution] = field(default_factory=list)
     verification_result: VerificationResult | None = None
     stop_reason: StopReason | None = None
@@ -91,6 +93,7 @@ class LoopOrchestrator:
             repo_root=settings.repo_root,
             strategy_config=config_data.get("memory", {}),
         )
+        model_adapter = build_model_adapter(config_data=config_data)
         tool_runner = CoreToolRunner(repo_root=settings.repo_root)
         planned_states = [
             AgentState.INGEST,
@@ -113,6 +116,7 @@ class LoopOrchestrator:
                 config_data=config_data,
                 context_builder=context_builder,
                 memory_manager=memory_manager,
+                model_adapter=model_adapter,
                 tool_runner=tool_runner,
             )
             runtime_state.mark_completed(state)
@@ -222,6 +226,7 @@ class LoopOrchestrator:
         config_data: dict[str, Any],
         context_builder: ContextBuilder,
         memory_manager: RuntimeMemoryManager,
+        model_adapter,
         tool_runner: CoreToolRunner,
     ) -> dict[str, Any]:
         """执行当前阶段的最小占位逻辑，重点是把过程证据写完整。"""
@@ -309,15 +314,34 @@ class LoopOrchestrator:
                 ],
             }
         if state is AgentState.PLAN:
+            runtime_state.model_decision = model_adapter.decide(
+                task=runtime_state.task,
+                task_type=runtime_state.task_type,
+                context_snapshot=runtime_state.context_snapshot,
+                config_data=config_data,
+            )
+            self.trace_writer.write_event(
+                TraceEvent(
+                    event_type="model_decision",
+                    payload=runtime_state.model_decision.to_dict(),
+                )
+            )
             return {
-                "summary": "已生成最小执行计划。",
-                "planned_actions": ["stub_act_once", "stub_verify_once"],
+                "summary": runtime_state.model_decision.summary,
+                "planned_actions": list(runtime_state.model_decision.planned_actions),
+                "rationale": runtime_state.model_decision.rationale,
+                "provider": runtime_state.model_decision.provider,
+                "model_name": runtime_state.model_decision.model_name,
             }
         if state is AgentState.ACT:
-            tool_calls = self._run_phase_3_tools(tool_runner=tool_runner, task=runtime_state.task)
+            tool_calls = self._run_planned_tools(
+                tool_runner=tool_runner,
+                model_decision=runtime_state.model_decision,
+                task=runtime_state.task,
+            )
             runtime_state.tool_executions = tool_calls
             return {
-                "summary": "已执行一次最小核心工具闭环。",
+                "summary": "已执行一次由任务级决策层生成的工具计划。",
                 "tool_calls": [tool_call.to_trace_payload() for tool_call in tool_calls],
             }
         if state is AgentState.OBSERVE:
@@ -353,10 +377,25 @@ class LoopOrchestrator:
             "final_status": "success",
         }
 
-    def _run_phase_3_tools(self, tool_runner: CoreToolRunner, task: str) -> list[ToolExecution]:
-        """执行 Phase 3 的受控工具序列，并把调用前后都写进 trace。"""
+    def _run_planned_tools(
+        self,
+        tool_runner: CoreToolRunner,
+        model_decision: ModelDecision | None,
+        task: str,
+    ) -> list[ToolExecution]:
+        """执行决策层产出的工具计划；若计划缺失则回退到旧的 Phase 3 序列。"""
         executions: list[ToolExecution] = []
-        for tool_name, tool_input in build_phase_3_tool_sequence(task=task):
+        planned_tool_calls = (
+            [(item.tool_name, item.tool_input) for item in model_decision.tool_calls]
+            if model_decision and model_decision.tool_calls
+            else []
+        )
+        if not planned_tool_calls:
+            from tools import build_phase_3_tool_sequence
+
+            planned_tool_calls = build_phase_3_tool_sequence(task=task)
+
+        for tool_name, tool_input in planned_tool_calls:
             self.trace_writer.write_event(
                 TraceEvent(
                     event_type="tool_called",
