@@ -265,6 +265,13 @@ def _build_phase_4_report(
     verification_status = "通过" if verification_result and verification_result.passed else "未通过"
     verification_summary = verification_result.summary if verification_result else "尚未生成验证结果。"
     context_snapshot = runtime_state.context_snapshot
+    progress_status = "是" if runtime_state.progress_made else "否"
+    observation_summary = runtime_state.observation_summary or "尚未生成进展观察结果。"
+    changed_file_lines = [
+        f"- `{path}`"
+        for path in runtime_state.changed_files
+    ]
+    changed_files_summary = "\n".join(changed_file_lines) if changed_file_lines else "- 暂无变更文件。"
 
     tool_lines = []
     for execution in runtime_state.tool_executions:
@@ -357,6 +364,12 @@ def _build_phase_4_report(
         f"- reflect：{reflect_status}\n"
         f"- stop reason：`{stop_reason_code}`\n"
         f"- stop reason 说明：{stop_reason_text}\n"
+        f"\n## 进展观察\n\n"
+        f"- 是否观察到进展：{progress_status}\n"
+        f"- 变更文件数：`{len(runtime_state.changed_files)}`\n"
+        f"- 失败工具数：`{runtime_state.failed_tool_count}`\n"
+        f"- 观察摘要：{observation_summary}\n"
+        f"{changed_files_summary}\n"
         f"\n## 上下文摘要\n\n"
         f"{context_summary}\n"
         f"\n## 工具调用摘要\n\n"

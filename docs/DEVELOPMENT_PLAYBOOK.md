@@ -367,6 +367,19 @@ Trace 最少应记录：
 - verify result
 - stop reason
 
+### 6.5 测试环境规范
+
+本项目在当前 Windows 开发环境中统一使用以下虚拟环境执行测试：
+
+- `D:\jt\ANACONDA\envs_dirs\learn-claude-code`
+
+执行测试时应显式调用该环境的 Python：
+
+- `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m pytest ...`
+- `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m compileall src tests`
+
+不要默认使用系统 PATH 中的 `python` / `py`，也不要切到 Codex 内置 Python 作为首选测试环境。若该虚拟环境缺少测试依赖，应在结果中明确说明缺失依赖，而不是静默换用其他 Python。
+
 ## 7. 建议里程碑
 
 ### Milestone A

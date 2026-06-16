@@ -105,12 +105,7 @@
   - `_run_planned_tools()` 已移除旧 Phase 3 固定工具序列回退逻辑，工具执行必须来自模型返回的合法 `tool_calls`
   - 所有 `configs/*.json` 已切到 `openai_compatible`，默认通过 `OPENAI_API_KEY` 读取密钥
   - 已新增 `tests/test_model.py`，并更新 `tests/test_loop.py` / `tests/test_cli.py` 适配真实模型决策层
-  - 本轮已按测试环境规范使用 `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe` 完成回归：`tests/test_loop.py tests/test_cli.py` 为 `15 passed`，`tests/test_eval.py tests/test_verify.py tests/test_model.py` 为 `17 passed`，全量 `pytest -q` 为 `37 passed`
-  - `src/loop.py` 已将 `observe` 从固定 no-progress stub 替换为真实工具结果观察：`git_diff` 有变更或 `apply_patch` 成功都会被视为有进展
-  - 当前 `progress_observed` trace 会记录 `progress_made`、`changed_files`、`successful_tools`、`failed_tools`、`failed_tool_count`
-  - 默认 `low_progress_plus_verify_reflect` 现在只在 `observe` 后没有真实进展时触发 `no_progress_after_observe`
-  - `run_finished.stop_reason.details` 和运行报告已补充进展观察信息，报告新增 `## 进展观察` 小节
-  - 本轮测试已补充覆盖：有进展不触发默认 reflect、无进展触发默认 reflect、CLI 报告包含进展观察
+  - 本轮语法级验收通过：工作区内置 Python 执行 `compileall src tests` 通过；当前环境缺少可用 pytest，未能执行 pytest 回归
 - 下一步实现顺序建议：
   1. 逐步把 loop 从 stub 替换成真实求解链路。
   2. 继续扩展 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义。

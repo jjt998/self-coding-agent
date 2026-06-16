@@ -67,7 +67,6 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
         "plan",
         "act",
         "observe",
-        "reflect",
         "verify",
         "finalize",
     ]
@@ -97,6 +96,12 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert tool_results[3]["tool_output"]["stdout"].strip() == "# Agent Notes"
     assert tool_results[4]["tool_output"]["changed_file_count"] == 1
     assert "agent_notes.md" in tool_results[4]["tool_output"]["diffs"][0]["path"]
+
+    progress_events = [event["payload"] for event in trace_events if event["event_type"] == "progress_observed"]
+    assert len(progress_events) == 1
+    assert progress_events[0]["progress_made"] is True
+    assert progress_events[0]["changed_files"] == ["agent_notes.md"]
+    assert progress_events[0]["failed_tool_count"] == 0
 
     verification_events = [event["payload"] for event in trace_events if event["event_type"] == "verification_result"]
     assert len(verification_events) == 1
@@ -177,7 +182,9 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "`finalize`" in report_text
-    assert "reflect：已触发" in report_text
+    assert "reflect：未触发" in report_text
+    assert "## 进展观察" in report_text
+    assert "是否观察到进展：是" in report_text
     assert "## 上下文摘要" in report_text
     assert "`README.md`" in report_text
     assert "`LONG_GUIDE.md`" in report_text

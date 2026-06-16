@@ -43,7 +43,7 @@
 - 当前模型工具计划已做最小校验：只允许 `search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`，且 `tool_input` 必须是对象。
 - 当前 `plan` 阶段模型配置、请求或响应失败会写入 `model_decision_failed` trace，并以 `stop_reason.code = model_error` 结束 run，不再回退到本地规则决策。
 - 当前所有 `configs/*.json` 已统一切到 `openai_compatible`，默认要求通过 `OPENAI_API_KEY` 提供密钥；无 API key 是预期的模型配置错误。
-- 本轮已按测试环境规范使用 `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe` 完成回归：`tests/test_loop.py tests/test_cli.py` 为 `15 passed`，`tests/test_eval.py tests/test_verify.py tests/test_model.py` 为 `17 passed`，全量 `pytest -q` 为 `37 passed`。
+- 本轮已完成语法级验收：使用工作区内置 Python 执行 `compileall src tests` 通过。当前环境没有可用 `python`/`py` 命令，且内置 Python 未安装 `pytest`，因此本轮未能执行 pytest 回归。
 
 ## 已完成
 
@@ -80,21 +80,6 @@
 
 - 暂无外部阻塞。
 - 当前主要约束是继续保持 MVP 节奏，优先补齐“真实任务可运行、可验证、可复现”的最小闭环，再继续扩展更复杂的策略和指标。
-
-## 本轮新增进展
-
-- `observe` 已从固定 stub 替换为基于工具结果的真实进展判断。
-- 当前进展判定规则：`git_diff.changed_file_count > 0` 视为有文件变更进展；任意 `apply_patch.tool_output.ok == true` 视为有成功编辑进展。
-- `RuntimeState` 已新增 `progress_made`、`changed_files`、`failed_tool_count`、`observation_summary`，并在 `progress_observed` trace 事件中记录观察证据。
-- 默认 `low_progress_plus_verify_reflect` 策略现在只在 `observe` 后未观察到进展时触发 `no_progress_after_observe`；验证失败后的 reflect 逻辑保持不变。
-- `run_finished.stop_reason.details` 已补充进展观察字段，运行报告已新增 `## 进展观察` 小节。
-- 本轮未扩展 `verify_rules`，未处理 setup / verify failure taxonomy，未改 CLI 单次 verify 参数，也未删除 `build_phase_3_tool_sequence()`。
-
-## 下一步顺序
-
-1. 继续逐步把 `loop` 从 stub 替换成真实任务求解链路。
-2. 继续扩展任务级 `verify_rules`。
-3. 把 setup / verify 失败收口成结构化 stop reason 和更稳定的 failure taxonomy。
 
 ## 新会话恢复指引
 

@@ -156,6 +156,19 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
         "run_command",
         "git_diff",
     ]
+    assert runtime_state.progress_made is True
+    assert runtime_state.changed_files == ["agent_notes.md"]
+    assert runtime_state.failed_tool_count == 0
+    assert runtime_state.reflect_triggered is False
+    assert runtime_state.completed_states == [
+        "ingest",
+        "analyze",
+        "plan",
+        "act",
+        "observe",
+        "verify",
+        "finalize",
+    ]
 
     trace_events = [
         json.loads(line)
@@ -166,6 +179,98 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert model_decision_payload["provider"] == "openai_compatible"
     assert model_decision_payload["model_name"] == "demo-model"
     assert model_decision_payload["planned_actions"] == ["执行模型工具计划"]
+    progress_payload = next(event["payload"] for event in trace_events if event["event_type"] == "progress_observed")
+    assert progress_payload["progress_made"] is True
+    assert progress_payload["changed_files"] == ["agent_notes.md"]
+    assert progress_payload["failed_tool_count"] == 0
+    transition_targets = [
+        event["payload"]["to_state"]
+        for event in trace_events
+        if event["event_type"] == "state_transitioned"
+    ]
+    assert transition_targets == [
+        "ingest",
+        "analyze",
+        "plan",
+        "act",
+        "observe",
+        "verify",
+        "finalize",
+    ]
+
+
+def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "SELF_CODING_AGENT_FAKE_MODEL_RESPONSE",
+        _fake_model_response(
+            [
+                {"tool_name": "read_file", "tool_input": {"path": "README.md"}},
+                {"tool_name": "search_text", "tool_input": {"query": "Demo", "limit": 5}},
+            ]
+        ),
+    )
+
+    settings = build_settings(
+        task="只读取文件不修改",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+
+    assert runtime_state.progress_made is False
+    assert runtime_state.changed_files == []
+    assert runtime_state.failed_tool_count == 0
+    assert runtime_state.reflect_triggered is True
+    assert runtime_state.reflect_trigger_reason == "no_progress_after_observe"
+    assert runtime_state.completed_states == [
+        "ingest",
+        "analyze",
+        "plan",
+        "act",
+        "observe",
+        "reflect",
+        "verify",
+        "finalize",
+    ]
+
+    trace_events = [
+        json.loads(line)
+        for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    progress_payload = next(event["payload"] for event in trace_events if event["event_type"] == "progress_observed")
+    assert progress_payload["progress_made"] is False
+    assert progress_payload["changed_files"] == []
+    assert progress_payload["failed_tool_count"] == 0
+    transition_targets = [
+        event["payload"]["to_state"]
+        for event in trace_events
+        if event["event_type"] == "state_transitioned"
+    ]
+    assert transition_targets == [
+        "ingest",
+        "analyze",
+        "plan",
+        "act",
+        "observe",
+        "reflect",
+        "verify",
+        "finalize",
+    ]
 
 
 def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, monkeypatch) -> None:

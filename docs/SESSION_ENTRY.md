@@ -44,3 +44,4 @@
 6. 如果目标清晰，但当前路径不是更短、更直接或更本质的办法，应直接指出，并建议更好的路径。
 7. 遇到问题优先追根因，不做只掩盖表象的补丁；每个关键决策都应能回答“为什么这样做”。
 8. 输出只保留会改变判断、路径或决策的信息，其余信息默认删掉。
+9. 测试默认使用虚拟环境 `D:\jt\ANACONDA\envs_dirs\learn-claude-code`，显式调用 `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe`；不要默认使用系统 PATH 或 Codex 内置 Python。

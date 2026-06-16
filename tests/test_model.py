@@ -126,7 +126,7 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
 
 
 def test_openai_compatible_adapter_raises_on_http_error(monkeypatch) -> None:
-    def fake_urlopen(_request, _timeout):
+    def fake_urlopen(_request, timeout=None):
         raise OSError("network down")
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

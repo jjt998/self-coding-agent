@@ -65,6 +65,10 @@ class RuntimeState:
     context_snapshot: ContextSnapshot | None = None
     model_decision: ModelDecision | None = None
     tool_executions: list[ToolExecution] = field(default_factory=list)
+    progress_made: bool = False
+    changed_files: list[str] = field(default_factory=list)
+    failed_tool_count: int = 0
+    observation_summary: str = ""
     verification_result: VerificationResult | None = None
     stop_reason: StopReason | None = None
 
@@ -156,6 +160,9 @@ class LoopOrchestrator:
                 "reflect_triggered": runtime_state.reflect_triggered,
                 "reflect_trigger_reason": runtime_state.reflect_trigger_reason,
                 "verification_passed": runtime_state.verification_result.passed if runtime_state.verification_result else False,
+                "progress_made": runtime_state.progress_made,
+                "changed_files": runtime_state.changed_files,
+                "failed_tool_count": runtime_state.failed_tool_count,
             },
         )
         self.trace_writer.write_event(
@@ -215,7 +222,11 @@ class LoopOrchestrator:
         if runtime_state.reflect_triggered:
             return
 
-        if state is AgentState.OBSERVE and reflect_strategy == "low_progress_plus_verify_reflect":
+        if (
+            state is AgentState.OBSERVE
+            and reflect_strategy == "low_progress_plus_verify_reflect"
+            and runtime_state.progress_made is False
+        ):
             # 这里保留当前默认基线：当 observe 没看到真实进展时，先触发一次 reflect。
             runtime_state.no_progress_count += 1
             runtime_state.reflect_triggered = True
@@ -374,10 +385,7 @@ class LoopOrchestrator:
                 "tool_calls": [tool_call.to_trace_payload() for tool_call in tool_calls],
             }
         if state is AgentState.OBSERVE:
-            return {
-                "summary": "未观察到真实代码变更进展。",
-                "progress_made": False,
-            }
+            return self._observe_progress(runtime_state=runtime_state)
         if state is AgentState.REFLECT:
             return {
                 "summary": "已按策略插入一次 reflect。",
@@ -434,3 +442,95 @@ class LoopOrchestrator:
                 )
             )
         return executions
+
+    def _observe_progress(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """根据工具执行结果判断本轮是否已经产生真实进展。"""
+        changed_files: list[str] = []
+        successful_tools: list[str] = []
+        failed_tools: list[dict[str, Any]] = []
+        failed_execution_ids: set[int] = set()
+        apply_patch_succeeded = False
+
+        for index, execution in enumerate(runtime_state.tool_executions):
+            tool_output = execution.tool_output
+            ok = tool_output.get("ok")
+
+            if ok is True:
+                successful_tools.append(execution.tool_name)
+                if execution.tool_name == "apply_patch":
+                    apply_patch_succeeded = True
+
+            if execution.tool_name == "git_diff":
+                changed_file_count = int(tool_output.get("changed_file_count") or 0)
+                if changed_file_count > 0:
+                    successful_tools.append(execution.tool_name)
+                for diff in tool_output.get("diffs", []):
+                    if isinstance(diff, dict) and isinstance(diff.get("path"), str):
+                        changed_files.append(diff["path"])
+
+            if ok is False:
+                failed_execution_ids.add(index)
+                failed_tools.append(
+                    {
+                        "tool_name": execution.tool_name,
+                        "error": tool_output.get("error", ""),
+                        "returncode": tool_output.get("returncode"),
+                    }
+                )
+
+            if execution.tool_name == "run_command" and tool_output.get("returncode", 0) != 0:
+                if index not in failed_execution_ids:
+                    failed_execution_ids.add(index)
+                    failed_tools.append(
+                        {
+                            "tool_name": execution.tool_name,
+                            "error": tool_output.get("stderr", ""),
+                            "returncode": tool_output.get("returncode"),
+                        }
+                    )
+
+        changed_files = list(dict.fromkeys(changed_files))
+        successful_tools = list(dict.fromkeys(successful_tools))
+        progress_made = bool(changed_files) or apply_patch_succeeded
+        failed_tool_count = len(failed_execution_ids)
+        observation_summary = self._build_observation_summary(
+            progress_made=progress_made,
+            changed_files=changed_files,
+            failed_tool_count=failed_tool_count,
+            successful_tools=successful_tools,
+        )
+
+        runtime_state.progress_made = progress_made
+        runtime_state.changed_files = changed_files
+        runtime_state.failed_tool_count = failed_tool_count
+        runtime_state.observation_summary = observation_summary
+
+        payload = {
+            "summary": observation_summary,
+            "progress_made": progress_made,
+            "changed_files": changed_files,
+            "successful_tools": successful_tools,
+            "failed_tools": failed_tools,
+            "failed_tool_count": failed_tool_count,
+        }
+        # 感觉这里和上游的state_result事件有点重复，但又不好合并，因为这个事件里有一些专门针对 observe 的字段，先保持分开，后续如果觉得冗余再调整。
+        self.trace_writer.write_event(TraceEvent(event_type="progress_observed", payload=payload))
+        return payload
+
+    def _build_observation_summary(
+        self,
+        progress_made: bool,
+        changed_files: list[str],
+        failed_tool_count: int,
+        successful_tools: list[str],
+    ) -> str:
+        """生成报告和 state_result 共用的进展观察摘要。"""
+        if progress_made:
+            return (
+                f"已观察到真实进展：变更文件 {len(changed_files)} 个，"
+                f"成功工具 {len(successful_tools)} 个，失败工具 {failed_tool_count} 个。"
+            )
+        return (
+            f"未观察到文件变更或成功编辑进展；"
+            f"成功工具 {len(successful_tools)} 个，失败工具 {failed_tool_count} 个。"
+        )
