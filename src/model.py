@@ -77,6 +77,7 @@ class ModelAdapter:
         task_type: str,
         context_snapshot: ContextSnapshot | None,
         config_data: dict[str, Any],
+        runtime_feedback: dict[str, Any] | None = None,
     ) -> ModelDecision:
         """根据任务、上下文和配置，产出一次结构化决策结果。"""
         raise NotImplementedError
@@ -114,12 +115,14 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         task_type: str,
         context_snapshot: ContextSnapshot | None,
         config_data: dict[str, Any],
+        runtime_feedback: dict[str, Any] | None = None,
     ) -> ModelDecision:
         """调用模型并把返回内容解析成稳定的 ModelDecision。"""
         request_payload = self._build_request_payload(
             task=task,
             task_type=task_type,
             context_snapshot=context_snapshot,
+            runtime_feedback=runtime_feedback,
         )
         response_payload = self._request_chat_completion(request_payload)
         raw_decision = self._extract_decision_json(response_payload)
@@ -130,6 +133,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         task: str,
         task_type: str,
         context_snapshot: ContextSnapshot | None,
+        runtime_feedback: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """构造模型请求，只要求返回一份 JSON 决策对象。"""
         context_payload = context_snapshot.to_dict() if context_snapshot else {}
@@ -153,6 +157,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                             "task": task,
                             "task_type": task_type,
                             "context_snapshot": context_payload,
+                            "runtime_feedback": runtime_feedback or {},
                         },
                         ensure_ascii=False,
                     ),

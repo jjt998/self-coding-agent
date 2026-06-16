@@ -105,22 +105,16 @@
   - `_run_planned_tools()` 已移除旧 Phase 3 固定工具序列回退逻辑，工具执行必须来自模型返回的合法 `tool_calls`
   - 所有 `configs/*.json` 已切到 `openai_compatible`，默认通过 `OPENAI_API_KEY` 读取密钥
   - 已新增 `tests/test_model.py`，并更新 `tests/test_loop.py` / `tests/test_cli.py` 适配真实模型决策层
-  - 本轮已按测试环境规范使用 `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe` 完成回归：`tests/test_loop.py tests/test_model.py` 为 `12 passed`，`tests/test_cli.py tests/test_eval.py tests/test_verify.py` 为 `23 passed`，全量 `pytest -q` 为 `40 passed`
+  - 本轮已按测试环境规范使用 `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe` 完成回归：`tests/test_loop.py tests/test_cli.py` 为 `15 passed`，`tests/test_eval.py tests/test_verify.py tests/test_model.py` 为 `17 passed`，全量 `pytest -q` 为 `37 passed`
   - `src/loop.py` 已将 `observe` 从固定 no-progress stub 替换为真实工具结果观察：`git_diff` 有变更或 `apply_patch` 成功都会被视为有进展
   - 当前 `progress_observed` trace 会记录 `progress_made`、`changed_files`、`successful_tools`、`failed_tools`、`failed_tool_count`
   - 默认 `low_progress_plus_verify_reflect` 现在只在 `observe` 后没有真实进展时触发 `no_progress_after_observe`
   - `run_finished.stop_reason.details` 和运行报告已补充进展观察信息，报告新增 `## 进展观察` 小节
   - 本轮测试已补充覆盖：有进展不触发默认 reflect、无进展触发默认 reflect、CLI 报告包含进展观察
-  - `src/loop.py` 已从单轮执行升级为最小多轮求解，当前流程为 `ingest -> analyze -> (plan -> act -> observe -> verify/reflect)* -> finalize`
-  - `runtime.max_steps` 现在解释为最大求解轮数，所有现有策略配置已统一从 `1` 调整为 `2`
-  - 验证失败且仍有预算时会触发 reflect 后重新 plan；达到最大轮数仍失败时以 `stop_reason.code = max_steps_reached` 收口
-  - 第二轮及以后模型 plan 会收到 `runtime_feedback`，包含上一轮观察、最近工具摘要和验证结果
-  - `run_finished.stop_reason.details` 和报告已补充 `max_steps`、`iteration_count`、`reflect_count`、`reflect_trigger_reasons`
-  - 回归测试新增覆盖：单轮成功、多轮失败后成功、无进展后重规划、达到最大轮数失败、第二轮 runtime feedback、模型错误路径
 - 下一步实现顺序建议：
-  1. 继续扩展 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义。
-  2. 把 setup / verify 失败都收口为结构化 stop reason 与更稳定的 failure taxonomy。
-  3. 继续把 reflect 从占位记录替换成能辅助重规划的真实反思链路。
+  1. 逐步把 loop 从 stub 替换成真实求解链路。
+  2. 继续扩展 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义。
+  3. 把 setup / verify 失败都收口为结构化 stop reason 与更稳定的 failure taxonomy。
 
 ## 下一步
 

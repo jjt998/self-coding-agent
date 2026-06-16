@@ -118,11 +118,46 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
     assert captured["timeout"] == 7
     assert captured["authorization"] == "Bearer test-key"
     assert captured["body"]["model"] == "demo-model"
+    user_payload = json.loads(captured["body"]["messages"][1]["content"])
+    assert user_payload["runtime_feedback"] == {}
     assert decision.provider == "openai_compatible"
     assert decision.model_name == "demo-model"
     assert decision.planned_actions == ["搜索相关文件"]
     assert decision.tool_calls[0].tool_name == "search_text"
     assert decision.tool_calls[0].tool_input == {"query": "Demo", "limit": 5}
+
+
+def test_openai_compatible_adapter_includes_runtime_feedback(monkeypatch) -> None:
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _FakeHttpResponse(_openai_response(_valid_decision()))
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", raising=False)
+    monkeypatch.setattr(model_module, "urlopen", fake_urlopen)
+    adapter = OpenAICompatibleModelAdapter(
+        provider="openai_compatible",
+        model_name="demo-model",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+        timeout_seconds=7,
+    )
+
+    adapter.decide(
+        task="检查 Demo",
+        task_type="general",
+        context_snapshot=None,
+        config_data={},
+        runtime_feedback={"iteration": 2, "previous_verification": {"passed": False}},
+    )
+
+    user_payload = json.loads(captured["body"]["messages"][1]["content"])
+    assert user_payload["runtime_feedback"] == {
+        "iteration": 2,
+        "previous_verification": {"passed": False},
+    }
 
 
 def test_openai_compatible_adapter_raises_on_http_error(monkeypatch) -> None:

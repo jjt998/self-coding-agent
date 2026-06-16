@@ -43,7 +43,7 @@
 - 当前模型工具计划已做最小校验：只允许 `search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`，且 `tool_input` 必须是对象。
 - 当前 `plan` 阶段模型配置、请求或响应失败会写入 `model_decision_failed` trace，并以 `stop_reason.code = model_error` 结束 run，不再回退到本地规则决策。
 - 当前所有 `configs/*.json` 已统一切到 `openai_compatible`，默认要求通过 `OPENAI_API_KEY` 提供密钥；无 API key 是预期的模型配置错误。
-- 本轮已按测试环境规范使用 `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe` 完成回归：`tests/test_loop.py tests/test_model.py` 为 `12 passed`，`tests/test_cli.py tests/test_eval.py tests/test_verify.py` 为 `23 passed`，全量 `pytest -q` 为 `40 passed`。
+- 本轮已按测试环境规范使用 `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe` 完成回归：`tests/test_loop.py tests/test_cli.py` 为 `15 passed`，`tests/test_eval.py tests/test_verify.py tests/test_model.py` 为 `17 passed`，全量 `pytest -q` 为 `37 passed`。
 
 ## 已完成
 
@@ -63,7 +63,7 @@
 
 ## 当前最小闭环缺口
 
-- 决策层已切到强制真实模型接口，`loop` 已具备最小多轮求解能力；但当前仍缺更完整的真实任务求解内核，`src/loop.py` 仍有大段 `_run_stub_state`，`reflect` 仍主要是占位记录而不是会生成修正策略的真实反思。
+- 决策层已切到强制真实模型接口，但当前仍缺“真实任务求解内核”：`src/loop.py` 仍有大段 `_run_stub_state`，`observe` 还没有进入“按任务自主读代码、改代码、再验证”的真实求解闭环。
 - 缺少真实任务验证机制：当前 `src/verify.py` 主要验证 `agent_notes.md`、固定工具顺序和演示型 diff，不足以判断 bug fix、重构、测试补全等真实任务是否完成。
 - 真实任务 task schema 已补上第一版最小字段，`verify_commands` 也已接入执行，但还缺“通过条件”的更细粒度结构化解释与 richer verification schema。
 - 真实任务 task schema 已补上 `verify_rules` 第二版，但当前仍缺更高层的结构化断言，例如面向 JSON / diff / 多文件聚合结果的验证语义。
@@ -72,7 +72,7 @@
 
 ## 下一步明确动作
 
-- 继续把 `loop` 从 stub 链路替换成真实任务求解链路，下一步重点是让 `reflect` 和后续 plan 更稳定地利用验证失败证据。
+- 逐步把 `loop` 从 stub 链路替换成真实任务求解链路，并让 `model_decision` 开始驱动真实读代码/改代码步骤。
 - 继续扩展任务级 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义，把“通过条件更可解释的结构化验证”做成更完整 schema。
 - 在 sandbox 中补任务级准备步骤之后的真实执行/失败收口，让 setup 失败、verify 失败都能沉淀为结构化 stop reason，并进一步稳定 failure taxonomy。
 
@@ -89,17 +89,12 @@
 - 默认 `low_progress_plus_verify_reflect` 策略现在只在 `observe` 后未观察到进展时触发 `no_progress_after_observe`；验证失败后的 reflect 逻辑保持不变。
 - `run_finished.stop_reason.details` 已补充进展观察字段，运行报告已新增 `## 进展观察` 小节。
 - 本轮未扩展 `verify_rules`，未处理 setup / verify failure taxonomy，未改 CLI 单次 verify 参数，也未删除 `build_phase_3_tool_sequence()`。
-- `loop` 已从单轮执行升级为最小多轮求解：`runtime.max_steps` 现在表示最大求解轮数，默认配置已统一改为 `2`。
-- 验证失败且仍有预算时，当前会进入 `reflect`，再重新 `plan -> act -> observe -> verify`；验证通过则提前 finalize。
-- 达到最大轮数仍未通过时，run 会以 `stop_reason.code = max_steps_reached` 收口，并继续执行 `finalize` 写完整报告。
-- 第二轮 `plan` 现在会收到 `runtime_feedback`，包含上一轮观察摘要、最近工具结果摘要和上一轮验证结果。
-- `run_finished.stop_reason.details` 和报告已补充 `max_steps`、`iteration_count`、`reflect_count`、`reflect_trigger_reasons` 等多轮字段。
 
 ## 下一步顺序
 
-1. 继续扩展任务级 `verify_rules`。
-2. 把 setup / verify 失败收口成结构化 stop reason 和更稳定的 failure taxonomy。
-3. 继续把 `reflect` 从占位记录替换成能辅助重规划的真实反思链路。
+1. 继续逐步把 `loop` 从 stub 替换成真实任务求解链路。
+2. 继续扩展任务级 `verify_rules`。
+3. 把 setup / verify 失败收口成结构化 stop reason 和更稳定的 failure taxonomy。
 
 ## 新会话恢复指引
 

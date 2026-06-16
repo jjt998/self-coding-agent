@@ -62,9 +62,16 @@ class RuntimeState:
     no_progress_count: int = 0
     reflect_triggered: bool = False
     reflect_trigger_reason: str = ""
+    reflect_count: int = 0
+    reflect_trigger_reasons: list[str] = field(default_factory=list)
+    current_iteration: int = 0
+    iteration_count: int = 0
+    max_steps: int = 1
     context_snapshot: ContextSnapshot | None = None
     model_decision: ModelDecision | None = None
+    model_decisions: list[ModelDecision] = field(default_factory=list)
     tool_executions: list[ToolExecution] = field(default_factory=list)
+    recent_tool_executions: list[ToolExecution] = field(default_factory=list)
     progress_made: bool = False
     changed_files: list[str] = field(default_factory=list)
     failed_tool_count: int = 0
@@ -85,10 +92,12 @@ class LoopOrchestrator:
     def __init__(self, trace_writer: TraceWriter) -> None:
         """接收 trace writer，保证 loop 每个关键节点都能落进 trace。"""
         self.trace_writer = trace_writer
+        self._active_iteration = 0
 
     def run(self, settings: RunSettings, config_data: dict[str, Any]) -> RuntimeState:
-        """执行一条最小 stub 状态链路，并返回最终运行态。"""
+        """执行最小多轮求解 loop，并返回最终运行态。"""
         runtime_state = RuntimeState(task=settings.task, task_type=settings.task_type)
+        runtime_state.max_steps = self._get_max_steps(config_data=config_data)
         reflect_strategy = self._get_reflect_strategy(config_data=config_data)
         context_builder = ContextBuilder(
             repo_root=settings.repo_root,
@@ -99,23 +108,49 @@ class LoopOrchestrator:
             strategy_config=config_data.get("memory", {}),
         )
         tool_runner = CoreToolRunner(repo_root=settings.repo_root)
-        planned_states = [
-            AgentState.INGEST,
-            AgentState.ANALYZE,
-            AgentState.PLAN,
-            AgentState.ACT,
-            AgentState.OBSERVE,
-            AgentState.VERIFY,
-            AgentState.FINALIZE,
-        ]
 
-        index = 0
-        while index < len(planned_states):
-            state = planned_states[index]
-            self._transition(runtime_state, to_state=state, reason="baseline_loop")
-            try:
-                state_payload = self._run_stub_state(
-                    state=state,
+        for state in [AgentState.INGEST, AgentState.ANALYZE]:
+            self._execute_state(
+                state=state,
+                settings=settings,
+                runtime_state=runtime_state,
+                config_data=config_data,
+                context_builder=context_builder,
+                memory_manager=memory_manager,
+                tool_runner=tool_runner,
+            )
+
+        stop_code = StopReasonCode.MAX_STEPS_REACHED
+        stop_message = "已达到最大求解轮数，run 已停止。"
+        for iteration in range(1, runtime_state.max_steps + 1):
+            runtime_state.current_iteration = iteration
+            runtime_state.iteration_count = iteration
+            reflected_this_iteration = False
+
+            for state in [AgentState.PLAN, AgentState.ACT, AgentState.OBSERVE]:
+                try:
+                    self._execute_state(
+                        state=state,
+                        settings=settings,
+                        runtime_state=runtime_state,
+                        config_data=config_data,
+                        context_builder=context_builder,
+                        memory_manager=memory_manager,
+                        tool_runner=tool_runner,
+                    )
+                except ModelError as error:
+                    if state is not AgentState.PLAN:
+                        raise
+                    self._finish_with_model_error(runtime_state=runtime_state, error=error)
+                    return runtime_state
+
+            if self._should_reflect_after_observe(
+                runtime_state=runtime_state,
+                reflect_strategy=reflect_strategy,
+            ):
+                self._record_reflect_trigger(runtime_state=runtime_state, reason="no_progress_after_observe")
+                self._execute_state(
+                    state=AgentState.REFLECT,
                     settings=settings,
                     runtime_state=runtime_state,
                     config_data=config_data,
@@ -123,47 +158,91 @@ class LoopOrchestrator:
                     memory_manager=memory_manager,
                     tool_runner=tool_runner,
                 )
-            except ModelError as error:
-                if state is not AgentState.PLAN:
-                    raise
-                self._finish_with_model_error(runtime_state=runtime_state, error=error)
-                return runtime_state
-            runtime_state.mark_completed(state)
+                reflected_this_iteration = True
 
-            self.trace_writer.write_event(
-                TraceEvent(
-                    event_type="state_result",
-                    payload={
-                        "state": state.value,
-                        "step_count": runtime_state.step_count,
-                        "result": state_payload,
-                    },
-                )
-            )
-
-            # 每次状态完成后都检查一次是否需要补插 reflect，这样不同策略只改这里一处就够了。
-            self._maybe_schedule_reflect(
-                state=state,
+            self._execute_state(
+                state=AgentState.VERIFY,
+                settings=settings,
                 runtime_state=runtime_state,
-                planned_states=planned_states,
-                insert_at=index + 1,
-                reflect_strategy=reflect_strategy,
+                config_data=config_data,
+                context_builder=context_builder,
+                memory_manager=memory_manager,
+                tool_runner=tool_runner,
             )
+            if runtime_state.verification_result and runtime_state.verification_result.passed:
+                stop_code = StopReasonCode.COMPLETED
+                stop_message = "最小多轮求解链路已验证通过。"
+                break
 
-            index += 1
+            has_next_iteration = iteration < runtime_state.max_steps
+            if has_next_iteration and not reflected_this_iteration and self._should_reflect_after_verify(
+                runtime_state=runtime_state,
+                reflect_strategy=reflect_strategy,
+            ):
+                self._record_reflect_trigger(runtime_state=runtime_state, reason="verification_failed")
+                self._execute_state(
+                    state=AgentState.REFLECT,
+                    settings=settings,
+                    runtime_state=runtime_state,
+                    config_data=config_data,
+                    context_builder=context_builder,
+                    memory_manager=memory_manager,
+                    tool_runner=tool_runner,
+                )
 
+        self._execute_state(
+            state=AgentState.FINALIZE,
+            settings=settings,
+            runtime_state=runtime_state,
+            config_data=config_data,
+            context_builder=context_builder,
+            memory_manager=memory_manager,
+            tool_runner=tool_runner,
+        )
+        self._finish_run(runtime_state=runtime_state, code=stop_code, message=stop_message)
+        return runtime_state
+
+    def _execute_state(
+        self,
+        state: AgentState,
+        settings: RunSettings,
+        runtime_state: RuntimeState,
+        config_data: dict[str, Any],
+        context_builder: ContextBuilder,
+        memory_manager: RuntimeMemoryManager,
+        tool_runner: CoreToolRunner,
+    ) -> dict[str, Any]:
+        """执行一个状态并统一写入迁移与状态结果事件。"""
+        self._transition(runtime_state, to_state=state, reason="baseline_loop")
+        state_payload = self._run_stub_state(
+            state=state,
+            settings=settings,
+            runtime_state=runtime_state,
+            config_data=config_data,
+            context_builder=context_builder,
+            memory_manager=memory_manager,
+            tool_runner=tool_runner,
+        )
+        runtime_state.mark_completed(state)
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="state_result",
+                payload={
+                    "state": state.value,
+                    "iteration": runtime_state.current_iteration,
+                    "step_count": runtime_state.step_count,
+                    "result": state_payload,
+                },
+            )
+        )
+        return state_payload
+
+    def _finish_run(self, runtime_state: RuntimeState, code: StopReasonCode, message: str) -> None:
+        """写入统一 run_finished 事件。"""
         runtime_state.stop_reason = StopReason(
-            code=StopReasonCode.COMPLETED,
-            message="最小状态机链路已完整跑通。",
-            details={
-                "completed_states": runtime_state.completed_states,
-                "reflect_triggered": runtime_state.reflect_triggered,
-                "reflect_trigger_reason": runtime_state.reflect_trigger_reason,
-                "verification_passed": runtime_state.verification_result.passed if runtime_state.verification_result else False,
-                "progress_made": runtime_state.progress_made,
-                "changed_files": runtime_state.changed_files,
-                "failed_tool_count": runtime_state.failed_tool_count,
-            },
+            code=code,
+            message=message,
+            details=self._build_stop_reason_details(runtime_state=runtime_state),
         )
         self.trace_writer.write_event(
             TraceEvent(
@@ -175,7 +254,62 @@ class LoopOrchestrator:
                 },
             )
         )
-        return runtime_state
+
+    def _build_stop_reason_details(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """整理 run 结束时需要保留的兼容字段和多轮信息。"""
+        verification_passed = bool(runtime_state.verification_result and runtime_state.verification_result.passed)
+        return {
+            "completed_states": runtime_state.completed_states,
+            "max_steps": runtime_state.max_steps,
+            "iteration_count": runtime_state.iteration_count,
+            "reflect_triggered": runtime_state.reflect_triggered,
+            "reflect_trigger_reason": runtime_state.reflect_trigger_reason,
+            "reflect_count": runtime_state.reflect_count,
+            "reflect_trigger_reasons": list(runtime_state.reflect_trigger_reasons),
+            "verification_passed": verification_passed,
+            "progress_made": runtime_state.progress_made,
+            "changed_files": runtime_state.changed_files,
+            "failed_tool_count": runtime_state.failed_tool_count,
+        }
+
+    def _get_max_steps(self, config_data: dict[str, Any]) -> int:
+        """读取最大求解轮数；本轮把 max_steps 解释为最大 plan/act/verify 轮数。"""
+        runtime_config = config_data.get("runtime", {})
+        if not isinstance(runtime_config, dict):
+            return 2
+        raw_value = runtime_config.get("max_steps", 2)
+        if isinstance(raw_value, int):
+            return max(1, raw_value)
+        if isinstance(raw_value, str) and raw_value.strip():
+            try:
+                return max(1, int(raw_value.strip()))
+            except ValueError:
+                return 2
+        return 2
+
+    def _should_reflect_after_observe(self, runtime_state: RuntimeState, reflect_strategy: str) -> bool:
+        """判断 observe 后是否需要因为无进展触发 reflect。"""
+        return (
+            reflect_strategy == "low_progress_plus_verify_reflect"
+            and runtime_state.progress_made is False
+        )
+
+    def _should_reflect_after_verify(self, runtime_state: RuntimeState, reflect_strategy: str) -> bool:
+        """判断 verify 失败后是否需要触发 reflect。"""
+        return (
+            runtime_state.verification_result is not None
+            and not runtime_state.verification_result.passed
+            and reflect_strategy in {"verify_failure_only_reflect", "low_progress_plus_verify_reflect"}
+        )
+
+    def _record_reflect_trigger(self, runtime_state: RuntimeState, reason: str) -> None:
+        """记录一次 reflect 触发，同时保留旧的单值字段兼容 eval。"""
+        runtime_state.reflect_triggered = True
+        runtime_state.reflect_trigger_reason = reason
+        runtime_state.reflect_trigger_reasons.append(reason)
+        runtime_state.reflect_count += 1
+        if reason == "no_progress_after_observe":
+            runtime_state.no_progress_count += 1
 
     def _finish_with_model_error(self, runtime_state: RuntimeState, error: ModelError) -> None:
         """把模型决策失败收口成稳定 stop reason，并立即结束 run。"""
@@ -210,41 +344,6 @@ class LoopOrchestrator:
         strategy = str(reflect_config.get("strategy", "low_progress_plus_verify_reflect")).strip()
         return strategy or "low_progress_plus_verify_reflect"
 
-    def _maybe_schedule_reflect(
-        self,
-        state: AgentState,
-        runtime_state: RuntimeState,
-        planned_states: list[AgentState],
-        insert_at: int,
-        reflect_strategy: str,
-    ) -> None:
-        """根据当前 reflect 策略决定是否在后续流程中插入一次 reflect。"""
-        if runtime_state.reflect_triggered:
-            return
-
-        if (
-            state is AgentState.OBSERVE
-            and reflect_strategy == "low_progress_plus_verify_reflect"
-            and runtime_state.progress_made is False
-        ):
-            # 这里保留当前默认基线：当 observe 没看到真实进展时，先触发一次 reflect。
-            runtime_state.no_progress_count += 1
-            runtime_state.reflect_triggered = True
-            runtime_state.reflect_trigger_reason = "no_progress_after_observe"
-            planned_states.insert(insert_at, AgentState.REFLECT)
-            return
-
-        if (
-            state is AgentState.VERIFY
-            and runtime_state.verification_result
-            and not runtime_state.verification_result.passed
-            and reflect_strategy in {"verify_failure_only_reflect", "low_progress_plus_verify_reflect"}
-        ):
-            # 这里把“验证失败后补反思”单独收口，便于比较不同 reflect 策略的代价和收益。
-            runtime_state.reflect_triggered = True
-            runtime_state.reflect_trigger_reason = "verification_failed"
-            planned_states.insert(insert_at, AgentState.REFLECT)
-
     def _transition(self, runtime_state: RuntimeState, to_state: AgentState, reason: str) -> None:
         """写入状态迁移事件，并同步更新当前状态指针。"""
         self.trace_writer.write_event(
@@ -258,6 +357,55 @@ class LoopOrchestrator:
             )
         )
         runtime_state.current_state = to_state.value
+
+    def _build_runtime_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """给下一轮 plan 提供上一轮执行反馈，避免模型盲目重复同一计划。"""
+        if runtime_state.current_iteration <= 1 and not runtime_state.verification_result:
+            return {}
+        verification_payload = (
+            runtime_state.verification_result.to_dict()
+            if runtime_state.verification_result
+            else {}
+        )
+        return {
+            "iteration": runtime_state.current_iteration,
+            "remaining_iterations": max(runtime_state.max_steps - runtime_state.current_iteration + 1, 0),
+            "previous_observation": {
+                "progress_made": runtime_state.progress_made,
+                "changed_files": list(runtime_state.changed_files),
+                "failed_tool_count": runtime_state.failed_tool_count,
+                "summary": runtime_state.observation_summary,
+            },
+            "previous_verification": verification_payload,
+            "recent_tool_results": [
+                self._summarize_tool_execution(execution)
+                for execution in runtime_state.recent_tool_executions
+            ],
+        }
+
+    def _summarize_tool_execution(self, execution: ToolExecution) -> dict[str, Any]:
+        """压缩工具结果，避免把大段 stdout、文件内容或 diff 原样塞回模型。"""
+        output = execution.tool_output
+        summary: dict[str, Any] = {
+            "tool_name": execution.tool_name,
+            "ok": output.get("ok"),
+        }
+        if "error" in output:
+            summary["error"] = output.get("error")
+        if "returncode" in output:
+            summary["returncode"] = output.get("returncode")
+        if execution.tool_name == "git_diff":
+            summary["changed_file_count"] = output.get("changed_file_count", 0)
+            summary["changed_files"] = [
+                item.get("path")
+                for item in output.get("diffs", [])
+                if isinstance(item, dict) and item.get("path")
+            ]
+        if execution.tool_name == "search_text":
+            summary["match_count"] = output.get("match_count", 0)
+        if execution.tool_name == "read_file":
+            summary["line_count"] = output.get("line_count", 0)
+        return summary
 
     def _run_stub_state(
         self,
@@ -360,11 +508,16 @@ class LoopOrchestrator:
                 task_type=runtime_state.task_type,
                 context_snapshot=runtime_state.context_snapshot,
                 config_data=config_data,
+                runtime_feedback=self._build_runtime_feedback(runtime_state=runtime_state),
             )
+            runtime_state.model_decisions.append(runtime_state.model_decision)
             self.trace_writer.write_event(
                 TraceEvent(
                     event_type="model_decision",
-                    payload=runtime_state.model_decision.to_dict(),
+                    payload={
+                        **runtime_state.model_decision.to_dict(),
+                        "iteration": runtime_state.current_iteration,
+                    },
                 )
             )
             return {
@@ -375,11 +528,13 @@ class LoopOrchestrator:
                 "model_name": runtime_state.model_decision.model_name,
             }
         if state is AgentState.ACT:
+            self._active_iteration = runtime_state.current_iteration
             tool_calls = self._run_planned_tools(
                 tool_runner=tool_runner,
                 model_decision=runtime_state.model_decision,
             )
-            runtime_state.tool_executions = tool_calls
+            runtime_state.recent_tool_executions = tool_calls
+            runtime_state.tool_executions.extend(tool_calls)
             return {
                 "summary": "已执行一次由任务级决策层生成的工具计划。",
                 "tool_calls": [tool_call.to_trace_payload() for tool_call in tool_calls],
@@ -394,7 +549,7 @@ class LoopOrchestrator:
         if state is AgentState.VERIFY:
             verification_result = build_phase_4_verification(
                 settings=settings,
-                tool_executions=runtime_state.tool_executions,
+                tool_executions=runtime_state.recent_tool_executions,
             )
             runtime_state.verification_result = verification_result
             self.trace_writer.write_event(
@@ -430,6 +585,7 @@ class LoopOrchestrator:
                     payload={
                         "tool_name": tool_name,
                         "tool_input": tool_input,
+                        "iteration": self._current_tool_iteration(),
                     },
                 )
             )
@@ -438,10 +594,17 @@ class LoopOrchestrator:
             self.trace_writer.write_event(
                 TraceEvent(
                     event_type="tool_result",
-                    payload=execution.to_trace_payload(),
+                    payload={
+                        **execution.to_trace_payload(),
+                        "iteration": self._current_tool_iteration(),
+                    },
                 )
             )
         return executions
+
+    def _current_tool_iteration(self) -> int:
+        """返回当前工具调用所属轮次；工具 runner 本身不持有 runtime_state。"""
+        return getattr(self, "_active_iteration", 0)
 
     def _observe_progress(self, runtime_state: RuntimeState) -> dict[str, Any]:
         """根据工具执行结果判断本轮是否已经产生真实进展。"""
@@ -451,7 +614,7 @@ class LoopOrchestrator:
         failed_execution_ids: set[int] = set()
         apply_patch_succeeded = False
 
-        for index, execution in enumerate(runtime_state.tool_executions):
+        for index, execution in enumerate(runtime_state.recent_tool_executions):
             tool_output = execution.tool_output
             ok = tool_output.get("ok")
 
@@ -507,6 +670,7 @@ class LoopOrchestrator:
 
         payload = {
             "summary": observation_summary,
+            "iteration": runtime_state.current_iteration,
             "progress_made": progress_made,
             "changed_files": changed_files,
             "successful_tools": successful_tools,

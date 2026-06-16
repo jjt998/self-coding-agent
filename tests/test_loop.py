@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import loop as loop_module
 from config import build_settings
+from model import ModelDecision, PlannedToolCall
 from trace import TraceWriter
 from verify import VerificationCheck, VerificationResult
 
@@ -88,6 +89,9 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
 
     assert runtime_state.reflect_triggered is True
     assert runtime_state.reflect_trigger_reason == "verification_failed"
+    assert runtime_state.reflect_count == 1
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MAX_STEPS_REACHED
     assert runtime_state.completed_states == [
         "ingest",
         "analyze",
@@ -96,6 +100,10 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
         "observe",
         "verify",
         "reflect",
+        "plan",
+        "act",
+        "observe",
+        "verify",
         "finalize",
     ]
 
@@ -117,6 +125,10 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
         "observe",
         "verify",
         "reflect",
+        "plan",
+        "act",
+        "observe",
+        "verify",
         "finalize",
     ]
 
@@ -160,6 +172,8 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert runtime_state.changed_files == ["agent_notes.md"]
     assert runtime_state.failed_tool_count == 0
     assert runtime_state.reflect_triggered is False
+    assert runtime_state.iteration_count == 1
+    assert runtime_state.max_steps == 2
     assert runtime_state.completed_states == [
         "ingest",
         "analyze",
@@ -179,6 +193,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert model_decision_payload["provider"] == "openai_compatible"
     assert model_decision_payload["model_name"] == "demo-model"
     assert model_decision_payload["planned_actions"] == ["执行模型工具计划"]
+    assert model_decision_payload["iteration"] == 1
     progress_payload = next(event["payload"] for event in trace_events if event["event_type"] == "progress_observed")
     assert progress_payload["progress_made"] is True
     assert progress_payload["changed_files"] == ["agent_notes.md"]
@@ -236,9 +251,18 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
     assert runtime_state.failed_tool_count == 0
     assert runtime_state.reflect_triggered is True
     assert runtime_state.reflect_trigger_reason == "no_progress_after_observe"
+    assert runtime_state.reflect_count == 2
+    assert runtime_state.reflect_trigger_reasons == ["no_progress_after_observe", "no_progress_after_observe"]
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MAX_STEPS_REACHED
     assert runtime_state.completed_states == [
         "ingest",
         "analyze",
+        "plan",
+        "act",
+        "observe",
+        "reflect",
+        "verify",
         "plan",
         "act",
         "observe",
@@ -252,7 +276,9 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
         for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    progress_payload = next(event["payload"] for event in trace_events if event["event_type"] == "progress_observed")
+    progress_payloads = [event["payload"] for event in trace_events if event["event_type"] == "progress_observed"]
+    progress_payload = progress_payloads[0]
+    assert len(progress_payloads) == 2
     assert progress_payload["progress_made"] is False
     assert progress_payload["changed_files"] == []
     assert progress_payload["failed_tool_count"] == 0
@@ -269,8 +295,154 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
         "observe",
         "reflect",
         "verify",
+        "plan",
+        "act",
+        "observe",
+        "reflect",
+        "verify",
         "finalize",
     ]
+
+
+def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", _fake_model_response())
+    verification_calls = {"count": 0}
+
+    def fake_verification(*, settings, tool_executions):
+        verification_calls["count"] += 1
+        passed = verification_calls["count"] == 2
+        return VerificationResult(
+            passed=passed,
+            summary="验证通过" if passed else "验证失败",
+            checks=[VerificationCheck(name="fake_verify", passed=passed, detail="按轮次模拟验证结果。")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="验证失败后重试",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    assert runtime_state.iteration_count == 2
+    assert runtime_state.reflect_count == 1
+    assert runtime_state.reflect_trigger_reasons == ["verification_failed"]
+    assert verification_calls["count"] == 2
+
+    trace_events = [
+        json.loads(line)
+        for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    transition_targets = [
+        event["payload"]["to_state"]
+        for event in trace_events
+        if event["event_type"] == "state_transitioned"
+    ]
+    assert transition_targets == [
+        "ingest",
+        "analyze",
+        "plan",
+        "act",
+        "observe",
+        "verify",
+        "reflect",
+        "plan",
+        "act",
+        "observe",
+        "verify",
+        "finalize",
+    ]
+    run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
+    assert run_finished_payload["stop_reason"]["details"]["iteration_count"] == 2
+    assert run_finished_payload["stop_reason"]["details"]["reflect_count"] == 1
+
+
+def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+    feedbacks: list[dict] = []
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-feedback-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="fake decision",
+                rationale="test feedback",
+                planned_actions=["执行反馈测试工具计划"],
+                tool_calls=[
+                    PlannedToolCall(
+                        tool_name="apply_patch",
+                        tool_input={"path": "agent_notes.md", "old_text": None, "new_text": "# Agent Notes\n"},
+                    ),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["agent_notes.md"]}),
+                ],
+            )
+
+    verification_calls = {"count": 0}
+
+    def fake_verification(*, settings, tool_executions):
+        verification_calls["count"] += 1
+        passed = verification_calls["count"] == 2
+        return VerificationResult(
+            passed=passed,
+            summary="验证通过" if passed else "验证失败",
+            checks=[VerificationCheck(name="fake_verify", passed=passed, detail="按轮次模拟验证结果。")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="检查反馈",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    assert len(feedbacks) == 2
+    assert feedbacks[0] == {}
+    assert feedbacks[1]["iteration"] == 2
+    assert feedbacks[1]["previous_observation"]["progress_made"] is True
+    assert feedbacks[1]["previous_verification"]["passed"] is False
+    assert feedbacks[1]["recent_tool_results"][0]["tool_name"] == "apply_patch"
 
 
 def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, monkeypatch) -> None:
