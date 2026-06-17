@@ -40,6 +40,26 @@
       "name": "bug_fix_fail_regression",
       "task": "定位并修复 fail to load data 相关问题，优先检查 app.py、tests/test_app.py 和验证链路之间的关系。",
       "task_type": "bug_fix",
+      "verify_commands": [
+        [
+          "python",
+          "-c",
+          "from pathlib import Path; raise SystemExit(0 if Path('agent_notes.md').exists() else 1)"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "file_contains",
+          "name": "bug fix notes exist",
+          "path": "agent_notes.md",
+          "contains": "# Agent Notes"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "bug fix diff records notes",
+          "path": "agent_notes.md"
+        }
+      ],
       "expectation": {
         "passed": true,
         "outcome": "passed_cleanly",
@@ -82,6 +102,22 @@
       "name": "test_generation_comparison_guard",
       "task": "为策略对比或实验套件补一个聚焦测试，优先覆盖 summary 字段、任务级 delta 或路径解析边界。",
       "task_type": "test_generation",
+      "verify_commands": [
+        [
+          "python",
+          "-c",
+          "from pathlib import Path; raise SystemExit(0 if Path('agent_notes.md').exists() else 1)"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "files_matching_count_at_least",
+          "name": "test generation notes exist",
+          "glob": "*.md",
+          "contains": "# Agent Notes",
+          "min_count": 1
+        }
+      ],
       "expectation": {
         "passed": true,
         "outcome": "passed_cleanly",
@@ -93,6 +129,21 @@
       "name": "refactor_eval_summary_cleanup",
       "task": "在不改变行为和 summary 字段的前提下整理 eval 或 comparison 汇总代码，减少重复并保持输出稳定。",
       "task_type": "refactor",
+      "verify_commands": [
+        [
+          "python",
+          "-c",
+          "from pathlib import Path; raise SystemExit(0 if Path('agent_notes.md').exists() else 1)"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "file_contains",
+          "name": "refactor notes contain heading",
+          "path": "agent_notes.md",
+          "contains": "# Agent Notes"
+        }
+      ],
       "expectation": {
         "passed": true,
         "outcome": "passed_cleanly",

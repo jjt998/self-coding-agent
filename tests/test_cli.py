@@ -343,6 +343,65 @@ def test_cli_keeps_sandbox_after_failed_verify_command_under_default_policy(tmp_
     assert "清理结果：已保留" in report_text
 
 
+def test_cli_runs_sample_batch_and_comparison_smoke(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n\n用于 sample batch smoke。\n", encoding="utf-8")
+
+    eval_command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--eval-task-file",
+        str(Path.cwd() / "eval_tasks" / "sample_batch.json"),
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    eval_result = run(eval_command, capture_output=True, text=True, check=False, env=env)
+
+    assert eval_result.returncode == 0, eval_result.stderr
+    eval_summary_path = output_root / "eval-sample_batch" / "summary.json"
+    eval_summary = json.loads(eval_summary_path.read_text(encoding="utf-8"))
+    assert eval_summary["task_count"] == 5
+    assert eval_summary["success_count"] == 5
+    assert eval_summary["failure_taxonomy_counts"] == {}
+    assert eval_summary["failure_taxonomy_tag_counts"] == {}
+    eval_summary_text = (output_root / "eval-sample_batch" / "summary.md").read_text(encoding="utf-8")
+    assert "## Failure Taxonomy" in eval_summary_text
+    assert "## Reflect 原因" in eval_summary_text
+
+    comparison_output_root = tmp_path / "comparison_runs"
+    comparison_command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--eval-task-file",
+        str(Path.cwd() / "eval_tasks" / "sample_batch.json"),
+        "--compare-strategies",
+        "default,verify_failure_only_reflect",
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(comparison_output_root),
+    ]
+    comparison_result = run(comparison_command, capture_output=True, text=True, check=False, env=env)
+
+    assert comparison_result.returncode == 0, comparison_result.stderr
+    comparison_summary = json.loads(
+        (comparison_output_root / "comparison-sample_batch" / "summary.json").read_text(encoding="utf-8")
+    )
+    delta = comparison_summary["deltas"][0]
+    assert "failure_taxonomy_counts_delta" in delta
+    assert "failure_taxonomy_tag_counts_delta" in delta
+    assert "reflect_trigger_reason_counts_delta" in delta
+    assert comparison_summary["task_deltas"]
+
+
 def test_cli_stops_with_structured_setup_failure(tmp_path: Path) -> None:
     output_root = tmp_path / "runs"
     repo_root = tmp_path / "repo"

@@ -653,6 +653,42 @@ def test_missing_task_verification_gets_stable_taxonomy_and_tags() -> None:
     assert "verification_check:task_verification_configured" in tags
 
 
+def test_runtime_and_model_failures_get_stable_taxonomy_and_tags() -> None:
+    model_details = {"error_type": "ModelResponseError"}
+    model_taxonomy = _build_failure_taxonomy(
+        outcome="stopped_early",
+        stop_reason="model_error",
+        failing_checks=[],
+        stop_reason_details=model_details,
+    )
+    model_tags = _build_failure_taxonomy_tags(
+        outcome="stopped_early",
+        stop_reason="model_error",
+        failing_checks=[],
+        diagnostic_labels=[],
+        stop_reason_details=model_details,
+    )
+    max_steps_taxonomy = _build_failure_taxonomy(
+        outcome="stopped_early",
+        stop_reason="max_steps_reached",
+        failing_checks=["verify_command_1"],
+        stop_reason_details={"verification_failure": {"verification_mode": "task_verify_commands"}},
+    )
+    max_steps_tags = _build_failure_taxonomy_tags(
+        outcome="stopped_early",
+        stop_reason="max_steps_reached",
+        failing_checks=["verify_command_1"],
+        diagnostic_labels=[],
+        stop_reason_details={"verification_failure": {"verification_mode": "task_verify_commands"}},
+    )
+
+    assert model_taxonomy == "model:ModelResponseError"
+    assert "model_error_type:ModelResponseError" in model_tags
+    assert max_steps_taxonomy == "runtime:max_steps_reached"
+    assert "runtime:max_steps_reached" in max_steps_tags
+    assert "verification_check:verify_command_1" in max_steps_tags
+
+
 def test_eval_batch_result_counts_structured_setup_and_verify_taxonomy() -> None:
     run_results = [
         EvalRunResult(
@@ -704,14 +740,56 @@ def test_eval_batch_result_counts_structured_setup_and_verify_taxonomy() -> None
                 "verification_check:task_verification_configured",
             ],
         ),
+        EvalRunResult(
+            task_name="model_error",
+            run_id="run-model-error",
+            run_dir="runs/run-model-error",
+            passed=False,
+            step_count=2,
+            tool_call_count=0,
+            stop_reason="model_error",
+            outcome="stopped_early",
+            failure_taxonomy="model:ModelResponseError",
+            failure_taxonomy_tags=[
+                "outcome:stopped_early",
+                "stop_reason:model_error",
+                "model_error_type:ModelResponseError",
+            ],
+        ),
+        EvalRunResult(
+            task_name="max_steps",
+            run_id="run-max-steps",
+            run_dir="runs/run-max-steps",
+            passed=False,
+            step_count=8,
+            tool_call_count=5,
+            stop_reason="max_steps_reached",
+            outcome="stopped_early",
+            failing_checks=["verify_command_1"],
+            failure_taxonomy="runtime:max_steps_reached",
+            failure_taxonomy_tags=[
+                "outcome:stopped_early",
+                "stop_reason:max_steps_reached",
+                "runtime:max_steps_reached",
+                "verification_check_count:1",
+                "verification_check:verify_command_1",
+            ],
+        ),
     ]
 
     batch_result = _build_eval_batch_result(eval_name="structured_failures", run_results=run_results)
 
-    assert batch_result.outcome_counts == {"failed_setup": 1, "failed_verification": 2}
-    assert batch_result.failure_distribution == {"setup_failed": 1, "verification_failed": 2}
+    assert batch_result.outcome_counts == {"failed_setup": 1, "failed_verification": 2, "stopped_early": 2}
+    assert batch_result.failure_distribution == {
+        "setup_failed": 1,
+        "verification_failed": 2,
+        "model_error": 1,
+        "max_steps_reached": 1,
+    }
     assert batch_result.failure_taxonomy_counts == {
         "setup:command_returncode": 1,
         "verification:verify_command_returncode": 1,
         "verification:missing_task_verification": 1,
+        "model:ModelResponseError": 1,
+        "runtime:max_steps_reached": 1,
     }

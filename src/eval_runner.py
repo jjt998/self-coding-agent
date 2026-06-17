@@ -936,6 +936,9 @@ def _build_failure_taxonomy(
         if isinstance(failed_setup_commands, list) and failed_setup_commands:
             return "setup:command_returncode"
         return "setup:unknown"
+    if stop_reason == "model_error":
+        error_type = str(details.get("error_type", "")).strip() or "unknown"
+        return f"model:{error_type}"
     if outcome == "failed_verification":
         verification_failure = details.get("verification_failure", {})
         if isinstance(verification_failure, dict):
@@ -951,6 +954,8 @@ def _build_failure_taxonomy(
                 return f"verification:verify_rule:{primary_check}"
         primary_check = failing_checks[0] if failing_checks else "unknown_check"
         return f"verification:{primary_check}"
+    if stop_reason == "max_steps_reached":
+        return "runtime:max_steps_reached"
     if outcome == "stopped_early":
         return f"stop_reason:{stop_reason}"
     if outcome == "failed_unknown":
@@ -973,6 +978,11 @@ def _build_failure_taxonomy_tags(
     details = stop_reason_details if isinstance(stop_reason_details, dict) else {}
     if outcome == "failed_setup":
         tags.append("setup_failure")
+    if stop_reason == "model_error":
+        error_type = str(details.get("error_type", "")).strip() or "unknown"
+        tags.append(f"model_error_type:{error_type}")
+    if stop_reason == "max_steps_reached":
+        tags.append("runtime:max_steps_reached")
     if outcome == "failed_verification":
         verification_failure = details.get("verification_failure", {})
         if isinstance(verification_failure, dict):

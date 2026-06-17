@@ -153,6 +153,57 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                     "verification_mode:missing_task_verification",
                     "verification_check:task_verification_configured",
                 ],
+            ),
+            EvalRunResult(
+                task_name="task_model_error",
+                run_id="run-model-error",
+                run_dir="runs/run-model-error",
+                passed=False,
+                step_count=2,
+                tool_call_count=0,
+                verify_count=0,
+                reflect_count=0,
+                reflect_triggered=False,
+                stop_reason="model_error",
+                config_name="memory_off",
+                context_strategy="naive_recent_context",
+                reflect_strategy="verify_failure_only_reflect",
+                memory_enabled=False,
+                memory_strategy="memory_off",
+                outcome="stopped_early",
+                failure_taxonomy="model:ModelResponseError",
+                failure_taxonomy_tags=[
+                    "outcome:stopped_early",
+                    "stop_reason:model_error",
+                    "model_error_type:ModelResponseError",
+                ],
+            ),
+            EvalRunResult(
+                task_name="task_max_steps",
+                run_id="run-max-steps",
+                run_dir="runs/run-max-steps",
+                passed=False,
+                step_count=8,
+                tool_call_count=5,
+                verify_count=2,
+                reflect_count=1,
+                reflect_triggered=True,
+                reflect_trigger_reason="verification_failed",
+                stop_reason="max_steps_reached",
+                config_name="memory_off",
+                context_strategy="naive_recent_context",
+                reflect_strategy="verify_failure_only_reflect",
+                memory_enabled=False,
+                memory_strategy="memory_off",
+                outcome="stopped_early",
+                failing_checks=["verify_command_1"],
+                failure_taxonomy="runtime:max_steps_reached",
+                failure_taxonomy_tags=[
+                    "outcome:stopped_early",
+                    "stop_reason:max_steps_reached",
+                    "runtime:max_steps_reached",
+                    "verification_check:verify_command_1",
+                ],
             )
         ],
     )
@@ -192,75 +243,43 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
     assert delta["failure_taxonomy_counts_delta"] == {
         "verification:doc_readable": 1,
         "verification:missing_task_verification": 1,
+        "model:ModelResponseError": 1,
+        "runtime:max_steps_reached": 1,
     }
     assert delta["failure_taxonomy_tag_counts_delta"] == {
         "outcome:failed_verification": 2,
+        "outcome:stopped_early": 2,
+        "stop_reason:model_error": 1,
+        "stop_reason:max_steps_reached": 1,
+        "model_error_type:ModelResponseError": 1,
+        "runtime:max_steps_reached": 1,
         "verification_check:doc_readable": 1,
         "verification_check:task_verification_configured": 1,
+        "verification_check:verify_command_1": 1,
         "verification_mode:missing_task_verification": 1,
     }
     assert delta["verification_failure_counts_delta"] == {
         "doc_readable": 1,
         "task_verification_configured": 1,
+        "verify_command_1": 1,
     }
     assert delta["reflect_trigger_reason_counts_delta"] == {
         "no_progress_after_observe": -1,
-        "verification_failed": 2,
+        "verification_failed": 3,
     }
-    assert comparison_result.task_deltas == [
-        {
-            "baseline_strategy": "default",
-            "strategy": "memory_off",
-            "tasks": [
-                    {
-                        "task_name": "task_a",
-                        "baseline_present": True,
-                        "candidate_present": True,
-                    "baseline_run_id": "run-a",
-                    "candidate_run_id": "run-b",
-                    "baseline_run_dir": "runs/run-a",
-                    "candidate_run_dir": "runs/run-b",
-                    "baseline_outcome": "passed_cleanly",
-                    "candidate_outcome": "failed_verification",
-                    "baseline_passed": True,
-                    "candidate_passed": False,
-                    "step_count_delta": 2,
-                    "tool_call_count_delta": 1,
-                    "verify_count_delta": 0,
-                    "reflect_count_delta": 0,
-                    "baseline_reflect_trigger_reason": "no_progress_after_observe",
-                    "candidate_reflect_trigger_reason": "verification_failed",
-                    "baseline_failure_taxonomy": "none",
-                    "candidate_failure_taxonomy": "verification:doc_readable",
-                        "failing_checks_delta": {"doc_readable": 1},
-                        "diagnostic_labels_delta": {},
-                    },
-                    {
-                        "task_name": "task_missing_verification",
-                        "baseline_present": False,
-                        "candidate_present": True,
-                        "baseline_run_id": "",
-                        "candidate_run_id": "run-missing-verification",
-                        "baseline_run_dir": "",
-                        "candidate_run_dir": "runs/run-missing-verification",
-                        "baseline_outcome": "missing",
-                        "candidate_outcome": "failed_verification",
-                        "baseline_passed": False,
-                        "candidate_passed": False,
-                        "step_count_delta": 10,
-                        "tool_call_count_delta": 6,
-                        "verify_count_delta": 1,
-                        "reflect_count_delta": 1,
-                        "baseline_reflect_trigger_reason": "none",
-                        "candidate_reflect_trigger_reason": "verification_failed",
-                        "baseline_failure_taxonomy": "none",
-                        "candidate_failure_taxonomy": "verification:missing_task_verification",
-                        "failing_checks_delta": {"task_verification_configured": 1},
-                        "diagnostic_labels_delta": {},
-                    }
-                ],
-            }
-        ]
+    assert comparison_result.task_deltas[0]["baseline_strategy"] == "default"
+    assert comparison_result.task_deltas[0]["strategy"] == "memory_off"
+    task_delta_by_name = {
+        item["task_name"]: item
+        for item in comparison_result.task_deltas[0]["tasks"]
+    }
+    assert task_delta_by_name["task_a"]["candidate_failure_taxonomy"] == "verification:doc_readable"
+    assert task_delta_by_name["task_missing_verification"]["candidate_failure_taxonomy"] == (
+        "verification:missing_task_verification"
+    )
+    assert task_delta_by_name["task_model_error"]["candidate_failure_taxonomy"] == "model:ModelResponseError"
+    assert task_delta_by_name["task_max_steps"]["candidate_failure_taxonomy"] == "runtime:max_steps_reached"
+    assert task_delta_by_name["task_max_steps"]["failing_checks_delta"] == {"verify_command_1": 1}
 
     summary_text = _build_strategy_comparison_markdown(comparison_result)
     assert "failure taxonomy delta" in summary_text

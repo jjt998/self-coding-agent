@@ -313,6 +313,24 @@ def _build_phase_4_report(
     stop_reason = runtime_state.stop_reason
     stop_reason_text = stop_reason.message if stop_reason else "未设置"
     stop_reason_code = stop_reason.code.value if stop_reason else "unknown"
+    stop_reason_details = stop_reason.details if stop_reason else {}
+    failure_diagnostic_lines = [f"- stop reason：`{stop_reason_code}`"]
+    if stop_reason_code == "setup_failed":
+        failure_diagnostic_lines.append(
+            f"- setup 失败命令数：`{len(stop_reason_details.get('failed_setup_commands', []))}`"
+        )
+    elif stop_reason_code == "model_error":
+        failure_diagnostic_lines.append(f"- 模型错误类型：`{stop_reason_details.get('error_type', 'unknown')}`")
+    elif stop_reason_code in {"verification_failed", "max_steps_reached"}:
+        verification_failure = stop_reason_details.get("verification_failure", {})
+        if isinstance(verification_failure, dict):
+            failure_diagnostic_lines.append(
+                f"- 验证模式：`{verification_failure.get('verification_mode', '')}`"
+            )
+            failure_diagnostic_lines.append(
+                f"- 失败检查：`{', '.join(verification_failure.get('failing_check_names', [])) or 'none'}`"
+            )
+    failure_diagnostic_summary = "\n".join(failure_diagnostic_lines)
     completed_states = " -> ".join(runtime_state.completed_states)
     reflect_status = "已触发" if runtime_state.reflect_triggered else "未触发"
     verification_result = runtime_state.verification_result
@@ -443,6 +461,8 @@ def _build_phase_4_report(
         f"- reflect 次数：`{runtime_state.reflect_count}`\n"
         f"- stop reason：`{stop_reason_code}`\n"
         f"- stop reason 说明：{stop_reason_text}\n"
+        f"\n## 失败诊断\n\n"
+        f"{failure_diagnostic_summary}\n"
         f"\n## 进展观察\n\n"
         f"- 是否观察到进展：{progress_status}\n"
         f"- 变更文件数：`{len(runtime_state.changed_files)}`\n"
