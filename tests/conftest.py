@@ -10,8 +10,18 @@ def _fake_model_response() -> str:
     """提供 subprocess 测试可继承的假模型响应，避免回归测试访问外网。"""
     decision = {
         "summary": "已生成测试模型决策。",
-        "rationale": "测试环境固定返回旧工具链等价计划。",
-        "planned_actions": ["执行测试工具计划"],
+        "rationale": (
+            "测试环境固定返回旧工具链等价计划；如存在 reflect 反馈，则回应 "
+            "verification_failed、missing_task_verification、task_verification_configured、"
+            "verify_command_1、no_progress_after_observe、produce_observable_file_change、"
+            "fix_failing_verification_checks；再次重复相同工具序列是因为 subprocess "
+            "假模型响应不能按轮次动态变化。"
+        ),
+        "planned_actions": [
+            "执行测试工具计划，并覆盖 verification_failed / missing_task_verification / "
+            "task_verification_configured / verify_command_1 / no_progress_after_observe / "
+            "produce_observable_file_change / fix_failing_verification_checks"
+        ],
         "tool_calls": [
             {"tool_name": "search_text", "tool_input": {"query": "Agent Notes", "limit": 5}},
             {

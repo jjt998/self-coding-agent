@@ -7,7 +7,7 @@ from typing import Any
 from context import ContextBuilder, ContextSnapshot
 from config import RunSettings
 from memory import RuntimeMemoryManager
-from model import ModelDecision, ModelError, build_model_adapter
+from model import ModelDecision, ModelError, ModelResponseError, build_model_adapter
 from trace import TraceEvent, TraceWriter
 from tools import CoreToolRunner, ToolExecution
 from verify import VerificationResult, build_phase_4_verification
@@ -394,7 +394,7 @@ class LoopOrchestrator:
         }
 
     def _build_previous_reflect_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """Return the latest reflect feedback with direct constraints for the next plan."""
+        """返回最近一次 reflect 反馈，并补齐下一轮 plan 必须响应的约束。"""
         if not runtime_state.reflect_feedback:
             return {}
         feedback = dict(runtime_state.reflect_feedback)
@@ -402,7 +402,7 @@ class LoopOrchestrator:
         return feedback
 
     def _build_replan_constraints(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """Convert recent failure evidence into compact model-consumable replan constraints."""
+        """把最近失败证据压缩成模型可直接消费的重规划约束。"""
         verification_failure = self._build_verification_failure_details(runtime_state=runtime_state)
         failed_check_names = list(verification_failure.get("failing_check_names", []))
         failed_tools = [
@@ -445,7 +445,7 @@ class LoopOrchestrator:
         }
 
     def _summarize_reflect_feedback_for_trace(self, runtime_feedback: dict[str, Any]) -> dict[str, Any]:
-        """Keep model_decision trace compact while exposing replan evidence."""
+        """让 model_decision trace 保持精简，同时暴露重规划证据。"""
         reflect_feedback = runtime_feedback.get("previous_reflect_feedback", {})
         if not isinstance(reflect_feedback, dict) or not reflect_feedback:
             return {}
@@ -483,6 +483,103 @@ class LoopOrchestrator:
         if execution.tool_name == "read_file":
             summary["line_count"] = output.get("line_count", 0)
         return summary
+
+    def _validate_reflect_constraints_acknowledged(
+        self,
+        model_decision: ModelDecision,
+        runtime_feedback: dict[str, Any],
+    ) -> None:
+        """校验模型在重规划时确实响应了上一轮 reflect 硬约束。"""
+        reflect_feedback = runtime_feedback.get("previous_reflect_feedback", {})
+        if not isinstance(reflect_feedback, dict) or not reflect_feedback:
+            return
+        constraints = reflect_feedback.get("replan_constraints", {})
+        if not isinstance(constraints, dict) or not constraints:
+            return
+
+        decision_text = " ".join(
+            [
+                model_decision.rationale,
+                model_decision.summary,
+                " ".join(model_decision.planned_actions),
+            ]
+        ).lower()
+        missing_evidence = self._find_unacknowledged_reflect_constraints(
+            decision_text=decision_text,
+            constraints=constraints,
+        )
+        if missing_evidence:
+            raise ModelResponseError(
+                "模型重规划未响应 reflect 约束："
+                + "、".join(missing_evidence),
+                provider=model_decision.provider,
+                model_name=model_decision.model_name,
+            )
+
+        previous_sequence = [
+            str(item).strip()
+            for item in constraints.get("avoid_exact_tool_sequence", [])
+            if str(item).strip()
+        ]
+        current_sequence = [tool_call.tool_name for tool_call in model_decision.tool_calls]
+        if previous_sequence and current_sequence == previous_sequence:
+            rationale = model_decision.rationale.lower()
+            explanation_markers = [
+                "重复",
+                "相同",
+                "再次",
+                "仍需",
+                "继续",
+                "because",
+                "repeat",
+                "same",
+                "again",
+                "retry",
+            ]
+            if not any(marker in rationale for marker in explanation_markers):
+                raise ModelResponseError(
+                    "模型重规划重复了上一轮失败工具序列，但 rationale 未解释重复原因。",
+                    provider=model_decision.provider,
+                    model_name=model_decision.model_name,
+                )
+
+    def _find_unacknowledged_reflect_constraints(
+        self,
+        decision_text: str,
+        constraints: dict[str, Any],
+    ) -> list[str]:
+        """检查 failure reason、失败检查和关注点是否在模型计划中被回应。"""
+        missing: list[str] = []
+        failure_reason = str(constraints.get("failure_reason", "")).strip()
+        if failure_reason and failure_reason.lower() not in decision_text:
+            missing.append(f"failure_reason={failure_reason}")
+
+        failed_check_names = [
+            str(item).strip()
+            for item in constraints.get("failed_check_names", [])
+            if str(item).strip()
+        ]
+        unmentioned_checks = [
+            check_name
+            for check_name in failed_check_names
+            if check_name.lower() not in decision_text
+        ]
+        if unmentioned_checks:
+            missing.append("failed_check_names=" + ",".join(unmentioned_checks))
+
+        must_address = [
+            str(item).strip()
+            for item in constraints.get("must_address", [])
+            if str(item).strip()
+        ]
+        unmentioned_focus = [
+            focus
+            for focus in must_address
+            if focus.lower() not in decision_text
+        ]
+        if unmentioned_focus:
+            missing.append("must_address=" + ",".join(unmentioned_focus))
+        return missing
 
     def _run_state(
         self,
@@ -635,7 +732,7 @@ class LoopOrchestrator:
         }
 
     def _run_plan(self, runtime_state: RuntimeState, config_data: dict[str, Any]) -> dict[str, Any]:
-        """Ask the configured model adapter for the next tool plan."""
+        """请求模型生成下一步工具计划，并校验 reflect 重规划约束。"""
         model_adapter = build_model_adapter(config_data=config_data)
         runtime_feedback = self._build_runtime_feedback(runtime_state=runtime_state)
         reflect_feedback_summary = self._summarize_reflect_feedback_for_trace(runtime_feedback=runtime_feedback)
@@ -644,6 +741,10 @@ class LoopOrchestrator:
             task_type=runtime_state.task_type,
             context_snapshot=runtime_state.context_snapshot,
             config_data=config_data,
+            runtime_feedback=runtime_feedback,
+        )
+        self._validate_reflect_constraints_acknowledged(
+            model_decision=runtime_state.model_decision,
             runtime_feedback=runtime_feedback,
         )
         runtime_state.model_decisions.append(runtime_state.model_decision)
@@ -655,6 +756,7 @@ class LoopOrchestrator:
                     "iteration": runtime_state.current_iteration,
                     "has_reflect_feedback": bool(reflect_feedback_summary),
                     "reflect_feedback_summary": reflect_feedback_summary,
+                    "reflect_constraints_acknowledged": bool(reflect_feedback_summary),
                 },
             )
         )

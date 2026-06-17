@@ -97,7 +97,8 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     model_decision_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision")
     assert model_decision_payload["provider"] == "openai_compatible"
     assert model_decision_payload["model_name"] == "gpt-4.1-mini"
-    assert model_decision_payload["planned_actions"] == ["执行测试工具计划"]
+    assert model_decision_payload["planned_actions"][0].startswith("执行测试工具计划")
+    assert "fix_failing_verification_checks" in model_decision_payload["planned_actions"][0]
 
     tool_results = [event["payload"] for event in trace_events if event["event_type"] == "tool_result"]
     assert len(tool_results) == 10

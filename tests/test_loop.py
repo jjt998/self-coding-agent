@@ -53,10 +53,47 @@ def _fake_model_response(tool_calls: list[dict] | None = None) -> str:
     )
 
 
+def _constraint_aware_rationale(runtime_feedback: dict | None, *, repeat_reason: bool = True) -> str:
+    """为测试 fake 模型生成可通过 reflect 硬约束校验的说明文本。"""
+    reflect_feedback = (runtime_feedback or {}).get("previous_reflect_feedback", {})
+    constraints = reflect_feedback.get("replan_constraints", {}) if isinstance(reflect_feedback, dict) else {}
+    if not constraints:
+        return "首轮执行常规计划。"
+    parts = [
+        str(constraints.get("failure_reason", "")),
+        " ".join(str(item) for item in constraints.get("failed_check_names", [])),
+        " ".join(str(item) for item in constraints.get("must_address", [])),
+    ]
+    suffix = "，再次重复相同工具序列是因为测试需要保持同一工具计划。" if repeat_reason else ""
+    return "回应 reflect 约束：" + " ".join(item for item in parts if item).strip() + suffix
+
+
 def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-verify-reflect-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            rationale = _constraint_aware_rationale(runtime_feedback)
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="fake decision",
+                rationale=rationale,
+                planned_actions=[rationale],
+                tool_calls=[
+                    PlannedToolCall(
+                        tool_name="apply_patch",
+                        tool_input={"path": "agent_notes.md", "old_text": None, "new_text": "# Agent Notes\n"},
+                    ),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["agent_notes.md"]}),
+                ],
+            )
 
     def fake_verification(*, settings, tool_executions):
         return VerificationResult(
@@ -67,8 +104,7 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
         )
 
     monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", _fake_model_response())
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
 
     settings = build_settings(
         task="触发验证失败后的 reflect",
@@ -250,16 +286,27 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv(
-        "SELF_CODING_AGENT_FAKE_MODEL_RESPONSE",
-        _fake_model_response(
-            [
-                {"tool_name": "read_file", "tool_input": {"path": "README.md"}},
-                {"tool_name": "search_text", "tool_input": {"query": "Demo", "limit": 5}},
-            ]
-        ),
-    )
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-no-progress-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            rationale = _constraint_aware_rationale(runtime_feedback, repeat_reason=True)
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="fake decision",
+                rationale=rationale,
+                planned_actions=[rationale],
+                tool_calls=[
+                    PlannedToolCall(tool_name="read_file", tool_input={"path": "README.md"}),
+                    PlannedToolCall(tool_name="search_text", tool_input={"query": "Demo", "limit": 5}),
+                ],
+            )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
 
     settings = build_settings(
         task="只读取文件不修改",
@@ -345,8 +392,40 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", _fake_model_response())
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-replan-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect_feedback"))
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="fake decision",
+                rationale=(
+                    "回应 verification_failed、fake_verify 和 fix_failing_verification_checks 后重规划，"
+                    "再次重复相同工具序列是因为需要覆盖同一文件并重新生成 diff。"
+                    if has_reflect_feedback
+                    else "首轮执行常规计划。"
+                ),
+                planned_actions=[
+                    (
+                        "修复 verification_failed / fake_verify / fix_failing_verification_checks 后重新验证"
+                        if has_reflect_feedback
+                        else "执行首轮工具计划"
+                    )
+                ],
+                tool_calls=[
+                    PlannedToolCall(
+                        tool_name="apply_patch",
+                        tool_input={"path": "agent_notes.md", "old_text": None, "new_text": "# Agent Notes\n"},
+                    ),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["agent_notes.md"]}),
+                ],
+            )
+
     verification_calls = {"count": 0}
 
     def fake_verification(*, settings, tool_executions):
@@ -359,6 +438,7 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
             details={"verification_mode": "fake"},
         )
 
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
     monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
     settings = build_settings(
         task="验证失败后重试",
@@ -425,13 +505,25 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
 
         def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
             feedbacks.append(runtime_feedback or {})
+            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect_feedback"))
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
                 task_type=task_type,
                 summary="fake decision",
-                rationale="test feedback",
-                planned_actions=["执行反馈测试工具计划"],
+                rationale=(
+                    "回应 verification_failed、fake_verify 和 fix_failing_verification_checks，"
+                    "再次使用相同工具序列是因为需要覆盖同一文件并重新生成 diff。"
+                    if has_reflect_feedback
+                    else "test feedback"
+                ),
+                planned_actions=[
+                    (
+                        "处理 verification_failed / fake_verify / fix_failing_verification_checks 后执行反馈测试工具计划"
+                        if has_reflect_feedback
+                        else "执行反馈测试工具计划"
+                    )
+                ],
                 tool_calls=[
                     PlannedToolCall(
                         tool_name="apply_patch",
@@ -504,6 +596,151 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
     assert model_decision_payloads[1]["has_reflect_feedback"] is True
     assert model_decision_payloads[1]["reflect_feedback_summary"]["failure_reason"] == "verification_failed"
     assert model_decision_payloads[1]["reflect_feedback_summary"]["failed_check_names"] == ["fake_verify"]
+
+
+def _run_reflect_constraint_case(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    second_rationale: str,
+    second_planned_actions: list[str],
+    repeat_tool_sequence: bool,
+) -> tuple[loop_module.RuntimeState, list[dict]]:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-reflect-constraint-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect_feedback"))
+            if has_reflect_feedback:
+                tool_calls = [
+                    PlannedToolCall(
+                        tool_name="apply_patch",
+                        tool_input={"path": "agent_notes.md", "old_text": None, "new_text": "# Agent Notes\n"},
+                    ),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["agent_notes.md"]}),
+                ]
+                if not repeat_tool_sequence:
+                    tool_calls = [
+                        PlannedToolCall(tool_name="read_file", tool_input={"path": "README.md"}),
+                        *tool_calls,
+                    ]
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="second decision",
+                    rationale=second_rationale,
+                    planned_actions=second_planned_actions,
+                    tool_calls=tool_calls,
+                )
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="first decision",
+                rationale="首轮执行常规计划。",
+                planned_actions=["执行首轮工具计划"],
+                tool_calls=[
+                    PlannedToolCall(
+                        tool_name="apply_patch",
+                        tool_input={"path": "agent_notes.md", "old_text": None, "new_text": "# Agent Notes\n"},
+                    ),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["agent_notes.md"]}),
+                ],
+            )
+
+    verification_calls = {"count": 0}
+
+    def fake_verification(*, settings, tool_executions):
+        verification_calls["count"] += 1
+        passed = verification_calls["count"] == 2
+        return VerificationResult(
+            passed=passed,
+            summary="验证通过" if passed else "验证失败",
+            checks=[VerificationCheck(name="fake_verify", passed=passed, detail="按轮次模拟验证结果。")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="检查 reflect 约束",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+    trace_events = [
+        json.loads(line)
+        for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    return runtime_state, trace_events
+
+
+def test_second_plan_must_acknowledge_reflect_constraints(tmp_path: Path, monkeypatch) -> None:
+    runtime_state, trace_events = _run_reflect_constraint_case(
+        tmp_path,
+        monkeypatch,
+        second_rationale="忽略上一轮失败，直接继续。",
+        second_planned_actions=["执行新计划"],
+        repeat_tool_sequence=False,
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MODEL_ERROR
+    assert runtime_state.current_state == "plan"
+    failure_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision_failed")
+    assert failure_payload["error_type"] == "ModelResponseError"
+    assert "未响应 reflect 约束" in failure_payload["error_message"]
+
+
+def test_second_plan_cannot_repeat_failed_tool_sequence_without_explanation(tmp_path: Path, monkeypatch) -> None:
+    runtime_state, trace_events = _run_reflect_constraint_case(
+        tmp_path,
+        monkeypatch,
+        second_rationale="回应 verification_failed、fake_verify 和 fix_failing_verification_checks。",
+        second_planned_actions=["修复 verification_failed / fake_verify / fix_failing_verification_checks"],
+        repeat_tool_sequence=True,
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MODEL_ERROR
+    failure_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision_failed")
+    assert "重复了上一轮失败工具序列" in failure_payload["error_message"]
+
+
+def test_second_plan_can_repeat_failed_tool_sequence_with_explanation(tmp_path: Path, monkeypatch) -> None:
+    runtime_state, trace_events = _run_reflect_constraint_case(
+        tmp_path,
+        monkeypatch,
+        second_rationale=(
+            "回应 verification_failed、fake_verify 和 fix_failing_verification_checks，"
+            "再次重复相同工具序列是因为需要覆盖同一文件后重新生成 diff。"
+        ),
+        second_planned_actions=["修复 verification_failed / fake_verify / fix_failing_verification_checks"],
+        repeat_tool_sequence=True,
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
+    assert model_decision_payloads[1]["has_reflect_feedback"] is True
+    assert model_decision_payloads[1]["reflect_constraints_acknowledged"] is True
 
 
 def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, monkeypatch) -> None:

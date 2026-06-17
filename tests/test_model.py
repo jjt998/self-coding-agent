@@ -202,6 +202,8 @@ def test_openai_compatible_adapter_includes_reflect_feedback_constraints(monkeyp
     assert "runtime_feedback.previous_reflect_feedback" in prompt_text
     assert "replan_constraints" in prompt_text
     assert "avoid_exact_tool_sequence" in prompt_text
+    assert "重规划硬约束" in prompt_text
+    assert "必须在 rationale 或 planned_actions 中明确回应" in prompt_text
 
 
 def test_openai_compatible_adapter_raises_on_http_error(monkeypatch) -> None:

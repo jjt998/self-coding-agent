@@ -153,10 +153,11 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                 {
                     "role": "system",
                     "content": (
-                        "Replanning rule: when runtime_feedback.previous_reflect_feedback is present, "
-                        "the next plan must explicitly respond to its replan_constraints in rationale "
-                        "and planned_actions. Avoid repeating the exact failed tool sequence from "
-                        "replan_constraints.avoid_exact_tool_sequence unless rationale explains why."
+                        "重规划硬约束：当 runtime_feedback.previous_reflect_feedback 存在时，"
+                        "下一轮 plan 必须在 rationale 或 planned_actions 中明确回应 "
+                        "replan_constraints.failure_reason、failed_check_names、must_address。"
+                        "除非 rationale 明确说明重复原因，否则不得重复 "
+                        "replan_constraints.avoid_exact_tool_sequence 中完全相同的失败工具序列。"
                     ),
                 },
                 {
