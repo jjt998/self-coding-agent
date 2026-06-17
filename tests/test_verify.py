@@ -35,6 +35,59 @@ def test_verify_uses_task_verify_commands_when_defined(tmp_path: Path) -> None:
     assert result.checks[0].name == "verify_command_1"
 
 
+def test_verify_rules_can_run_without_verify_commands(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "result.txt").write_text("status=ok\n", encoding="utf-8")
+
+    settings = build_settings(
+        task="仅使用结构化规则验证",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_rules=[
+            {"type": "file_exists", "name": "结果文件存在", "path": "result.txt"},
+            {"type": "file_contains", "name": "结果文件包含成功状态", "path": "result.txt", "contains": "status=ok"},
+        ],
+    )
+
+    result = build_phase_4_verification(settings=settings, tool_executions=[])
+
+    assert result.passed is True
+    assert result.details["verification_mode"] == "task_verify_commands"
+    assert result.details["verify_command_count"] == 0
+    assert result.details["verify_rule_count"] == 2
+    assert result.details["verify_command_results"] == []
+    assert [check.name for check in result.checks] == ["结果文件存在", "结果文件包含成功状态"]
+
+
+def test_verify_rules_without_verify_commands_can_fail(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "result.txt").write_text("status=fail\n", encoding="utf-8")
+
+    settings = build_settings(
+        task="仅使用结构化规则验证失败",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_rules=[
+            {"type": "file_not_contains", "name": "结果文件不应包含失败状态", "path": "result.txt", "not_contains": "status=fail"},
+        ],
+    )
+
+    result = build_phase_4_verification(settings=settings, tool_executions=[])
+
+    assert result.passed is False
+    assert result.details["verification_mode"] == "task_verify_commands"
+    assert result.details["verify_command_count"] == 0
+    assert result.details["verify_rule_count"] == 1
+    assert result.checks[0].name == "结果文件不应包含失败状态"
+    assert result.checks[0].passed is False
+
+
 def test_verify_supports_structured_verify_rules_for_command_and_file_checks(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -419,32 +472,22 @@ def test_verify_supports_files_matching_count_rules(tmp_path: Path) -> None:
     assert "skipped=1" in result.checks[1].detail
 
 
-def test_verify_falls_back_to_stub_tool_chain_when_no_verify_commands() -> None:
+def test_verify_fails_when_no_task_verification_is_configured() -> None:
     settings = build_settings(
-        task="回退到演示验证",
+        task="缺少任务级验证配置",
         task_type="general",
         repo_root=".",
         output_root="runs",
         config_name="default",
     )
-    tool_executions = [
-        ToolExecution("search_text", {"query": "Agent Notes", "limit": 5}, {"match_count": 0, "matches": []}),
-        ToolExecution(
-            "apply_patch",
-            {"path": "agent_notes.md", "old_text": None, "new_text": "# Agent Notes\n"},
-            {"ok": True, "action": "create_or_replace", "bytes_written": 14},
-        ),
-        ToolExecution("read_file", {"path": "agent_notes.md"}, {"ok": True, "content": "# Agent Notes\n", "line_count": 1}),
-        ToolExecution(
-            "run_command",
-            {"command": ["python", "-c", "print('# Agent Notes')"]},
-            {"ok": True, "returncode": 0, "stdout": "# Agent Notes\n", "stderr": ""},
-        ),
-        ToolExecution("git_diff", {"paths": ["agent_notes.md"]}, {"changed_file_count": 1, "diffs": [{"path": "agent_notes.md", "diff": "demo"}]}),
-    ]
 
-    result = build_phase_4_verification(settings=settings, tool_executions=tool_executions)
+    result = build_phase_4_verification(settings=settings, tool_executions=[])
 
-    assert result.passed is True
-    assert result.details["verification_mode"] == "stub_tool_chain"
-    assert result.checks[0].name == "工具调用顺序"
+    assert result.passed is False
+    assert result.summary == "验证失败：未配置任务级验证，无法判断任务是否完成。"
+    assert result.details["verification_mode"] == "missing_task_verification"
+    assert result.details["verify_command_count"] == 0
+    assert result.details["verify_rule_count"] == 0
+    assert result.details["verify_command_results"] == []
+    assert result.checks[0].name == "task_verification_configured"
+    assert result.checks[0].passed is False

@@ -68,6 +68,11 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
         "act",
         "observe",
         "verify",
+        "reflect",
+        "plan",
+        "act",
+        "observe",
+        "verify",
         "finalize",
     ]
 
@@ -82,6 +87,11 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
         "read_file",
         "run_command",
         "git_diff",
+        "search_text",
+        "apply_patch",
+        "read_file",
+        "run_command",
+        "git_diff",
     ]
 
     model_decision_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision")
@@ -90,7 +100,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert model_decision_payload["planned_actions"] == ["执行测试工具计划"]
 
     tool_results = [event["payload"] for event in trace_events if event["event_type"] == "tool_result"]
-    assert len(tool_results) == 5
+    assert len(tool_results) == 10
     assert tool_results[1]["tool_output"]["ok"] is True
     assert tool_results[2]["tool_output"]["content"].startswith("# Agent Notes")
     assert tool_results[3]["tool_output"]["stdout"].strip() == "# Agent Notes"
@@ -98,15 +108,16 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "agent_notes.md" in tool_results[4]["tool_output"]["diffs"][0]["path"]
 
     progress_events = [event["payload"] for event in trace_events if event["event_type"] == "progress_observed"]
-    assert len(progress_events) == 1
+    assert len(progress_events) == 2
     assert progress_events[0]["progress_made"] is True
     assert progress_events[0]["changed_files"] == ["agent_notes.md"]
     assert progress_events[0]["failed_tool_count"] == 0
 
     verification_events = [event["payload"] for event in trace_events if event["event_type"] == "verification_result"]
-    assert len(verification_events) == 1
-    assert verification_events[0]["passed"] is True
-    assert verification_events[0]["checks"][0]["name"] == "工具调用顺序"
+    assert len(verification_events) == 2
+    assert verification_events[0]["passed"] is False
+    assert verification_events[0]["details"]["verification_mode"] == "missing_task_verification"
+    assert verification_events[0]["checks"][0]["name"] == "task_verification_configured"
 
     memory_search_events = [event["payload"] for event in trace_events if event["event_type"] == "memory_search_result"]
     assert len(memory_search_events) == 1
@@ -117,14 +128,11 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert memory_search_events[0]["matched_count"] >= 1
 
     memory_entry_written_events = [event["payload"] for event in trace_events if event["event_type"] == "memory_entry_written"]
-    assert len(memory_entry_written_events) == 1
-    assert memory_entry_written_events[0]["run_id"] == snapshot["run_id"]
-    assert memory_entry_written_events[0]["task"] == "创建脚手架"
-    assert memory_entry_written_events[0]["evidence"]["task_keywords"][0] == "创建脚手架"
+    assert memory_entry_written_events == []
 
     memory_write_events = [event["payload"] for event in trace_events if event["event_type"] == "memory_write_result"]
     assert len(memory_write_events) == 1
-    assert memory_write_events[0]["written"] is True
+    assert memory_write_events[0]["written"] is False
     assert memory_write_events[0]["store_path"].endswith(".agent_memory\\long_term_memory.jsonl")
 
     context_events = [event["payload"] for event in trace_events if event["event_type"] == "context_snapshot"]
@@ -161,29 +169,12 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "当前情况：已记录到 Phase 3 工具闭环。" in notes_path.read_text(encoding="utf-8")
 
     memory_store_path = repo_root / ".agent_memory" / "long_term_memory.jsonl"
-    assert memory_store_path.exists()
-    memory_entries = [
-        json.loads(line)
-        for line in memory_store_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert len(memory_entries) == 1
-    assert memory_entries[0]["task"] == "创建脚手架"
-    assert memory_entries[0]["task_type"] == "general"
-    assert memory_entries[0]["tags"] == ["general", "verified", "mvp"]
-    assert memory_entries[0]["evidence"]["task_keywords"][0] == "创建脚手架"
-    assert "验证通过" in memory_entries[0]["evidence"]["summary_keywords"][0]
-    assert memory_entries[0]["evidence"]["task_summary_excerpt"].startswith("验证通过")
-    assert memory_entries[0]["evidence"]["selected_context_files"] == [
-        "README.md",
-        "LONG_GUIDE.md",
-        "DIRECTORY_GUIDE.md",
-    ]
+    assert not memory_store_path.exists()
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "`finalize`" in report_text
     assert "## 反思反馈" in report_text
-    assert "reflect：未触发" in report_text
+    assert "reflect：已触发" in report_text
     assert "## 进展观察" in report_text
     assert "是否观察到进展：是" in report_text
     assert "## 上下文摘要" in report_text
@@ -197,8 +188,8 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "## 验证结果" in report_text
     assert "## Memory 写入" in report_text
     assert "## Sandbox 清理" in report_text
-    assert "写入状态：已写入" in report_text
-    assert "验证状态：通过" in report_text
+    assert "写入状态：未写入" in report_text
+    assert "验证状态：未通过" in report_text
     assert "`apply_patch`：成功" in report_text
 
 
@@ -220,6 +211,9 @@ def test_cli_deletes_sandbox_after_success_by_default(tmp_path: Path) -> None:
                         "name": "sandbox_cleanup_default",
                         "task": "创建脚手架",
                         "task_type": "general",
+                        "verify_rules": [
+                            {"type": "file_exists", "name": "agent notes exists", "path": "agent_notes.md"}
+                        ],
                     }
                 ]
             },
@@ -482,10 +476,10 @@ def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path)
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "召回倾向：优先测试文件和相关代码文件" in report_text
     assert "memory：已启用" in report_text
-    assert "写入状态：已写入" in report_text
+    assert "写入状态：未写入" in report_text
 
 
-def test_cli_does_not_trigger_reflect_when_strategy_is_verify_failure_only(tmp_path: Path) -> None:
+def test_cli_verify_failure_only_reflects_when_verification_is_missing(tmp_path: Path) -> None:
     output_root = tmp_path / "runs"
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -535,15 +529,22 @@ def test_cli_does_not_trigger_reflect_when_strategy_is_verify_failure_only(tmp_p
         "act",
         "observe",
         "verify",
+        "reflect",
+        "plan",
+        "act",
+        "observe",
+        "verify",
         "finalize",
     ]
 
+    verification_payload = next(event["payload"] for event in trace_events if event["event_type"] == "verification_result")
+    assert verification_payload["details"]["verification_mode"] == "missing_task_verification"
     run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
-    assert run_finished_payload["stop_reason"]["details"]["reflect_triggered"] is False
-    assert run_finished_payload["stop_reason"]["details"]["reflect_trigger_reason"] == ""
+    assert run_finished_payload["stop_reason"]["details"]["reflect_triggered"] is True
+    assert run_finished_payload["stop_reason"]["details"]["reflect_trigger_reason"] == "verification_failed"
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
-    assert "reflect：未触发" in report_text
+    assert "reflect：已触发" in report_text
 
 
 def test_cli_uses_naive_recent_context_strategy_from_config(tmp_path: Path) -> None:

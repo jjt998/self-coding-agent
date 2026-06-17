@@ -147,6 +147,9 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
         repo_root=str(repo_root),
         output_root=str(tmp_path / "runs"),
         config_name="default",
+        verify_rules=[
+            {"type": "file_exists", "name": "agent notes exists", "path": "agent_notes.md"},
+        ],
     )
     run_dir = Path(settings.output_root) / settings.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -207,7 +210,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert ingest_payload["workspace_mode"] == settings.workspace_mode
     assert ingest_payload["setup_command_count"] == 0
     assert ingest_payload["verify_command_count"] == 0
-    assert ingest_payload["verify_rule_count"] == 0
+    assert ingest_payload["verify_rule_count"] == 1
     assert ingest_payload["max_steps"] == 2
     assert ingest_payload["config_name"] == "default"
     assert ingest_payload["config_keys"] == ["model"]
@@ -225,7 +228,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     state_results = [event["payload"] for event in trace_events if event["event_type"] == "state_result"]
     ingest_state_result = next(event for event in state_results if event["state"] == "ingest")
     finalize_state_result = next(event for event in state_results if event["state"] == "finalize")
-    assert ingest_state_result["result"]["verify_rule_count"] == 0
+    assert ingest_state_result["result"]["verify_rule_count"] == 1
     assert finalize_state_result["result"]["tool_execution_count"] == 5
     transition_targets = [
         event["payload"]["to_state"]

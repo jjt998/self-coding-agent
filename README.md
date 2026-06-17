@@ -11,7 +11,7 @@
 - 最小多轮 loop：默认 `runtime.max_steps = 2`，流程为 `ingest -> analyze -> (plan -> act -> observe -> verify/reflect)* -> finalize`。
 - 核心工具：`search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`。
 - 真实进展观察：基于 `apply_patch` 成功和 `git_diff` 变更判断是否有进展。
-- 任务级验证：支持 `verify_commands` 和结构化 `verify_rules`。
+- 任务级验证：支持 `verify_commands` 和结构化 `verify_rules`；未配置任务级验证时会以 `missing_task_verification` 失败，不再回退到演示型检查。
 - 结构化失败收口：支持 `setup_failed`、`verification_failed`、`model_error` 等 stop reason。
 - eval batch：批量运行任务并生成聚合 `summary.json` / `summary.md`。
 - strategy comparison：对同一批任务执行多套配置并输出 delta。
@@ -215,7 +215,7 @@ eval 和 comparison 会额外生成：
 
 ## 当前限制
 
-- loop 仍保留 `_run_stub_state` 作为状态实现入口，正在逐步替换为真实任务求解链路。
+- loop 已拆分为独立状态处理方法，后续仍需继续增强真实任务求解策略。
 - reflect 已能生成结构化 feedback，但仍需继续接入更强的重规划策略。
 - 默认最大求解轮数仍固定为 `2`，暂不开放更高预算。
 - CLI 暂不支持单次运行直接传入 `verify_commands` / `verify_rules`，该能力目前只在 eval task schema 中使用。

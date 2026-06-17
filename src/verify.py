@@ -57,89 +57,34 @@ class VerifyCommandResult:
 
 
 def build_phase_4_verification(settings: RunSettings, tool_executions: list[ToolExecution]) -> VerificationResult:
-    """根据任务设置决定走真实 verify 还是旧的演示型 verify。"""
-    if settings.verify_commands:
-        return _build_task_command_verification(settings=settings, tool_executions=tool_executions)
-    return _build_stub_tool_verification(tool_executions=tool_executions)
+    """根据任务显式配置执行验证；缺少验证配置时不再回退到演示检查。"""
+    if settings.verify_commands or settings.verify_rules:
+        return _build_task_verification(settings=settings, tool_executions=tool_executions)
+    return _build_missing_task_verification()
 
 
-def _build_stub_tool_verification(tool_executions: list[ToolExecution]) -> VerificationResult:
-    """根据工具执行结果做最小验证，判断本次 run 是否真的产生了预期产物。"""
-    execution_by_name = {execution.tool_name: execution for execution in tool_executions}
-    checks: list[VerificationCheck] = []
-
-    expected_tools = ["search_text", "apply_patch", "read_file", "run_command", "git_diff"]
-    called_tools = [execution.tool_name for execution in tool_executions]
-    checks.append(
-        VerificationCheck(
-            name="工具调用顺序",
-            passed=called_tools == expected_tools,
-            detail=f"实际调用顺序：{', '.join(called_tools) if called_tools else '无'}",
-        )
+def _build_missing_task_verification() -> VerificationResult:
+    """返回稳定失败结果，明确提示当前任务缺少可判定的验证配置。"""
+    check = VerificationCheck(
+        name="task_verification_configured",
+        passed=False,
+        detail="未配置 verify_commands 或 verify_rules，无法判断任务是否完成。",
     )
-
-    apply_patch_result = execution_by_name.get("apply_patch")
-    apply_patch_ok = bool(apply_patch_result and apply_patch_result.tool_output.get("ok"))
-    checks.append(
-        VerificationCheck(
-            name="说明文件写入",
-            passed=apply_patch_ok,
-            detail="已成功写入 agent_notes.md。" if apply_patch_ok else "未成功写入 agent_notes.md。",
-        )
-    )
-
-    read_file_result = execution_by_name.get("read_file")
-    read_file_content = read_file_result.tool_output.get("content", "") if read_file_result else ""
-    read_file_ok = bool(read_file_result and read_file_result.tool_output.get("ok") and "# Agent Notes" in read_file_content)
-    checks.append(
-        VerificationCheck(
-            name="说明文件可读",
-            passed=read_file_ok,
-            detail="已读回 agent_notes.md，且标题符合预期。"
-            if read_file_ok
-            else "未能正确读回 agent_notes.md。",
-        )
-    )
-
-    command_result = execution_by_name.get("run_command")
-    command_stdout = command_result.tool_output.get("stdout", "").strip() if command_result else ""
-    command_ok = bool(command_result and command_result.tool_output.get("ok") and command_stdout == "# Agent Notes")
-    checks.append(
-        VerificationCheck(
-            name="命令检查通过",
-            passed=command_ok,
-            detail=f"命令输出首行：{command_stdout or '空'}",
-        )
-    )
-
-    diff_result = execution_by_name.get("git_diff")
-    diff_count = int(diff_result.tool_output.get("changed_file_count", 0)) if diff_result else 0
-    diff_ok = diff_count > 0
-    checks.append(
-        VerificationCheck(
-            name="变更已被记录",
-            passed=diff_ok,
-            detail=f"diff 记录到的变更文件数：{diff_count}",
-        )
-    )
-
-    passed = all(check.passed for check in checks)
-    summary = "验证通过：本次 run 已写入说明文件，并保留了可检查的工具结果。" if passed else "验证失败：至少有一项关键检查未通过。"
     return VerificationResult(
-        passed=passed,
-        summary=summary,
-        checks=checks,
+        passed=False,
+        summary="验证失败：未配置任务级验证，无法判断任务是否完成。",
+        checks=[check],
         details={
-            "verification_mode": "stub_tool_chain",
-            "tool_call_count": len(tool_executions),
-            "called_tools": called_tools,
-            "changed_file_count": diff_count,
+            "verification_mode": "missing_task_verification",
+            "verify_command_count": 0,
+            "verify_rule_count": 0,
+            "verify_command_results": [],
         },
     )
 
 
-def _build_task_command_verification(settings: RunSettings, tool_executions: list[ToolExecution]) -> VerificationResult:
-    """按任务定义的 verify_commands 执行真实验证，并把结果收敛成统一结构。"""
+def _build_task_verification(settings: RunSettings, tool_executions: list[ToolExecution]) -> VerificationResult:
+    """执行任务显式声明的 verify_commands 与 verify_rules，并合并为统一验证结果。"""
     checks: list[VerificationCheck] = []
     command_results: list[VerifyCommandResult] = []
 

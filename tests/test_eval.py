@@ -56,6 +56,9 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
                                 "from pathlib import Path; Path('setup_marker.txt').write_text('sandbox-ready', encoding='utf-8')",
                             ]
                         ],
+                        "verify_rules": [
+                            {"type": "file_exists", "name": "agent notes exists", "path": "agent_notes.md"}
+                        ],
                         "expectation": {
                             "passed": True,
                             "outcome": "passed_cleanly",
