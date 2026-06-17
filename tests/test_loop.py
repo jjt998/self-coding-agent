@@ -452,6 +452,54 @@ def test_loop_normalizes_common_tool_input_aliases(tmp_path: Path, monkeypatch) 
     assert runtime_state.tool_executions[0].tool_input == {"path": "README.md"}
 
 
+def test_loop_accepts_string_run_command_from_model(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-string-command-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="fake decision",
+                rationale="使用真实模型常见字符串命令读取文件。",
+                planned_actions=["运行 type README.md"],
+                tool_calls=[
+                    PlannedToolCall(tool_name="run_command", tool_input={"command": "type README.md"}),
+                ],
+            )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+
+    settings = build_settings(
+        task="运行字符串命令",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_rules=[{"type": "file_exists", "name": "README exists", "path": "README.md"}],
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+
+    assert runtime_state.tool_executions[0].tool_name == "run_command"
+    assert runtime_state.tool_executions[0].tool_input == {"command": "type README.md"}
+    assert runtime_state.tool_executions[0].tool_output["ok"] is True
+    assert "# Demo" in runtime_state.tool_executions[0].tool_output["stdout"]
+
+
 def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -895,7 +943,7 @@ def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, mon
     assert run_finished_payload["stop_reason"]["details"]["api_key_env"] == "DEEPSEEK_API_KEY"
 
 
-def test_loop_model_error_includes_safe_raw_response_excerpt(tmp_path: Path, monkeypatch) -> None:
+def test_loop_records_model_response_normalized_for_planned_actions(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
@@ -903,13 +951,102 @@ def test_loop_model_error_includes_safe_raw_response_excerpt(tmp_path: Path, mon
     monkeypatch.setenv(
         "SELF_CODING_AGENT_FAKE_MODEL_RESPONSE",
         json.dumps(
-            {"choices": [{"message": {"content": json.dumps({"summary": "少字段"}, ensure_ascii=False)}}]},
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "summary": "读取 README",
+                                    "rationale": "planned_actions 缺失时仍应执行安全的工具计划。",
+                                    "tool_calls": [
+                                        {
+                                            "tool_name": "read_file",
+                                            "tool_input": {"path": "README.md"},
+                                        }
+                                    ],
+                                },
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            },
             ensure_ascii=False,
         ),
     )
 
     settings = build_settings(
-        task="触发模型响应错误",
+        task="触发 planned_actions 归一化",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_rules=[{"type": "file_exists", "name": "README exists", "path": "README.md"}],
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    assert runtime_state.model_decision is not None
+    assert runtime_state.model_decision.planned_actions == ["执行工具：read_file"]
+    trace_events = [
+        json.loads(line)
+        for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    normalized_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_response_normalized")
+    assert normalized_payload["provider"] == "openai_compatible"
+    assert normalized_payload["model_name"] == "demo-model"
+    assert normalized_payload["iteration"] == 1
+    assert normalized_payload["notes"][0]["field_path"] == "planned_actions"
+    assert normalized_payload["notes"][0]["reason"] == "missing_or_unusable_fallback_to_tool_calls"
+    model_decision_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision")
+    assert model_decision_payload["planned_actions"] == ["执行工具：read_file"]
+
+
+def test_loop_model_error_includes_safe_raw_response_excerpt_for_invalid_tool_calls(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "secret-test-key")
+    monkeypatch.setenv(
+        "SELF_CODING_AGENT_FAKE_MODEL_RESPONSE",
+        json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "summary": "非法工具计划",
+                                    "rationale": "tool_input 非对象必须失败。",
+                                    "planned_actions": "读取文件",
+                                    "tool_calls": [{"tool_name": "read_file", "tool_input": "README.md"}],
+                                },
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    settings = build_settings(
+        task="触发工具计划错误",
         task_type="general",
         repo_root=str(repo_root),
         output_root=str(tmp_path / "runs"),
@@ -934,7 +1071,7 @@ def test_loop_model_error_includes_safe_raw_response_excerpt(tmp_path: Path, mon
     ]
     failure_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision_failed")
     assert failure_payload["error_type"] == "ModelResponseError"
-    assert failure_payload["field_path"] == "rationale"
+    assert failure_payload["field_path"] == "tool_calls[1].tool_input"
     assert "response_excerpt" in failure_payload
-    assert "少字段" in failure_payload["response_excerpt"]
+    assert "非法工具计划" in failure_payload["response_excerpt"]
     assert "secret-test-key" not in json.dumps(failure_payload, ensure_ascii=False)

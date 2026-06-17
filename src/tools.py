@@ -132,15 +132,31 @@ class CoreToolRunner:
             },
         )
 
-    def run_command(self, command: list[str]) -> ToolExecution:
-        """在仓库目录执行命令，保留返回码与标准输出。"""
-        completed = subprocess.run(
-            command,
-            cwd=self.repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+    def run_command(self, command: list[str] | str) -> ToolExecution:
+        """在仓库目录执行命令，保留返回码、标准输出和启动失败原因。"""
+        shell = isinstance(command, str)
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                shell=shell,
+            )
+        except OSError as error:
+            return ToolExecution(
+                tool_name="run_command",
+                tool_input={"command": command},
+                tool_output={
+                    "ok": False,
+                    "returncode": None,
+                    "stdout": "",
+                    "stderr": str(error),
+                    "error": str(error),
+                    "error_type": type(error).__name__,
+                },
+            )
         return ToolExecution(
             tool_name="run_command",
             tool_input={"command": command},

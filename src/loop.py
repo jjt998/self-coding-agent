@@ -796,6 +796,18 @@ class LoopOrchestrator:
                 },
             )
         )
+        if runtime_state.model_decision.normalization_notes:
+            self.trace_writer.write_event(
+                TraceEvent(
+                    event_type="model_response_normalized",
+                    payload={
+                        "provider": runtime_state.model_decision.provider,
+                        "model_name": runtime_state.model_decision.model_name,
+                        "iteration": runtime_state.current_iteration,
+                        "notes": list(runtime_state.model_decision.normalization_notes),
+                    },
+                )
+            )
         self._validate_reflect_constraints_acknowledged(
             model_decision=runtime_state.model_decision,
             runtime_feedback=runtime_feedback,

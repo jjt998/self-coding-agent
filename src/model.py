@@ -66,11 +66,13 @@ class ModelDecision:
     planned_actions: list[str] = field(default_factory=list)
     tool_calls: list[PlannedToolCall] = field(default_factory=list)
     raw_response_content: str = ""
+    normalization_notes: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """转换成普通字典，便于 trace 和报告复用。"""
         data = asdict(self)
         data.pop("raw_response_content", None)
+        data.pop("normalization_notes", None)
         data["tool_calls"] = [tool_call.to_dict() for tool_call in self.tool_calls]
         return data
 
@@ -346,8 +348,11 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         """校验模型决策字段，并转换成内部数据结构。"""
         summary = _required_string(raw_decision, "summary", self)
         rationale = _required_string(raw_decision, "rationale", self)
-        planned_actions = _required_string_list(raw_decision, "planned_actions", self)
         tool_calls = _required_tool_calls(raw_decision, self)
+        planned_actions, normalization_notes = _normalize_planned_actions(
+            raw_decision=raw_decision,
+            tool_calls=tool_calls,
+        )
         return ModelDecision(
             provider=self.provider,
             model_name=self.model_name,
@@ -357,6 +362,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             planned_actions=planned_actions,
             tool_calls=tool_calls,
             raw_response_content=raw_response_content,
+            normalization_notes=normalization_notes,
         )
 
 
@@ -481,6 +487,67 @@ def _required_string_list(
             details=adapter._diagnostic_details(field_path=field_name),
         )
     return normalized
+
+
+def _normalize_planned_actions(
+    raw_decision: dict[str, Any],
+    tool_calls: list[PlannedToolCall],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """把非执行字段 planned_actions 宽容归一化，避免展示字段导致 run 中断。"""
+    value = raw_decision.get("planned_actions")
+    notes: list[dict[str, Any]] = []
+    if isinstance(value, list):
+        normalized: list[str] = []
+        changed = False
+        for item in value:
+            if isinstance(item, str):
+                text = item.strip()
+            elif isinstance(item, dict):
+                text = _extract_action_text_from_dict(item)
+                changed = True
+            else:
+                text = str(item).strip()
+                changed = True
+            if text:
+                normalized.append(text)
+        if normalized:
+            if changed:
+                notes.append(
+                    {
+                        "field_path": "planned_actions",
+                        "reason": "coerced_list_items_to_strings",
+                    }
+                )
+            return normalized, notes
+        notes.append({"field_path": "planned_actions", "reason": "empty_list_fallback_to_tool_calls"})
+        return _planned_actions_from_tool_calls(tool_calls), notes
+
+    if isinstance(value, str) and value.strip():
+        notes.append({"field_path": "planned_actions", "reason": "coerced_string_to_single_item_list"})
+        return [value.strip()], notes
+
+    notes.append(
+        {
+            "field_path": "planned_actions",
+            "reason": "missing_or_unusable_fallback_to_tool_calls",
+            "raw_type": type(value).__name__,
+        }
+    )
+    return _planned_actions_from_tool_calls(tool_calls), notes
+
+
+def _extract_action_text_from_dict(item: dict[str, Any]) -> str:
+    """从模型常见对象形式里提取可读 action 文本。"""
+    for key in ["step", "action", "description", "text", "name"]:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return json.dumps(item, ensure_ascii=False)
+
+
+def _planned_actions_from_tool_calls(tool_calls: list[PlannedToolCall]) -> list[str]:
+    """当 planned_actions 不可用时，从真实执行工具计划派生可读说明。"""
+    return [f"执行工具：{tool_call.tool_name}" for tool_call in tool_calls]
 
 
 def _required_tool_calls(raw_decision: dict[str, Any], adapter: OpenAICompatibleModelAdapter) -> list[PlannedToolCall]:

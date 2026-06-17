@@ -313,6 +313,33 @@ def test_openai_compatible_adapter_raises_on_url_and_timeout_errors(monkeypatch)
             raise AssertionError("request failure should raise ModelRequestError")
 
 
+def test_openai_compatible_adapter_normalizes_non_executable_planned_actions(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    adapter = OpenAICompatibleModelAdapter(
+        provider="openai_compatible",
+        model_name="demo-model",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+        timeout_seconds=7,
+    )
+
+    cases = [
+        ("读取文件并修复", ["读取文件并修复"], "coerced_string_to_single_item_list"),
+        ([{"step": "读取文件"}, {"action": "修复代码"}], ["读取文件", "修复代码"], "coerced_list_items_to_strings"),
+        ([], ["执行工具：search_text"], "empty_list_fallback_to_tool_calls"),
+    ]
+    for raw_planned_actions, expected_actions, expected_reason in cases:
+        response_payload = _openai_response({**_valid_decision(), "planned_actions": raw_planned_actions})
+        monkeypatch.setenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", json.dumps(response_payload, ensure_ascii=False))
+
+        decision = adapter.decide(task="任务", task_type="general", context_snapshot=None, config_data={})
+
+        assert decision.planned_actions == expected_actions
+        assert decision.normalization_notes[0]["field_path"] == "planned_actions"
+        assert decision.normalization_notes[0]["reason"] == expected_reason
+        assert "normalization_notes" not in decision.to_dict()
+
+
 def test_openai_compatible_adapter_rejects_invalid_response(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     adapter = OpenAICompatibleModelAdapter(
