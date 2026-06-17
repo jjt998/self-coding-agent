@@ -1,0 +1,6 @@
+# 安装本地 CLI 包，提供 self-coding-agent 命令。
+-e .
+
+# 运行时代码当前只使用 Python 标准库。
+# pytest 用于本地回归测试。
+pytest>=9.1,<10
