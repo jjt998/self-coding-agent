@@ -182,6 +182,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "`finalize`" in report_text
+    assert "## 反思反馈" in report_text
     assert "reflect：未触发" in report_text
     assert "## 进展观察" in report_text
     assert "是否观察到进展：是" in report_text

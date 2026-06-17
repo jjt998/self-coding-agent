@@ -151,6 +151,15 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     ),
                 },
                 {
+                    "role": "system",
+                    "content": (
+                        "Replanning rule: when runtime_feedback.previous_reflect_feedback is present, "
+                        "the next plan must explicitly respond to its replan_constraints in rationale "
+                        "and planned_actions. Avoid repeating the exact failed tool sequence from "
+                        "replan_constraints.avoid_exact_tool_sequence unless rationale explains why."
+                    ),
+                },
+                {
                     "role": "user",
                     "content": json.dumps(
                         {

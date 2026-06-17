@@ -386,11 +386,78 @@ class LoopOrchestrator:
                 "summary": runtime_state.observation_summary,
             },
             "previous_verification": verification_payload,
-            "previous_reflect_feedback": dict(runtime_state.reflect_feedback),
+            "previous_reflect_feedback": self._build_previous_reflect_feedback(runtime_state=runtime_state),
             "recent_tool_results": [
                 self._summarize_tool_execution(execution)
                 for execution in runtime_state.recent_tool_executions
             ],
+        }
+
+    def _build_previous_reflect_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """Return the latest reflect feedback with direct constraints for the next plan."""
+        if not runtime_state.reflect_feedback:
+            return {}
+        feedback = dict(runtime_state.reflect_feedback)
+        feedback["replan_constraints"] = self._build_replan_constraints(runtime_state=runtime_state)
+        return feedback
+
+    def _build_replan_constraints(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """Convert recent failure evidence into compact model-consumable replan constraints."""
+        verification_failure = self._build_verification_failure_details(runtime_state=runtime_state)
+        failed_check_names = list(verification_failure.get("failing_check_names", []))
+        failed_tools = [
+            self._summarize_tool_execution(execution)
+            for execution in runtime_state.recent_tool_executions
+            if execution.tool_output.get("ok") is False
+            or (execution.tool_name == "run_command" and execution.tool_output.get("returncode", 0) != 0)
+        ]
+        previous_tool_sequence = [execution.tool_name for execution in runtime_state.recent_tool_executions]
+        suggested_tools: list[str] = []
+        if not runtime_state.progress_made:
+            suggested_tools.extend(["apply_patch", "git_diff"])
+        if failed_check_names:
+            suggested_tools.extend(["read_file", "apply_patch", "run_command", "git_diff"])
+        if failed_tools:
+            suggested_tools.append("run_command")
+
+        trigger = runtime_state.reflect_trigger_reason or "unknown"
+        if trigger == "no_progress_after_observe":
+            failure_reason = "no_progress_after_observe"
+        elif failed_check_names:
+            failure_reason = "verification_failed"
+        elif failed_tools:
+            failure_reason = "tool_failed"
+        else:
+            failure_reason = trigger
+
+        return {
+            "failure_reason": failure_reason,
+            "must_address": self._build_suggested_focus(
+                runtime_state=runtime_state,
+                verification_failure=verification_failure,
+                failed_tool_summaries=failed_tools,
+            ),
+            "avoid_exact_tool_sequence": previous_tool_sequence,
+            "failed_check_names": failed_check_names,
+            "failed_tools": failed_tools,
+            "suggested_focus_files": list(runtime_state.changed_files),
+            "suggested_tools": list(dict.fromkeys(suggested_tools)),
+        }
+
+    def _summarize_reflect_feedback_for_trace(self, runtime_feedback: dict[str, Any]) -> dict[str, Any]:
+        """Keep model_decision trace compact while exposing replan evidence."""
+        reflect_feedback = runtime_feedback.get("previous_reflect_feedback", {})
+        if not isinstance(reflect_feedback, dict) or not reflect_feedback:
+            return {}
+        constraints = reflect_feedback.get("replan_constraints", {})
+        if not isinstance(constraints, dict):
+            constraints = {}
+        return {
+            "trigger": reflect_feedback.get("trigger", ""),
+            "failure_reason": constraints.get("failure_reason", ""),
+            "failed_check_names": list(constraints.get("failed_check_names", [])),
+            "must_address": list(constraints.get("must_address", [])),
+            "avoid_exact_tool_sequence": list(constraints.get("avoid_exact_tool_sequence", [])),
         }
 
     def _summarize_tool_execution(self, execution: ToolExecution) -> dict[str, Any]:
@@ -513,12 +580,14 @@ class LoopOrchestrator:
             }
         if state is AgentState.PLAN:
             model_adapter = build_model_adapter(config_data=config_data)
+            runtime_feedback = self._build_runtime_feedback(runtime_state=runtime_state)
+            reflect_feedback_summary = self._summarize_reflect_feedback_for_trace(runtime_feedback=runtime_feedback)
             runtime_state.model_decision = model_adapter.decide(
                 task=runtime_state.task,
                 task_type=runtime_state.task_type,
                 context_snapshot=runtime_state.context_snapshot,
                 config_data=config_data,
-                runtime_feedback=self._build_runtime_feedback(runtime_state=runtime_state),
+                runtime_feedback=runtime_feedback,
             )
             runtime_state.model_decisions.append(runtime_state.model_decision)
             self.trace_writer.write_event(
@@ -527,6 +596,8 @@ class LoopOrchestrator:
                     payload={
                         **runtime_state.model_decision.to_dict(),
                         "iteration": runtime_state.current_iteration,
+                        "has_reflect_feedback": bool(reflect_feedback_summary),
+                        "reflect_feedback_summary": reflect_feedback_summary,
                     },
                 )
             )
@@ -792,4 +863,23 @@ class LoopOrchestrator:
             "verification_failure": verification_failure,
             "failed_tools": failed_tool_summaries,
             "suggested_focus": suggested_focus,
+            "replan_constraints": self._build_replan_constraints(runtime_state=runtime_state),
         }
+
+    def _build_suggested_focus(
+        self,
+        runtime_state: RuntimeState,
+        verification_failure: dict[str, Any],
+        failed_tool_summaries: list[dict[str, Any]],
+    ) -> list[str]:
+        """Build stable focus tags for model-facing replan constraints."""
+        suggested_focus: list[str] = []
+        if not runtime_state.progress_made:
+            suggested_focus.append("produce_observable_file_change")
+        if verification_failure.get("failing_check_names"):
+            suggested_focus.append("fix_failing_verification_checks")
+        if failed_tool_summaries:
+            suggested_focus.append("fix_failed_tool_or_command")
+        if not suggested_focus:
+            suggested_focus.append("adjust_next_tool_plan_from_previous_evidence")
+        return suggested_focus

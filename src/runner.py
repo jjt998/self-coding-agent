@@ -327,6 +327,24 @@ def _build_phase_4_report(
     ]
     changed_files_summary = "\n".join(changed_file_lines) if changed_file_lines else "- 暂无变更文件。"
 
+    reflect_feedback = runtime_state.reflect_feedback
+    reflect_constraints = reflect_feedback.get("replan_constraints", {}) if reflect_feedback else {}
+    if not isinstance(reflect_constraints, dict):
+        reflect_constraints = {}
+    reflect_failed_checks = reflect_constraints.get("failed_check_names", [])
+    reflect_focus = reflect_constraints.get("must_address", [])
+    reflect_sequence = reflect_constraints.get("avoid_exact_tool_sequence", [])
+    if reflect_feedback:
+        reflect_feedback_summary = (
+            f"- trigger: `{reflect_feedback.get('trigger', 'unknown')}`\n"
+            f"- failure reason: `{reflect_constraints.get('failure_reason', '')}`\n"
+            f"- failing checks: `{', '.join(str(item) for item in reflect_failed_checks) or 'none'}`\n"
+            f"- suggested focus: `{', '.join(str(item) for item in reflect_focus) or 'none'}`\n"
+            f"- avoid exact tool sequence: `{', '.join(str(item) for item in reflect_sequence) or 'none'}`"
+        )
+    else:
+        reflect_feedback_summary = "- 未生成反思反馈。"
+
     tool_lines = []
     for execution in runtime_state.tool_executions:
         tool_ok = execution.tool_output.get("ok")
@@ -427,6 +445,8 @@ def _build_phase_4_report(
         f"- 失败工具数：`{runtime_state.failed_tool_count}`\n"
         f"- 观察摘要：{observation_summary}\n"
         f"{changed_files_summary}\n"
+        f"\n## 反思反馈\n\n"
+        f"{reflect_feedback_summary}\n"
         f"\n## 上下文摘要\n\n"
         f"{context_summary}\n"
         f"\n## 工具调用摘要\n\n"

@@ -2,7 +2,7 @@
 
 ## 最后更新时间
 
-- 日期：2026-06-17
+- 日期：2026-06-16
 
 ## 当前阶段
 
@@ -139,10 +139,3 @@
 1. 继续把 reflect feedback 从“结构化建议”接到更真实的模型提示/策略约束，减少重复失败计划。
 2. 基于升级后的 sample batch 做一轮 eval/comparison smoke，观察新 taxonomy 和 reflect feedback 在报告里的可读性。
 3. 只有在真实任务暴露需求后，再补 regex、JSON key/length、diff text 等更高阶 `verify_rules`。
-## Phase 9 本轮新增进展：reflect feedback 驱动重规划
-
-- `runtime_feedback.previous_reflect_feedback` 现在会携带模型可直接消费的 `replan_constraints`，包括 `failure_reason`、`must_address`、`avoid_exact_tool_sequence`、`failed_check_names`、`suggested_tools` 等字段。
-- 第二轮及后续 `plan` 的 `model_decision` trace 会记录 `has_reflect_feedback` 和 `reflect_feedback_summary`，用于确认模型是否收到上一轮反思约束。
-- OpenAI compatible 请求增加了重规划提示：存在 `previous_reflect_feedback` 时，模型必须在 `rationale` / `planned_actions` 中回应失败证据，并避免无解释地重复完全相同的失败工具序列。
-- 单次 run 报告新增 `## 反思反馈` 小节，展示最近一次 reflect trigger、失败检查、建议关注点和需要避免重复的工具序列。
-- 本轮未开放 `runtime.max_steps > 2`，未新增 CLI 单次传 `verify_commands` / `verify_rules`，也未继续扩展新的 `verify_rules`。

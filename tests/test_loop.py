@@ -283,6 +283,11 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
     assert progress_payload["progress_made"] is False
     assert progress_payload["changed_files"] == []
     assert progress_payload["failed_tool_count"] == 0
+    reflect_payloads = [event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback"]
+    assert reflect_payloads[0]["trigger"] == "no_progress_after_observe"
+    assert reflect_payloads[0]["replan_constraints"]["failure_reason"] == "no_progress_after_observe"
+    assert "produce_observable_file_change" in reflect_payloads[0]["replan_constraints"]["must_address"]
+    assert reflect_payloads[0]["replan_constraints"]["failed_check_names"] == []
     transition_targets = [
         event["payload"]["to_state"]
         for event in trace_events
@@ -445,6 +450,13 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
     assert feedbacks[1]["previous_verification"]["passed"] is False
     assert feedbacks[1]["previous_reflect_feedback"]["trigger"] == "verification_failed"
     assert feedbacks[1]["previous_reflect_feedback"]["verification_failure"]["failing_check_names"] == ["fake_verify"]
+    assert feedbacks[1]["previous_reflect_feedback"]["replan_constraints"]["failure_reason"] == "verification_failed"
+    assert feedbacks[1]["previous_reflect_feedback"]["replan_constraints"]["failed_check_names"] == ["fake_verify"]
+    assert feedbacks[1]["previous_reflect_feedback"]["replan_constraints"]["avoid_exact_tool_sequence"] == [
+        "apply_patch",
+        "git_diff",
+    ]
+    assert "fix_failing_verification_checks" in feedbacks[1]["previous_reflect_feedback"]["replan_constraints"]["must_address"]
     assert feedbacks[1]["recent_tool_results"][0]["tool_name"] == "apply_patch"
 
     trace_events = [
@@ -455,6 +467,12 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
     reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback")
     assert reflect_payload["trigger"] == "verification_failed"
     assert reflect_payload["verification_failure"]["failing_check_names"] == ["fake_verify"]
+    assert reflect_payload["replan_constraints"]["failure_reason"] == "verification_failed"
+    model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
+    assert model_decision_payloads[0]["has_reflect_feedback"] is False
+    assert model_decision_payloads[1]["has_reflect_feedback"] is True
+    assert model_decision_payloads[1]["reflect_feedback_summary"]["failure_reason"] == "verification_failed"
+    assert model_decision_payloads[1]["reflect_feedback_summary"]["failed_check_names"] == ["fake_verify"]
 
 
 def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, monkeypatch) -> None:

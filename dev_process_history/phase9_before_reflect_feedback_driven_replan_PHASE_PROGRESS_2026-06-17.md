@@ -2,7 +2,7 @@
 
 ## 总览
 
-- 最后更新时间：2026-06-17
+- 最后更新时间：2026-06-16
 - 当前激活阶段：`Phase 9：真实任务最小闭环`
 - 当前阶段状态：`in_progress`
 
@@ -157,10 +157,3 @@
 1. 继续把 reflect feedback 接入更明确的模型重规划提示，减少重复失败计划。
 2. 用升级后的 sample batch 做 eval/comparison smoke，校验报告可读性和 taxonomy 聚合。
 3. 根据真实任务需求继续补 regex、JSON key/length、diff text 等验证规则。
-### Phase 9 本轮新增：reflect feedback 驱动重规划
-
-- `reflect_feedback` 不再只是记录型反馈；最新一次反馈会被整理为 `replan_constraints` 并传入下一轮 `runtime_feedback.previous_reflect_feedback`。
-- `replan_constraints` 当前覆盖失败原因、必须处理的关注点、失败检查名、失败工具摘要、建议工具和需要避免原样重复的上一轮工具序列。
-- `model_decision` trace 新增 `has_reflect_feedback` 与 `reflect_feedback_summary`，便于 eval/comparison 回看第二轮 plan 是否拿到了反思证据。
-- OpenAI compatible prompt 已明确要求模型在重规划时回应 `previous_reflect_feedback`，并避免无解释地重复完全相同的失败工具计划。
-- 报告新增 `## 反思反馈` 小节；本轮边界仍保持不开放更高 `runtime.max_steps`、不新增 CLI 单次 verify 参数、不扩展新 verify rule。
