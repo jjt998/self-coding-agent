@@ -8,3 +8,9 @@ runs/
 codex-repro-*/
 sandbox_experiments/runs/
 sandbox_experiments/repos/tmp_*/
+# Python bytecode cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
