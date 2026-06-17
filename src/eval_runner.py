@@ -1192,7 +1192,7 @@ def _normalize_verify_rules(raw_value: Any) -> list[dict[str, Any]]:
 def _normalize_sandbox_retention(raw_value: Any) -> str:
     """把 sandbox 保留策略收敛成当前支持的有限枚举。"""
     text = _normalize_optional_string(raw_value)
-    if text in {"always_keep", "delete_on_success", "always_delete"}:
+    if text in {"always_keep", "delete_on_success", "always_delete", "keep_on_success"}:
         return text
     return "delete_on_success"
 

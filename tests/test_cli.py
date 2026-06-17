@@ -361,6 +361,147 @@ def test_cli_keeps_sandbox_after_failed_verify_command_under_default_policy(tmp_
     assert "清理结果：已保留" in report_text
 
 
+def test_cli_keeps_sandbox_after_success_with_keep_on_success_policy(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# 项目说明\n\n这里用于验证成功后保留 sandbox。\n", encoding="utf-8")
+
+    eval_task_file = tmp_path / "eval_batch.json"
+    eval_task_file.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "name": "sandbox_keep_on_success",
+                        "task": "创建脚手架",
+                        "task_type": "general",
+                        "sandbox_retention": "keep_on_success",
+                        "verify_rules": [
+                            {"type": "file_exists", "name": "run evidence exists", "path": "run_evidence.md"}
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--eval-task-file",
+        str(eval_task_file),
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    summary_data = json.loads((output_root / "eval-eval_batch" / "summary.json").read_text(encoding="utf-8"))
+    assert summary_data["success_count"] == 1
+    run_dir = Path(summary_data["runs"][0]["run_dir"])
+    snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
+    sandbox_dir = Path(snapshot["sandbox_dir"])
+    assert snapshot["sandbox_retention"] == "keep_on_success"
+    assert sandbox_dir.exists()
+    assert (sandbox_dir / "repo" / "run_evidence.md").exists()
+
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    cleanup_payload = next(event["payload"] for event in trace_events if event["event_type"] == "sandbox_cleanup_result")
+    assert cleanup_payload["attempted"] is False
+    assert cleanup_payload["kept"] is True
+    assert cleanup_payload["retention_policy"] == "keep_on_success"
+
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "保留策略：`keep_on_success`" in report_text
+    assert "清理结果：已保留" in report_text
+
+
+def test_cli_deletes_sandbox_after_failure_with_keep_on_success_policy(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# 项目说明\n\n这里用于验证失败后删除 sandbox。\n", encoding="utf-8")
+
+    eval_task_file = tmp_path / "eval_batch.json"
+    eval_task_file.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "name": "sandbox_delete_on_failure",
+                        "task": "创建脚手架",
+                        "task_type": "general",
+                        "sandbox_retention": "keep_on_success",
+                        "verify_commands": [[sys.executable, "-c", "raise SystemExit(1)"]],
+                        "expectation": {
+                            "passed": False,
+                            "outcome": "failed_verification",
+                        },
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "cli",
+        "--eval-task-file",
+        str(eval_task_file),
+        "--repo-root",
+        str(repo_root),
+        "--output-root",
+        str(output_root),
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = run(command, capture_output=True, text=True, check=False, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+    summary_data = json.loads((output_root / "eval-eval_batch" / "summary.json").read_text(encoding="utf-8"))
+    assert summary_data["success_count"] == 0
+    run_dir = Path(summary_data["runs"][0]["run_dir"])
+    snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
+    sandbox_dir = Path(snapshot["sandbox_dir"])
+    assert snapshot["sandbox_retention"] == "keep_on_success"
+    assert not sandbox_dir.exists()
+
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    cleanup_payload = next(event["payload"] for event in trace_events if event["event_type"] == "sandbox_cleanup_result")
+    assert cleanup_payload["attempted"] is True
+    assert cleanup_payload["kept"] is False
+    assert cleanup_payload["retention_policy"] == "keep_on_success"
+
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "保留策略：`keep_on_success`" in report_text
+    assert "清理结果：已删除" in report_text
+
+
 def test_cli_runs_sample_batch_and_comparison_smoke(tmp_path: Path) -> None:
     output_root = tmp_path / "runs"
     repo_root = tmp_path / "repo"

@@ -175,6 +175,7 @@ eval task 文件使用 JSON：
 默认 eval 使用 `per_task_sandbox`，避免污染源仓库。sandbox 保留策略支持：
 
 - `delete_on_success`
+- `keep_on_success`
 - `always_keep`
 - `always_delete`
 

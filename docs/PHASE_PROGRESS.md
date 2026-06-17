@@ -86,7 +86,7 @@
   - sandbox 工作区改为更短的临时目录，绕开 experiment suite 下 Windows `cwd` 过长问题
   - 回归测试新增覆盖：schema 解析、sandbox 隔离、setup command 执行
   - `src/config.py` / `src/eval_runner.py` / `src/runner.py` 补齐 sandbox 保留策略字段与执行逻辑
-  - 当前支持 `always_keep`、`delete_on_success`、`always_delete` 三种 sandbox 生命周期策略，默认 `delete_on_success`
+  - 当前支持 `always_keep`、`delete_on_success`、`keep_on_success`、`always_delete` 四种 sandbox 生命周期策略，默认 `delete_on_success`
   - `sandbox_cleanup_result` 已进入 trace，报告中已新增 `Sandbox 清理` 小节
   - 回归测试新增覆盖：默认成功后删除 sandbox、显式保留 sandbox
   - `src/verify.py` 已支持“真实 verify command 优先、stub verify 回退”的双轨验证

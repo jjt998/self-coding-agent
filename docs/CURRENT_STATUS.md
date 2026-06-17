@@ -29,7 +29,7 @@
 - 当前 sandbox 工作区会在更短的临时目录下创建，避免 experiment suite 多层目录叠加后触发 Windows `cwd` 路径过长问题。
 - 当前 `run_started` / `workspace_prepared` / `task_setup_started` / `task_setup_result` 已进入 trace，可回看每题原始仓库、实际执行仓库和准备命令结果。
 - 当前 eval batch 已验证：任务内文件修改与 setup 产物会留在 sandbox 内，不再污染源仓库。
-- 当前已补上 sandbox 清理/保留策略：支持 `always_keep`、`delete_on_success`、`always_delete` 三种模式，默认使用 `delete_on_success`。
+- 当前已补上 sandbox 清理/保留策略：支持 `always_keep`、`delete_on_success`、`keep_on_success`、`always_delete` 四种模式，默认使用 `delete_on_success`。
 - 当前默认行为已改为“验证通过就删除 sandbox，验证失败则保留 sandbox”，兼顾磁盘占用与失败复盘。
 - 当前 `sandbox_cleanup_result` 已进入 trace，运行报告中也会明确展示 sandbox 的保留策略、清理结果和目录位置。
 - 当前 `verify_commands` 已真正接入验证链路：有任务级验证命令时优先执行真实验证，没有时才回退到旧的 `agent_notes.md` 演示验证。

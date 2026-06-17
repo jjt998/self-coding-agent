@@ -313,6 +313,10 @@ def _decide_sandbox_retention(retention_policy: str, verification_passed: bool) 
         return True, "当前策略要求始终保留 sandbox。"
     if retention_policy == "always_delete":
         return False, "当前策略要求始终删除 sandbox。"
+    if retention_policy == "keep_on_success":
+        if verification_passed:
+            return True, "当前策略为 keep_on_success，且本次验证通过。"
+        return False, "当前策略为 keep_on_success，且本次验证未通过。"
     if verification_passed:
         return False, "当前策略为 delete_on_success，且本次验证通过。"
     return True, "当前策略为 delete_on_success，且本次验证未通过。"

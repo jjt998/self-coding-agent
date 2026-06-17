@@ -491,7 +491,7 @@ def test_load_eval_task_specs_supports_sandbox_and_setup_fields(tmp_path: Path) 
                         "task_type": "bug_fix",
                         "repo_subdir": "packages/api",
                         "workspace_mode": "per_task_sandbox",
-                        "sandbox_retention": "always_delete",
+                        "sandbox_retention": "keep_on_success",
                         "setup_commands": [["python", "-V"], ["python", "-c", "print('setup')"]],
                         "verify_commands": [["python", "-m", "pytest", "-q"]],
                         "verify_rules": [
@@ -518,7 +518,7 @@ def test_load_eval_task_specs_supports_sandbox_and_setup_fields(tmp_path: Path) 
     assert specs[0].name == "sandbox_bug_fix"
     assert specs[0].repo_subdir == "packages/api"
     assert specs[0].workspace_mode == "per_task_sandbox"
-    assert specs[0].sandbox_retention == "always_delete"
+    assert specs[0].sandbox_retention == "keep_on_success"
     assert specs[0].setup_commands == [["python", "-V"], ["python", "-c", "print('setup')"]]
     assert specs[0].verify_commands == [["python", "-m", "pytest", "-q"]]
     assert specs[0].verify_rules == [
