@@ -10,10 +10,10 @@
 D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe
 ```
 
-真实模型运行需要设置：
+真实模型运行需要复制 `.env.example` 为 `.env`，并在 `.env` 中填写：
 
-```powershell
-$env:OPENAI_API_KEY = "你的 API key"
+```dotenv
+DEEPSEEK_API_KEY=你的 DeepSeek API key
 ```
 
 自动化回归测试使用 fake model 环境，不访问外网。

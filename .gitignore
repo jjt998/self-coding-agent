@@ -1,5 +1,10 @@
 pytest_tmp/*
 !pytest_tmp/.gitkeep
 .pytest_tmp/
+.env
+.env.*
+!.env.example
 runs/
 codex-repro-*/
+sandbox_experiments/runs/
+sandbox_experiments/repos/tmp_*/

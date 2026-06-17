@@ -55,5 +55,5 @@ def _fake_model_response() -> str:
 @pytest.fixture(autouse=True)
 def fake_model_environment(monkeypatch) -> None:
     """默认让测试使用可审计的假模型响应；功能代码仍要求 API key 存在。"""
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", _fake_model_response())

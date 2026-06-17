@@ -101,7 +101,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
 
     model_decision_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision")
     assert model_decision_payload["provider"] == "openai_compatible"
-    assert model_decision_payload["model_name"] == "gpt-4.1-mini"
+    assert model_decision_payload["model_name"] == "deepseek-v4-flash"
     assert model_decision_payload["planned_actions"][0].startswith("执行测试工具计划")
     assert "fix_failing_verification_checks" in model_decision_payload["planned_actions"][0]
 
@@ -618,7 +618,7 @@ def test_report_shows_model_error_diagnostics_without_api_key_value(tmp_path: Pa
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
-    monkeypatch.setenv("OPENAI_API_KEY", "secret-test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "secret-test-key")
     monkeypatch.delenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", raising=False)
     settings = build_settings(
         task="触发模型配置错误",

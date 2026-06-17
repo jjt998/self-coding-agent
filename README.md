@@ -7,7 +7,7 @@
 ## 当前能力
 
 - 单次任务运行：生成 `trace.jsonl`、`report.md`、`config_snapshot.json` 等运行产物。
-- OpenAI 兼容模型决策层：配置只支持 `openai_compatible`，默认使用 `OPENAI_API_KEY`。
+- OpenAI 兼容模型决策层：配置只支持 `openai_compatible`，默认使用 DeepSeek 的 OpenAI-compatible endpoint 和 `DEEPSEEK_API_KEY`。
 - 最小多轮 loop：默认 `runtime.max_steps = 2`，流程为 `ingest -> analyze -> (plan -> act -> observe -> verify/reflect)* -> finalize`。
 - 核心工具：`search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`。
 - 真实进展观察：基于 `apply_patch` 成功和 `git_diff` 变更判断是否有进展。
@@ -29,13 +29,19 @@
 D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe
 ```
 
-如需真实模型调用，需要设置 API key：
+如需真实模型调用，复制 `.env.example` 为 `.env`，并在 `.env` 中填写 API key：
 
 ```powershell
-$env:OPENAI_API_KEY = "你的 API key"
+Copy-Item .env.example .env
 ```
 
-无 API key 时，真实运行会按预期失败为 `model_error`。测试中通过 fake model 环境避免访问外网。
+`.env` 示例：
+
+```dotenv
+DEEPSEEK_API_KEY=你的 DeepSeek API key
+```
+
+程序启动时会自动加载项目根目录 `.env`；如果同名变量已经存在于系统环境变量中，则优先使用系统环境变量。无 API key 时，真实运行会按预期失败为 `model_error`。测试中通过 fake model 环境避免访问外网。
 
 ## 快速开始
 
@@ -94,9 +100,9 @@ $env:OPENAI_API_KEY = "你的 API key"
 {
   "model": {
     "provider": "openai_compatible",
-    "name": "gpt-4.1-mini",
-    "base_url": "https://api.openai.com/v1",
-    "api_key_env": "OPENAI_API_KEY",
+    "name": "deepseek-v4-flash",
+    "base_url": "https://api.deepseek.com",
+    "api_key_env": "DEEPSEEK_API_KEY",
     "timeout_seconds": 30
   },
   "runtime": {
@@ -126,8 +132,8 @@ $env:OPENAI_API_KEY = "你的 API key"
 
 ## 模型配置与排障
 
-- `api_key_env` 默认是 `OPENAI_API_KEY`；缺少该环境变量时会失败为 `model_error`，错误 details 会显示变量名但不会记录密钥值。
-- `base_url` 必须以 `http://` 或 `https://` 开头，默认是 `https://api.openai.com/v1`。
+- `api_key_env` 默认是 `DEEPSEEK_API_KEY`；程序会从 `.env` 或系统环境变量读取该变量，缺少时会失败为 `model_error`，错误 details 会显示变量名但不会记录密钥值。
+- `base_url` 必须以 `http://` 或 `https://` 开头，默认是 `https://api.deepseek.com`。
 - `timeout_seconds` 默认是 `30`；网络超时、DNS 错误、HTTP 非 2xx 都会在 trace/report 中显示安全摘要。
 - 常见 `model_error` 类型包括 `ModelConfigError`、`ModelRequestError`、`ModelResponseError`。
 - 测试环境可使用 `SELF_CODING_AGENT_FAKE_MODEL_RESPONSE` 注入假响应，仍需设置测试用 API key 环境变量。

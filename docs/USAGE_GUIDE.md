@@ -10,21 +10,27 @@
 {
   "model": {
     "provider": "openai_compatible",
-    "name": "gpt-4.1-mini",
-    "base_url": "https://api.openai.com/v1",
-    "api_key_env": "OPENAI_API_KEY",
+    "name": "deepseek-v4-flash",
+    "base_url": "https://api.deepseek.com",
+    "api_key_env": "DEEPSEEK_API_KEY",
     "timeout_seconds": 30
   }
 }
 ```
 
-真实运行前设置 API key：
+真实运行前复制 `.env.example` 为 `.env`，并在 `.env` 中填写 API key：
 
 ```powershell
-$env:OPENAI_API_KEY = "你的 API key"
+Copy-Item .env.example .env
 ```
 
-缺少 API key 会按预期停止为 `model_error`。测试环境使用 `SELF_CODING_AGENT_FAKE_MODEL_RESPONSE` 注入假模型响应，不访问外网。
+`.env` 示例：
+
+```dotenv
+DEEPSEEK_API_KEY=你的 DeepSeek API key
+```
+
+程序启动时会自动加载 `.env`；系统环境变量优先于 `.env`。缺少 API key 会按预期停止为 `model_error`。测试环境使用 `SELF_CODING_AGENT_FAKE_MODEL_RESPONSE` 注入假模型响应，不访问外网。
 
 ## 2. 运行单次任务
 

@@ -14,7 +14,8 @@ def test_readme_links_minimal_usage_and_acceptance_paths() -> None:
         "配置模型 -> 单次 run -> 编写 eval task -> 查看 report -> 运行 eval -> 运行 comparison -> 排障",
         "docs/USAGE_GUIDE.md",
         "docs/MVP_ACCEPTANCE.md",
-        "OPENAI_API_KEY",
+        ".env.example",
+        "DEEPSEEK_API_KEY",
         "eval task schema",
         "report.md",
         "--compare-strategies",
@@ -26,7 +27,8 @@ def test_usage_guide_covers_core_user_workflows() -> None:
     guide = _read_text("docs/USAGE_GUIDE.md")
 
     for expected in [
-        "OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        ".env",
         "verify_commands",
         "verify_rules",
         "report.md",

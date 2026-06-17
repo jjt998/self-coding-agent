@@ -42,7 +42,7 @@
 - 当前 OpenAI 兼容决策层会调用 `/chat/completions`，要求模型返回结构化 JSON：`summary`、`rationale`、`planned_actions`、`tool_calls`。
 - 当前模型工具计划已做最小校验：只允许 `search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`，且 `tool_input` 必须是对象。
 - 当前 `plan` 阶段模型配置、请求或响应失败会写入 `model_decision_failed` trace，并以 `stop_reason.code = model_error` 结束 run，不再回退到本地规则决策。
-- 当前所有 `configs/*.json` 已统一切到 `openai_compatible`，默认要求通过 `OPENAI_API_KEY` 提供密钥；无 API key 是预期的模型配置错误。
+- 当前所有 `configs/*.json` 已统一切到 `openai_compatible`，默认使用 DeepSeek endpoint，并通过 `.env` 或系统环境变量中的 `DEEPSEEK_API_KEY` 提供密钥；无 API key 是预期的模型配置错误。
 - 本轮已按测试环境规范使用 `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe` 完成回归：`tests/test_loop.py tests/test_model.py` 为 `12 passed`，`tests/test_cli.py tests/test_eval.py tests/test_verify.py` 为 `23 passed`，全量 `pytest -q` 为 `40 passed`。
 
 ## 已完成

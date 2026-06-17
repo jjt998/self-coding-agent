@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from context import ContextSnapshot
+from env_loader import load_dotenv
 
 
 ALLOWED_TOOL_NAMES = {"search_text", "read_file", "apply_patch", "run_command", "git_diff"}
@@ -338,6 +339,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
 
 def build_model_adapter(config_data: dict[str, Any]) -> ModelAdapter:
     """根据配置构建真实模型适配器；当前只接受 OpenAI 兼容 provider。"""
+    load_dotenv()
     model_config = config_data.get("model")
     if not isinstance(model_config, dict):
         raise ModelConfigError("缺少 model 配置。", details={"field_path": "model"})
@@ -358,9 +360,9 @@ def build_model_adapter(config_data: dict[str, Any]) -> ModelAdapter:
             details={"field_path": "model.name", "provider": provider},
         )
 
-    base_url = str(model_config.get("base_url", "https://api.openai.com/v1")).strip()
+    base_url = str(model_config.get("base_url", "https://api.deepseek.com")).strip()
     if not base_url:
-        base_url = "https://api.openai.com/v1"
+        base_url = "https://api.deepseek.com"
     if not (base_url.startswith("http://") or base_url.startswith("https://")):
         raise ModelConfigError(
             "model.base_url 必须以 http:// 或 https:// 开头。",
@@ -373,7 +375,7 @@ def build_model_adapter(config_data: dict[str, Any]) -> ModelAdapter:
                 "base_url": base_url,
             },
         )
-    api_key_env = str(model_config.get("api_key_env", "OPENAI_API_KEY")).strip() or "OPENAI_API_KEY"
+    api_key_env = str(model_config.get("api_key_env", "DEEPSEEK_API_KEY")).strip() or "DEEPSEEK_API_KEY"
     timeout_seconds = _normalize_timeout_seconds(model_config.get("timeout_seconds"))
     return OpenAICompatibleModelAdapter(
         provider=provider,

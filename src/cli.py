@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from config import build_settings, load_named_config
+from env_loader import load_dotenv
 from eval_runner import load_strategy_specs, run_eval_batch, run_strategy_comparison
 from experiment_runner import run_experiment_suite
 from runner import execute_initial_run
@@ -32,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     """解析命令行参数，并按用户选择进入单次 run、eval 或策略对比流程。"""
+    load_dotenv()
     parser = build_parser()
     args = parser.parse_args()
     config_dir = Path("configs")

@@ -73,23 +73,24 @@ def test_build_model_adapter_rejects_missing_or_unsupported_provider() -> None:
         raise AssertionError("unsupported provider should fail")
 
 
-def test_build_model_adapter_requires_api_key(monkeypatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+def test_build_model_adapter_requires_api_key(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
     try:
         build_model_adapter({"model": {"provider": "openai_compatible", "name": "demo"}})
     except ModelConfigError as error:
-        assert "OPENAI_API_KEY" in str(error)
+        assert "DEEPSEEK_API_KEY" in str(error)
         assert error.provider == "openai_compatible"
         assert error.model_name == "demo"
-        assert error.details["api_key_env"] == "OPENAI_API_KEY"
+        assert error.details["api_key_env"] == "DEEPSEEK_API_KEY"
         assert "test-key" not in json.dumps(error.details, ensure_ascii=False)
     else:
         raise AssertionError("missing API key should fail")
 
 
 def test_build_model_adapter_rejects_invalid_base_url(monkeypatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
 
     try:
         build_model_adapter(

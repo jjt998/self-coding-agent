@@ -756,10 +756,11 @@ def test_second_plan_can_repeat_failed_tool_sequence_with_explanation(tmp_path: 
 
 
 def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
     settings = build_settings(
         task="创建脚手架",
@@ -793,8 +794,8 @@ def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, mon
     assert failure_payload["provider"] == "openai_compatible"
     assert failure_payload["model_name"] == "demo-model"
     assert failure_payload["error_type"] == "ModelConfigError"
-    assert failure_payload["api_key_env"] == "OPENAI_API_KEY"
+    assert failure_payload["api_key_env"] == "DEEPSEEK_API_KEY"
     assert "test-key" not in json.dumps(failure_payload, ensure_ascii=False)
     run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
     assert run_finished_payload["stop_reason"]["code"] == "model_error"
-    assert run_finished_payload["stop_reason"]["details"]["api_key_env"] == "OPENAI_API_KEY"
+    assert run_finished_payload["stop_reason"]["details"]["api_key_env"] == "DEEPSEEK_API_KEY"
