@@ -199,6 +199,34 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert progress_payload["progress_made"] is True
     assert progress_payload["changed_files"] == ["agent_notes.md"]
     assert progress_payload["failed_tool_count"] == 0
+    ingest_payload = next(event["payload"] for event in trace_events if event["event_type"] == "task_ingested")
+    assert ingest_payload["task"] == settings.task
+    assert ingest_payload["task_type"] == settings.task_type
+    assert ingest_payload["repo_root"] == settings.repo_root
+    assert ingest_payload["source_repo_root"] == settings.source_repo_root
+    assert ingest_payload["workspace_mode"] == settings.workspace_mode
+    assert ingest_payload["setup_command_count"] == 0
+    assert ingest_payload["verify_command_count"] == 0
+    assert ingest_payload["verify_rule_count"] == 0
+    assert ingest_payload["max_steps"] == 2
+    assert ingest_payload["config_name"] == "default"
+    assert ingest_payload["config_keys"] == ["model"]
+    assert ingest_payload["model_provider"] == "openai_compatible"
+    assert ingest_payload["model_name"] == "demo-model"
+    finalize_payload = next(event["payload"] for event in trace_events if event["event_type"] == "finalize_summary")
+    assert finalize_payload["verification_passed"] is True
+    assert finalize_payload["progress_made"] is True
+    assert finalize_payload["changed_files"] == ["agent_notes.md"]
+    assert finalize_payload["failed_tool_count"] == 0
+    assert finalize_payload["reflect_count"] == 0
+    assert finalize_payload["iteration_count"] == 1
+    assert finalize_payload["max_steps"] == 2
+    assert finalize_payload["tool_execution_count"] == 5
+    state_results = [event["payload"] for event in trace_events if event["event_type"] == "state_result"]
+    ingest_state_result = next(event for event in state_results if event["state"] == "ingest")
+    finalize_state_result = next(event for event in state_results if event["state"] == "finalize")
+    assert ingest_state_result["result"]["verify_rule_count"] == 0
+    assert finalize_state_result["result"]["tool_execution_count"] == 5
     transition_targets = [
         event["payload"]["to_state"]
         for event in trace_events

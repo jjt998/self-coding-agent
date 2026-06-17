@@ -221,7 +221,7 @@ class LoopOrchestrator:
     ) -> dict[str, Any]:
         """执行一个状态并统一写入迁移与状态结果事件。"""
         self._transition(runtime_state, to_state=state, reason="baseline_loop")
-        state_payload = self._run_stub_state(
+        state_payload = self._run_state(
             state=state,
             settings=settings,
             runtime_state=runtime_state,
@@ -484,7 +484,7 @@ class LoopOrchestrator:
             summary["line_count"] = output.get("line_count", 0)
         return summary
 
-    def _run_stub_state(
+    def _run_state(
         self,
         state: AgentState,
         settings: RunSettings,
@@ -494,162 +494,249 @@ class LoopOrchestrator:
         memory_manager: RuntimeMemoryManager,
         tool_runner: CoreToolRunner,
     ) -> dict[str, Any]:
-        """执行当前阶段的最小占位逻辑，重点是把过程证据写完整。"""
-        # 这里故意把每个阶段都写成结构化返回值，后面替换成真实 agent 行为时不必重做 trace 结构。
+        """Route each state to a dedicated handler while preserving trace payloads."""
         if state is AgentState.INGEST:
-            return {
-                "summary": "已接收任务输入。",
-                "task": runtime_state.task,
-            }
+            return self._run_ingest(settings=settings, runtime_state=runtime_state, config_data=config_data)
         if state is AgentState.ANALYZE:
-            memory_query = memory_manager.build_query(
-                task=runtime_state.task,
-                task_type=runtime_state.task_type,
+            return self._run_analyze(
+                runtime_state=runtime_state,
+                context_builder=context_builder,
+                memory_manager=memory_manager,
             )
-            memory_search_result = memory_manager.search(
-                task=runtime_state.task,
-                task_type=runtime_state.task_type,
+        if state is AgentState.PLAN:
+            return self._run_plan(runtime_state=runtime_state, config_data=config_data)
+        if state is AgentState.ACT:
+            return self._run_act(runtime_state=runtime_state, tool_runner=tool_runner)
+        if state is AgentState.OBSERVE:
+            return self._run_observe(runtime_state=runtime_state)
+        if state is AgentState.REFLECT:
+            return self._run_reflect(runtime_state=runtime_state)
+        if state is AgentState.VERIFY:
+            return self._run_verify(settings=settings, runtime_state=runtime_state, config_data=config_data)
+        if state is AgentState.FINALIZE:
+            return self._run_finalize(runtime_state=runtime_state)
+        raise ValueError(f"Unsupported agent state: {state}")
+
+    def _run_ingest(
+        self,
+        settings: RunSettings,
+        runtime_state: RuntimeState,
+        config_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Capture concrete run inputs before analysis starts."""
+        model_config = config_data.get("model", {})
+        if not isinstance(model_config, dict):
+            model_config = {}
+        reflect_config = config_data.get("reflect", {})
+        if not isinstance(reflect_config, dict):
+            reflect_config = {}
+        payload = {
+            "summary": "Task input and run constraints captured.",
+            "task": runtime_state.task,
+            "task_type": runtime_state.task_type,
+            "repo_root": settings.repo_root,
+            "source_repo_root": settings.source_repo_root,
+            "workspace_mode": settings.workspace_mode,
+            "sandbox_dir": settings.sandbox_dir,
+            "setup_command_count": len(settings.setup_commands),
+            "verify_command_count": len(settings.verify_commands),
+            "verify_rule_count": len(settings.verify_rules),
+            "max_steps": runtime_state.max_steps,
+            "config_name": settings.config_name,
+            "config_keys": sorted(config_data.keys()),
+            "model_provider": model_config.get("provider", ""),
+            "model_name": model_config.get("name", ""),
+            "reflect_strategy": reflect_config.get("strategy", self._get_reflect_strategy(config_data=config_data)),
+        }
+        self.trace_writer.write_event(TraceEvent(event_type="task_ingested", payload=payload))
+        return payload
+
+    def _run_analyze(
+        self,
+        runtime_state: RuntimeState,
+        context_builder: ContextBuilder,
+        memory_manager: RuntimeMemoryManager,
+    ) -> dict[str, Any]:
+        """Build memory and context evidence for model planning."""
+        memory_query = memory_manager.build_query(
+            task=runtime_state.task,
+            task_type=runtime_state.task_type,
+        )
+        memory_search_result = memory_manager.search(
+            task=runtime_state.task,
+            task_type=runtime_state.task_type,
+        )
+        runtime_rule_entries = [
+            entry.to_dict() for entry in memory_search_result.runtime_rule_entries
+        ]
+        long_term_entries = [
+            entry.to_dict() for entry in memory_search_result.long_term_entries
+        ]
+        suppressed_long_term_entries = list(memory_search_result.suppressed_long_term_entries)
+        matched_memory_entries = [
+            entry.to_dict() for entry in memory_search_result.all_entries()
+        ]
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="memory_search_result",
+                payload={
+                    "query": memory_query,
+                    "runtime_rule_count": len(runtime_rule_entries),
+                    "long_term_count": len(long_term_entries),
+                    "suppressed_long_term_count": len(suppressed_long_term_entries),
+                    "matched_count": len(matched_memory_entries),
+                    "diagnostic_labels": list(memory_search_result.diagnostic_labels),
+                    "runtime_rule_entries": runtime_rule_entries,
+                    "long_term_entries": long_term_entries,
+                    "suppressed_long_term_entries": suppressed_long_term_entries,
+                },
             )
-            runtime_rule_entries = [
-                entry.to_dict() for entry in memory_search_result.runtime_rule_entries
-            ]
-            long_term_entries = [
-                entry.to_dict() for entry in memory_search_result.long_term_entries
-            ]
-            suppressed_long_term_entries = list(memory_search_result.suppressed_long_term_entries)
-            matched_memory_entries = [
-                entry.to_dict() for entry in memory_search_result.all_entries()
-            ]
-            # 这里把 memory 检索结果单独记成事件，后续做诊断时不必再从 context_snapshot 里反推。
+        )
+        if memory_search_result.conflict_evidence:
             self.trace_writer.write_event(
                 TraceEvent(
-                    event_type="memory_search_result",
+                    event_type="memory_conflict_detected",
                     payload={
                         "query": memory_query,
-                        "runtime_rule_count": len(runtime_rule_entries),
-                        "long_term_count": len(long_term_entries),
-                        "suppressed_long_term_count": len(suppressed_long_term_entries),
-                        "matched_count": len(matched_memory_entries),
+                        "conflict_count": len(memory_search_result.conflict_evidence),
                         "diagnostic_labels": list(memory_search_result.diagnostic_labels),
-                        "runtime_rule_entries": runtime_rule_entries,
-                        "long_term_entries": long_term_entries,
-                        "suppressed_long_term_entries": suppressed_long_term_entries,
+                        "conflicts": list(memory_search_result.conflict_evidence),
                     },
                 )
             )
-            if memory_search_result.conflict_evidence:
-                self.trace_writer.write_event(
-                    TraceEvent(
-                        event_type="memory_conflict_detected",
-                        payload={
-                            "query": memory_query,
-                            "conflict_count": len(memory_search_result.conflict_evidence),
-                            "diagnostic_labels": list(memory_search_result.diagnostic_labels),
-                            "conflicts": list(memory_search_result.conflict_evidence),
-                        },
-                    )
-                )
 
-            runtime_state.context_snapshot = context_builder.build_context_snapshot(
-                task=runtime_state.task,
-                task_type=runtime_state.task_type,
-                current_state=runtime_state.current_state,
-                completed_states=runtime_state.completed_states,
-                step_count=runtime_state.step_count,
-                memory_query=memory_query,
-                matched_memory_entries=matched_memory_entries,
-                runtime_rule_entries=runtime_rule_entries,
-                long_term_memory_entries=long_term_entries,
-                suppressed_long_term_entries=suppressed_long_term_entries,
-                memory_conflict_evidence=memory_search_result.conflict_evidence,
-                memory_diagnostic_labels=memory_search_result.diagnostic_labels,
+        runtime_state.context_snapshot = context_builder.build_context_snapshot(
+            task=runtime_state.task,
+            task_type=runtime_state.task_type,
+            current_state=runtime_state.current_state,
+            completed_states=runtime_state.completed_states,
+            step_count=runtime_state.step_count,
+            memory_query=memory_query,
+            matched_memory_entries=matched_memory_entries,
+            runtime_rule_entries=runtime_rule_entries,
+            long_term_memory_entries=long_term_entries,
+            suppressed_long_term_entries=suppressed_long_term_entries,
+            memory_conflict_evidence=memory_search_result.conflict_evidence,
+            memory_diagnostic_labels=memory_search_result.diagnostic_labels,
+        )
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="context_snapshot",
+                payload=runtime_state.context_snapshot.to_dict(),
             )
-            self.trace_writer.write_event(
-                TraceEvent(
-                    event_type="context_snapshot",
-                    payload=runtime_state.context_snapshot.to_dict(),
-                )
-            )
-            return {
-                "summary": "已完成任务初步分析。",
-                "task_type": runtime_state.task_type,
-                "selected_context_files": [
-                    file_context.to_dict()
-                    for file_context in runtime_state.context_snapshot.repo_context.selected_files
-                ],
-            }
-        if state is AgentState.PLAN:
-            model_adapter = build_model_adapter(config_data=config_data)
-            runtime_feedback = self._build_runtime_feedback(runtime_state=runtime_state)
-            reflect_feedback_summary = self._summarize_reflect_feedback_for_trace(runtime_feedback=runtime_feedback)
-            runtime_state.model_decision = model_adapter.decide(
-                task=runtime_state.task,
-                task_type=runtime_state.task_type,
-                context_snapshot=runtime_state.context_snapshot,
-                config_data=config_data,
-                runtime_feedback=runtime_feedback,
-            )
-            runtime_state.model_decisions.append(runtime_state.model_decision)
-            self.trace_writer.write_event(
-                TraceEvent(
-                    event_type="model_decision",
-                    payload={
-                        **runtime_state.model_decision.to_dict(),
-                        "iteration": runtime_state.current_iteration,
-                        "has_reflect_feedback": bool(reflect_feedback_summary),
-                        "reflect_feedback_summary": reflect_feedback_summary,
-                    },
-                )
-            )
-            return {
-                "summary": runtime_state.model_decision.summary,
-                "planned_actions": list(runtime_state.model_decision.planned_actions),
-                "rationale": runtime_state.model_decision.rationale,
-                "provider": runtime_state.model_decision.provider,
-                "model_name": runtime_state.model_decision.model_name,
-            }
-        if state is AgentState.ACT:
-            self._active_iteration = runtime_state.current_iteration
-            tool_calls = self._run_planned_tools(
-                tool_runner=tool_runner,
-                model_decision=runtime_state.model_decision,
-            )
-            runtime_state.recent_tool_executions = tool_calls
-            runtime_state.tool_executions.extend(tool_calls)
-            return {
-                "summary": "已执行一次由任务级决策层生成的工具计划。",
-                "tool_calls": [tool_call.to_trace_payload() for tool_call in tool_calls],
-            }
-        if state is AgentState.OBSERVE:
-            return self._observe_progress(runtime_state=runtime_state)
-        if state is AgentState.REFLECT:
-            reflect_feedback = self._build_reflect_feedback(runtime_state=runtime_state)
-            runtime_state.reflect_feedback = reflect_feedback
-            runtime_state.reflect_feedback_history.append(reflect_feedback)
-            self.trace_writer.write_event(TraceEvent(event_type="reflect_feedback", payload=reflect_feedback))
-            return reflect_feedback
-        if state is AgentState.VERIFY:
-            verification_result = build_phase_4_verification(
-                settings=settings,
-                tool_executions=runtime_state.recent_tool_executions,
-            )
-            runtime_state.verification_result = verification_result
-            self.trace_writer.write_event(
-                TraceEvent(
-                    event_type="verification_result",
-                    payload=verification_result.to_dict(),
-                )
-            )
-            return {
-                "summary": verification_result.summary,
-                "verification_passed": verification_result.passed,
-                "checks": [check.to_dict() for check in verification_result.checks],
-                "config_keys": sorted(config_data.keys()),
-            }
+        )
         return {
-            "summary": "run 即将收尾。",
-            "final_status": "success",
+            "summary": "Initial task analysis completed.",
+            "task_type": runtime_state.task_type,
+            "selected_context_files": [
+                file_context.to_dict()
+                for file_context in runtime_state.context_snapshot.repo_context.selected_files
+            ],
         }
+
+    def _run_plan(self, runtime_state: RuntimeState, config_data: dict[str, Any]) -> dict[str, Any]:
+        """Ask the configured model adapter for the next tool plan."""
+        model_adapter = build_model_adapter(config_data=config_data)
+        runtime_feedback = self._build_runtime_feedback(runtime_state=runtime_state)
+        reflect_feedback_summary = self._summarize_reflect_feedback_for_trace(runtime_feedback=runtime_feedback)
+        runtime_state.model_decision = model_adapter.decide(
+            task=runtime_state.task,
+            task_type=runtime_state.task_type,
+            context_snapshot=runtime_state.context_snapshot,
+            config_data=config_data,
+            runtime_feedback=runtime_feedback,
+        )
+        runtime_state.model_decisions.append(runtime_state.model_decision)
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="model_decision",
+                payload={
+                    **runtime_state.model_decision.to_dict(),
+                    "iteration": runtime_state.current_iteration,
+                    "has_reflect_feedback": bool(reflect_feedback_summary),
+                    "reflect_feedback_summary": reflect_feedback_summary,
+                },
+            )
+        )
+        return {
+            "summary": runtime_state.model_decision.summary,
+            "planned_actions": list(runtime_state.model_decision.planned_actions),
+            "rationale": runtime_state.model_decision.rationale,
+            "provider": runtime_state.model_decision.provider,
+            "model_name": runtime_state.model_decision.model_name,
+        }
+
+    def _run_act(self, runtime_state: RuntimeState, tool_runner: CoreToolRunner) -> dict[str, Any]:
+        """Execute the model-planned tool calls for the current iteration."""
+        self._active_iteration = runtime_state.current_iteration
+        tool_calls = self._run_planned_tools(
+            tool_runner=tool_runner,
+            model_decision=runtime_state.model_decision,
+        )
+        runtime_state.recent_tool_executions = tool_calls
+        runtime_state.tool_executions.extend(tool_calls)
+        return {
+            "summary": "Executed the model-planned tool sequence.",
+            "tool_calls": [tool_call.to_trace_payload() for tool_call in tool_calls],
+        }
+
+    def _run_observe(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """Interpret recent tool results as progress evidence."""
+        return self._observe_progress(runtime_state=runtime_state)
+
+    def _run_reflect(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """Produce structured feedback for the next planning round."""
+        reflect_feedback = self._build_reflect_feedback(runtime_state=runtime_state)
+        runtime_state.reflect_feedback = reflect_feedback
+        runtime_state.reflect_feedback_history.append(reflect_feedback)
+        self.trace_writer.write_event(TraceEvent(event_type="reflect_feedback", payload=reflect_feedback))
+        return reflect_feedback
+
+    def _run_verify(
+        self,
+        settings: RunSettings,
+        runtime_state: RuntimeState,
+        config_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Run task verification against the latest iteration's tool results."""
+        verification_result = build_phase_4_verification(
+            settings=settings,
+            tool_executions=runtime_state.recent_tool_executions,
+        )
+        runtime_state.verification_result = verification_result
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="verification_result",
+                payload=verification_result.to_dict(),
+            )
+        )
+        return {
+            "summary": verification_result.summary,
+            "verification_passed": verification_result.passed,
+            "checks": [check.to_dict() for check in verification_result.checks],
+            "config_keys": sorted(config_data.keys()),
+        }
+
+    def _run_finalize(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """Capture final runtime evidence before run_finished is emitted."""
+        verification_passed = bool(runtime_state.verification_result and runtime_state.verification_result.passed)
+        payload = {
+            "summary": "Final runtime evidence captured before run finish.",
+            "final_status": "success" if verification_passed else "incomplete",
+            "verification_passed": verification_passed,
+            "progress_made": runtime_state.progress_made,
+            "changed_files": list(runtime_state.changed_files),
+            "failed_tool_count": runtime_state.failed_tool_count,
+            "reflect_count": runtime_state.reflect_count,
+            "reflect_trigger_reasons": list(runtime_state.reflect_trigger_reasons),
+            "iteration_count": runtime_state.iteration_count,
+            "max_steps": runtime_state.max_steps,
+            "tool_execution_count": len(runtime_state.tool_executions),
+            "model_decision_count": len(runtime_state.model_decisions),
+            "completed_states_before_finalize": list(runtime_state.completed_states),
+        }
+        self.trace_writer.write_event(TraceEvent(event_type="finalize_summary", payload=payload))
+        return payload
 
     def _run_planned_tools(
         self,
