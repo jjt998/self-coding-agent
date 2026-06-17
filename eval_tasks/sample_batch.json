@@ -8,20 +8,20 @@
         [
           "python",
           "-c",
-          "from pathlib import Path; raise SystemExit(0 if Path('agent_notes.md').exists() else 1)"
+          "from pathlib import Path; raise SystemExit(0 if Path('run_evidence.md').exists() else 1)"
         ]
       ],
       "verify_rules": [
         {
           "type": "file_contains",
-          "name": "agent notes contains heading",
-          "path": "agent_notes.md",
-          "contains": "# Agent Notes"
+          "name": "run evidence contains heading",
+          "path": "run_evidence.md",
+          "contains": "# Run Evidence"
         },
         {
           "type": "diff_contains_file",
-          "name": "diff records agent notes",
-          "path": "agent_notes.md"
+          "name": "diff records run evidence",
+          "path": "run_evidence.md"
         }
       ],
       "expectation": {
@@ -44,20 +44,20 @@
         [
           "python",
           "-c",
-          "from pathlib import Path; raise SystemExit(0 if Path('agent_notes.md').exists() else 1)"
+          "from pathlib import Path; raise SystemExit(0 if Path('run_evidence.md').exists() else 1)"
         ]
       ],
       "verify_rules": [
         {
           "type": "file_contains",
-          "name": "bug fix notes exist",
-          "path": "agent_notes.md",
-          "contains": "# Agent Notes"
+          "name": "bug fix evidence exists",
+          "path": "run_evidence.md",
+          "contains": "# Run Evidence"
         },
         {
           "type": "diff_contains_file",
-          "name": "bug fix diff records notes",
-          "path": "agent_notes.md"
+          "name": "bug fix diff records evidence",
+          "path": "run_evidence.md"
         }
       ],
       "expectation": {
@@ -75,15 +75,15 @@
         [
           "python",
           "-c",
-          "from pathlib import Path; raise SystemExit(0 if Path('agent_notes.md').read_text(encoding='utf-8').startswith('# Agent Notes') else 1)"
+          "from pathlib import Path; raise SystemExit(0 if Path('run_evidence.md').read_text(encoding='utf-8').startswith('# Run Evidence') else 1)"
         ]
       ],
       "verify_rules": [
         {
           "type": "files_matching_count_at_least",
-          "name": "markdown notes exist",
+          "name": "markdown evidence exists",
           "glob": "*.md",
-          "contains": "# Agent Notes",
+          "contains": "# Run Evidence",
           "min_count": 1
         }
       ],
@@ -106,15 +106,15 @@
         [
           "python",
           "-c",
-          "from pathlib import Path; raise SystemExit(0 if Path('agent_notes.md').exists() else 1)"
+          "from pathlib import Path; raise SystemExit(0 if Path('run_evidence.md').exists() else 1)"
         ]
       ],
       "verify_rules": [
         {
           "type": "files_matching_count_at_least",
-          "name": "test generation notes exist",
+          "name": "test generation evidence exists",
           "glob": "*.md",
-          "contains": "# Agent Notes",
+          "contains": "# Run Evidence",
           "min_count": 1
         }
       ],
@@ -133,15 +133,15 @@
         [
           "python",
           "-c",
-          "from pathlib import Path; raise SystemExit(0 if Path('agent_notes.md').exists() else 1)"
+          "from pathlib import Path; raise SystemExit(0 if Path('run_evidence.md').exists() else 1)"
         ]
       ],
       "verify_rules": [
         {
           "type": "file_contains",
           "name": "refactor notes contain heading",
-          "path": "agent_notes.md",
-          "contains": "# Agent Notes"
+          "path": "run_evidence.md",
+          "contains": "# Run Evidence"
         }
       ],
       "expectation": {

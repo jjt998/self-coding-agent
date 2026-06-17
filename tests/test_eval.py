@@ -58,7 +58,7 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
                             ]
                         ],
                         "verify_rules": [
-                            {"type": "file_exists", "name": "agent notes exists", "path": "agent_notes.md"}
+                            {"type": "file_exists", "name": "run evidence exists", "path": "run_evidence.md"}
                         ],
                         "expectation": {
                             "passed": True,
@@ -160,7 +160,7 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
 
     run_dirs = sorted((eval_dir / "runs").iterdir())
     assert len(run_dirs) == 2
-    assert not (repo_root / "agent_notes.md").exists()
+    assert not (repo_root / "run_evidence.md").exists()
     assert not (repo_root / "setup_marker.txt").exists()
 
     run_dir_by_task = {
@@ -173,7 +173,7 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
     assert first_snapshot["source_repo_root"] == str(repo_root.resolve())
     sandbox_repo_root = Path(first_snapshot["repo_root"])
     assert sandbox_repo_root.exists()
-    assert (sandbox_repo_root / "agent_notes.md").exists()
+    assert (sandbox_repo_root / "run_evidence.md").exists()
     assert (sandbox_repo_root / "setup_marker.txt").read_text(encoding="utf-8") == "sandbox-ready"
     assert Path(first_snapshot["sandbox_dir"]).exists()
 

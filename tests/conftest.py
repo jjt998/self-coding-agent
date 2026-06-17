@@ -11,7 +11,7 @@ def _fake_model_response() -> str:
     decision = {
         "summary": "已生成测试模型决策。",
         "rationale": (
-            "测试环境固定返回旧工具链等价计划；如存在 reflect 反馈，则回应 "
+            "测试环境固定返回真实 loop 测试计划；如存在 reflect 反馈，则回应 "
             "verification_failed、missing_task_verification、task_verification_configured、"
             "verify_command_1、no_progress_after_observe、produce_observable_file_change、"
             "fix_failing_verification_checks；再次重复相同工具序列是因为 subprocess "
@@ -23,27 +23,27 @@ def _fake_model_response() -> str:
             "produce_observable_file_change / fix_failing_verification_checks"
         ],
         "tool_calls": [
-            {"tool_name": "search_text", "tool_input": {"query": "Agent Notes", "limit": 5}},
+            {"tool_name": "search_text", "tool_input": {"query": "Run Evidence", "limit": 5}},
             {
                 "tool_name": "apply_patch",
                 "tool_input": {
-                    "path": "agent_notes.md",
+                    "path": "run_evidence.md",
                     "old_text": None,
-                    "new_text": "# Agent Notes\n\n- 任务：测试任务\n- 当前情况：已记录到 Phase 3 工具闭环。\n",
+                    "new_text": "# Run Evidence\n\n- 任务：测试任务\n- 当前情况：已记录到 真实 loop 运行证据。\n",
                 },
             },
-            {"tool_name": "read_file", "tool_input": {"path": "agent_notes.md"}},
+            {"tool_name": "read_file", "tool_input": {"path": "run_evidence.md"}},
             {
                 "tool_name": "run_command",
                 "tool_input": {
                     "command": [
                         sys.executable,
                         "-c",
-                        "from pathlib import Path; print(Path('agent_notes.md').read_text(encoding='utf-8').splitlines()[0])",
+                        "from pathlib import Path; print(Path('run_evidence.md').read_text(encoding='utf-8').splitlines()[0])",
                     ]
                 },
             },
-            {"tool_name": "git_diff", "tool_input": {"paths": ["agent_notes.md"]}},
+            {"tool_name": "git_diff", "tool_input": {"paths": ["run_evidence.md"]}},
         ],
     }
     return json.dumps(

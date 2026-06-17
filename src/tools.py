@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass
 from difflib import unified_diff
 from pathlib import Path
 import subprocess
-import sys
 from typing import Any
 
 
@@ -204,29 +203,3 @@ class CoreToolRunner:
         return set(self._baseline_snapshot) | current_paths
 
 
-def build_phase_3_tool_sequence(task: str) -> list[tuple[str, dict[str, Any]]]:
-    """按固定顺序准备五个工具调用步骤，供 `act` 阶段依次执行。"""
-    notes_path = "agent_notes.md"
-    notes_content = (
-        "# Agent Notes\n\n"
-        f"- 任务：{task}\n"
-        "- 当前情况：已记录到 Phase 3 工具闭环。\n"
-    )
-    # 这里故意用更直白的 notes 命名，避免后续继续引入难懂英文词。
-    # 这一组步骤会先搜索，再写入说明文件，然后读回文件内容、执行一次检查命令，最后收集 diff。
-    return [
-        ("search_text", {"query": "Agent Notes", "limit": 5}),
-        ("apply_patch", {"path": notes_path, "old_text": None, "new_text": notes_content}),
-        ("read_file", {"path": notes_path}),
-        (
-            "run_command",
-            {
-                "command": [
-                    sys.executable,
-                    "-c",
-                    "from pathlib import Path; print(Path('agent_notes.md').read_text(encoding='utf-8').splitlines()[0])",
-                ]
-            },
-        ),
-        ("git_diff", {"paths": [notes_path]}),
-    ]

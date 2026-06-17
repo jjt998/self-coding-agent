@@ -46,8 +46,8 @@ class SetupCommandResult:
 
 
 def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
-    """初始化单次 run，并执行最小 stub 状态机流程。"""
-    # 这里继续沿用 Phase 1 的 run 初始化逻辑，再把 Phase 2 的最小 loop 接在后面。
+    """初始化单次 run，并执行当前真实 loop 状态机流程。"""
+    # run 初始化、setup、loop、报告写入都在这里串联，保证 CLI 和 eval 入口复用同一条路径。
     run_dir = Path(settings.output_root) / settings.run_id
     _prepare_execution_workspace(settings=settings, run_dir=run_dir)
     trace_writer = TraceWriter(run_dir=run_dir)

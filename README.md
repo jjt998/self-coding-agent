@@ -14,6 +14,7 @@
 - 任务级验证：支持 `verify_commands` 和结构化 `verify_rules`；未配置任务级验证时会以 `missing_task_verification` 失败，不再回退到演示型检查。
 - 结构化失败收口：支持 `setup_failed`、`verification_failed`、`model_error`、`max_steps_reached` 等 stop reason，并提供稳定 failure taxonomy。
 - Reflect feedback 重规划约束：下一轮模型计划必须回应上一轮失败证据，不能无解释重复失败工具序列。
+- 真实 loop 内核扫尾：当前代码不再保留 Phase 3 固定工具序列辅助函数，测试样例默认产物改为 `run_evidence.md`。
 - eval batch：批量运行任务并生成聚合 `summary.json` / `summary.md`。
 - strategy comparison：对同一批任务执行多套配置并输出 delta。
 - experiment suite：把多组 comparison 固化成实验清单。
@@ -226,7 +227,7 @@ eval 和 comparison 会额外生成：
 
 ## 当前限制
 
-- loop 已拆分为独立状态处理方法，后续仍需继续增强真实任务求解策略。
+- loop 已拆分为独立状态处理方法，并已清理旧 Phase 3 固定工具序列语义；后续仍需继续增强真实任务求解策略。
 - reflect feedback 已作为下一轮 plan 的硬约束；后续仍可继续增强反思策略质量。
 - 默认最大求解轮数仍固定为 `2`，暂不开放更高预算。
 - CLI 暂不支持单次运行直接传入 `verify_commands` / `verify_rules`，该能力目前只在 eval task schema 中使用。

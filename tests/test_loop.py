@@ -17,6 +17,18 @@ def _model_config() -> dict:
     return {"model": {"provider": "openai_compatible", "name": "demo-model"}}
 
 
+def test_src_no_longer_contains_phase3_stub_loop_markers() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    src_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((repo_root / "src").glob("*.py"))
+    )
+
+    assert "build_phase_3_tool_sequence" not in src_text
+    assert "_run_stub_state" not in src_text
+    assert "Phase 3 工具闭环" not in src_text
+
+
 def _fake_model_response(tool_calls: list[dict] | None = None) -> str:
     decision = {
         "summary": "已生成真实模型决策。",
@@ -24,27 +36,27 @@ def _fake_model_response(tool_calls: list[dict] | None = None) -> str:
         "planned_actions": ["执行模型工具计划"],
         "tool_calls": tool_calls
         or [
-            {"tool_name": "search_text", "tool_input": {"query": "Agent Notes", "limit": 5}},
+            {"tool_name": "search_text", "tool_input": {"query": "Run Evidence", "limit": 5}},
             {
                 "tool_name": "apply_patch",
                 "tool_input": {
-                    "path": "agent_notes.md",
+                    "path": "run_evidence.md",
                     "old_text": None,
-                    "new_text": "# Agent Notes\n\n- 任务：创建脚手架\n- 当前情况：已记录到 Phase 3 工具闭环。\n",
+                    "new_text": "# Run Evidence\n\n- 任务：创建脚手架\n- 当前情况：已记录到 真实 loop 运行证据。\n",
                 },
             },
-            {"tool_name": "read_file", "tool_input": {"path": "agent_notes.md"}},
+            {"tool_name": "read_file", "tool_input": {"path": "run_evidence.md"}},
             {
                 "tool_name": "run_command",
                 "tool_input": {
                     "command": [
                         sys.executable,
                         "-c",
-                        "from pathlib import Path; print(Path('agent_notes.md').read_text(encoding='utf-8').splitlines()[0])",
+                        "from pathlib import Path; print(Path('run_evidence.md').read_text(encoding='utf-8').splitlines()[0])",
                     ]
                 },
             },
-            {"tool_name": "git_diff", "tool_input": {"paths": ["agent_notes.md"]}},
+            {"tool_name": "git_diff", "tool_input": {"paths": ["run_evidence.md"]}},
         ],
     }
     return json.dumps(
@@ -89,9 +101,9 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
                 tool_calls=[
                     PlannedToolCall(
                         tool_name="apply_patch",
-                        tool_input={"path": "agent_notes.md", "old_text": None, "new_text": "# Agent Notes\n"},
+                        tool_input={"path": "run_evidence.md", "old_text": None, "new_text": "# Run Evidence\n"},
                     ),
-                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["agent_notes.md"]}),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["run_evidence.md"]}),
                 ],
             )
 
@@ -184,7 +196,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
         output_root=str(tmp_path / "runs"),
         config_name="default",
         verify_rules=[
-            {"type": "file_exists", "name": "agent notes exists", "path": "agent_notes.md"},
+            {"type": "file_exists", "name": "run evidence exists", "path": "run_evidence.md"},
         ],
     )
     run_dir = Path(settings.output_root) / settings.run_id
@@ -209,7 +221,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
         "git_diff",
     ]
     assert runtime_state.progress_made is True
-    assert runtime_state.changed_files == ["agent_notes.md"]
+    assert runtime_state.changed_files == ["run_evidence.md"]
     assert runtime_state.failed_tool_count == 0
     assert runtime_state.reflect_triggered is False
     assert runtime_state.iteration_count == 1
@@ -236,7 +248,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert model_decision_payload["iteration"] == 1
     progress_payload = next(event["payload"] for event in trace_events if event["event_type"] == "progress_observed")
     assert progress_payload["progress_made"] is True
-    assert progress_payload["changed_files"] == ["agent_notes.md"]
+    assert progress_payload["changed_files"] == ["run_evidence.md"]
     assert progress_payload["failed_tool_count"] == 0
     ingest_payload = next(event["payload"] for event in trace_events if event["event_type"] == "task_ingested")
     assert ingest_payload["task"] == settings.task
@@ -255,7 +267,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     finalize_payload = next(event["payload"] for event in trace_events if event["event_type"] == "finalize_summary")
     assert finalize_payload["verification_passed"] is True
     assert finalize_payload["progress_made"] is True
-    assert finalize_payload["changed_files"] == ["agent_notes.md"]
+    assert finalize_payload["changed_files"] == ["run_evidence.md"]
     assert finalize_payload["failed_tool_count"] == 0
     assert finalize_payload["reflect_count"] == 0
     assert finalize_payload["iteration_count"] == 1
@@ -420,9 +432,9 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
                 tool_calls=[
                     PlannedToolCall(
                         tool_name="apply_patch",
-                        tool_input={"path": "agent_notes.md", "old_text": None, "new_text": "# Agent Notes\n"},
+                        tool_input={"path": "run_evidence.md", "old_text": None, "new_text": "# Run Evidence\n"},
                     ),
-                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["agent_notes.md"]}),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["run_evidence.md"]}),
                 ],
             )
 
@@ -527,9 +539,9 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
                 tool_calls=[
                     PlannedToolCall(
                         tool_name="apply_patch",
-                        tool_input={"path": "agent_notes.md", "old_text": None, "new_text": "# Agent Notes\n"},
+                        tool_input={"path": "run_evidence.md", "old_text": None, "new_text": "# Run Evidence\n"},
                     ),
-                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["agent_notes.md"]}),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["run_evidence.md"]}),
                 ],
             )
 
@@ -620,9 +632,9 @@ def _run_reflect_constraint_case(
                 tool_calls = [
                     PlannedToolCall(
                         tool_name="apply_patch",
-                        tool_input={"path": "agent_notes.md", "old_text": None, "new_text": "# Agent Notes\n"},
+                        tool_input={"path": "run_evidence.md", "old_text": None, "new_text": "# Run Evidence\n"},
                     ),
-                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["agent_notes.md"]}),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["run_evidence.md"]}),
                 ]
                 if not repeat_tool_sequence:
                     tool_calls = [
@@ -648,9 +660,9 @@ def _run_reflect_constraint_case(
                 tool_calls=[
                     PlannedToolCall(
                         tool_name="apply_patch",
-                        tool_input={"path": "agent_notes.md", "old_text": None, "new_text": "# Agent Notes\n"},
+                        tool_input={"path": "run_evidence.md", "old_text": None, "new_text": "# Run Evidence\n"},
                     ),
-                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["agent_notes.md"]}),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["run_evidence.md"]}),
                 ],
             )
 

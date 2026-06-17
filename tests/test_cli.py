@@ -103,15 +103,15 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     tool_results = [event["payload"] for event in trace_events if event["event_type"] == "tool_result"]
     assert len(tool_results) == 10
     assert tool_results[1]["tool_output"]["ok"] is True
-    assert tool_results[2]["tool_output"]["content"].startswith("# Agent Notes")
-    assert tool_results[3]["tool_output"]["stdout"].strip() == "# Agent Notes"
+    assert tool_results[2]["tool_output"]["content"].startswith("# Run Evidence")
+    assert tool_results[3]["tool_output"]["stdout"].strip() == "# Run Evidence"
     assert tool_results[4]["tool_output"]["changed_file_count"] == 1
-    assert "agent_notes.md" in tool_results[4]["tool_output"]["diffs"][0]["path"]
+    assert "run_evidence.md" in tool_results[4]["tool_output"]["diffs"][0]["path"]
 
     progress_events = [event["payload"] for event in trace_events if event["event_type"] == "progress_observed"]
     assert len(progress_events) == 2
     assert progress_events[0]["progress_made"] is True
-    assert progress_events[0]["changed_files"] == ["agent_notes.md"]
+    assert progress_events[0]["changed_files"] == ["run_evidence.md"]
     assert progress_events[0]["failed_tool_count"] == 0
 
     verification_events = [event["payload"] for event in trace_events if event["event_type"] == "verification_result"]
@@ -165,9 +165,9 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert selected_by_path["DIRECTORY_GUIDE.md"]["injection_mode"] == "index"
     assert "索引提示：" in selected_by_path["DIRECTORY_GUIDE.md"]["injection_content"]
 
-    notes_path = repo_root / "agent_notes.md"
-    assert notes_path.exists()
-    assert "当前情况：已记录到 Phase 3 工具闭环。" in notes_path.read_text(encoding="utf-8")
+    evidence_path = repo_root / "run_evidence.md"
+    assert evidence_path.exists()
+    assert "当前情况：已记录到 真实 loop 运行证据。" in evidence_path.read_text(encoding="utf-8")
 
     memory_store_path = repo_root / ".agent_memory" / "long_term_memory.jsonl"
     assert not memory_store_path.exists()
@@ -213,7 +213,7 @@ def test_cli_deletes_sandbox_after_success_by_default(tmp_path: Path) -> None:
                         "task": "创建脚手架",
                         "task_type": "general",
                         "verify_rules": [
-                            {"type": "file_exists", "name": "agent notes exists", "path": "agent_notes.md"}
+                            {"type": "file_exists", "name": "run evidence exists", "path": "run_evidence.md"}
                         ],
                     }
                 ]

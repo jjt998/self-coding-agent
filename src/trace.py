@@ -46,10 +46,10 @@ class TraceWriter:
             json.dumps(config_snapshot, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        # 先创建空 trace 文件，后续即使还没有真实 agent loop，也能保证 run 产物完整。
+        # 先创建空 trace 文件，保证后续状态事件都从同一个文件追加。
         self.trace_path.write_text("", encoding="utf-8")
-        # report 先写一个占位版本，保证每次 run 从第一步开始就有可读输出。
-        self.report_path.write_text(self._build_report_stub(config_snapshot), encoding="utf-8")
+        # 初始化报告会在 run 结束时被正式报告覆盖；失败较早时也能保留基本任务信息。
+        self.report_path.write_text(self._build_initial_report(config_snapshot), encoding="utf-8")
 
     def write_event(self, event: TraceEvent) -> None:
         """按 JSONL 方式追加写入一条 trace 事件。"""
@@ -62,12 +62,12 @@ class TraceWriter:
         """覆盖写入当前 run 的 Markdown 报告。"""
         self.report_path.write_text(content, encoding="utf-8")
 
-    def _build_report_stub(self, config_snapshot: dict[str, Any]) -> str:
-        """生成 Phase 1 使用的最小占位报告内容。"""
+    def _build_initial_report(self, config_snapshot: dict[str, Any]) -> str:
+        """生成 run 刚初始化时的最小报告内容。"""
         task = config_snapshot.get("task", "")
         task_type = config_snapshot.get("task_type", "")
         run_id = config_snapshot.get("run_id", "")
-        # 这里先保留最小报告骨架，等 Phase 4 再替换成正式报告结构。
+        # 这里先保留最小报告骨架，最终报告由 runner 在收尾阶段覆盖写入。
         return (
             f"# 运行报告\n\n"
             f"- Run ID：`{run_id}`\n"
@@ -76,5 +76,5 @@ class TraceWriter:
             f"## 当前状态\n\n"
             f"`initialized`\n\n"
             f"## 说明\n\n"
-            f"- 这是在 Phase 1 脚手架阶段生成的占位报告。\n"
+            f"- run 已初始化，后续状态执行完成后会写入完整报告。\n"
         )
