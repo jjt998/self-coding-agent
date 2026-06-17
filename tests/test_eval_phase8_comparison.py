@@ -127,6 +127,32 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                     "outcome:failed_verification",
                     "verification_check:doc_readable",
                 ],
+            ),
+            EvalRunResult(
+                task_name="task_missing_verification",
+                run_id="run-missing-verification",
+                run_dir="runs/run-missing-verification",
+                passed=False,
+                step_count=10,
+                tool_call_count=6,
+                verify_count=1,
+                reflect_count=1,
+                reflect_triggered=True,
+                reflect_trigger_reason="verification_failed",
+                stop_reason="completed",
+                config_name="memory_off",
+                context_strategy="naive_recent_context",
+                reflect_strategy="verify_failure_only_reflect",
+                memory_enabled=False,
+                memory_strategy="memory_off",
+                outcome="failed_verification",
+                failing_checks=["task_verification_configured"],
+                failure_taxonomy="verification:missing_task_verification",
+                failure_taxonomy_tags=[
+                    "outcome:failed_verification",
+                    "verification_mode:missing_task_verification",
+                    "verification_check:task_verification_configured",
+                ],
             )
         ],
     )
@@ -165,27 +191,31 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
     delta = comparison_result.deltas[0]
     assert delta["failure_taxonomy_counts_delta"] == {
         "verification:doc_readable": 1,
+        "verification:missing_task_verification": 1,
     }
     assert delta["failure_taxonomy_tag_counts_delta"] == {
-        "outcome:failed_verification": 1,
+        "outcome:failed_verification": 2,
         "verification_check:doc_readable": 1,
+        "verification_check:task_verification_configured": 1,
+        "verification_mode:missing_task_verification": 1,
     }
     assert delta["verification_failure_counts_delta"] == {
         "doc_readable": 1,
+        "task_verification_configured": 1,
     }
     assert delta["reflect_trigger_reason_counts_delta"] == {
         "no_progress_after_observe": -1,
-        "verification_failed": 1,
+        "verification_failed": 2,
     }
     assert comparison_result.task_deltas == [
         {
             "baseline_strategy": "default",
             "strategy": "memory_off",
             "tasks": [
-                {
-                    "task_name": "task_a",
-                    "baseline_present": True,
-                    "candidate_present": True,
+                    {
+                        "task_name": "task_a",
+                        "baseline_present": True,
+                        "candidate_present": True,
                     "baseline_run_id": "run-a",
                     "candidate_run_id": "run-b",
                     "baseline_run_dir": "runs/run-a",
@@ -202,12 +232,35 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                     "candidate_reflect_trigger_reason": "verification_failed",
                     "baseline_failure_taxonomy": "none",
                     "candidate_failure_taxonomy": "verification:doc_readable",
-                    "failing_checks_delta": {"doc_readable": 1},
-                    "diagnostic_labels_delta": {},
-                }
-            ],
-        }
-    ]
+                        "failing_checks_delta": {"doc_readable": 1},
+                        "diagnostic_labels_delta": {},
+                    },
+                    {
+                        "task_name": "task_missing_verification",
+                        "baseline_present": False,
+                        "candidate_present": True,
+                        "baseline_run_id": "",
+                        "candidate_run_id": "run-missing-verification",
+                        "baseline_run_dir": "",
+                        "candidate_run_dir": "runs/run-missing-verification",
+                        "baseline_outcome": "missing",
+                        "candidate_outcome": "failed_verification",
+                        "baseline_passed": False,
+                        "candidate_passed": False,
+                        "step_count_delta": 10,
+                        "tool_call_count_delta": 6,
+                        "verify_count_delta": 1,
+                        "reflect_count_delta": 1,
+                        "baseline_reflect_trigger_reason": "none",
+                        "candidate_reflect_trigger_reason": "verification_failed",
+                        "baseline_failure_taxonomy": "none",
+                        "candidate_failure_taxonomy": "verification:missing_task_verification",
+                        "failing_checks_delta": {"task_verification_configured": 1},
+                        "diagnostic_labels_delta": {},
+                    }
+                ],
+            }
+        ]
 
     summary_text = _build_strategy_comparison_markdown(comparison_result)
     assert "failure taxonomy delta" in summary_text

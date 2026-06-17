@@ -14,6 +14,7 @@ from eval_runner import (
     EvalRunResult,
     _build_eval_batch_result,
     _build_eval_summary_markdown,
+    _build_failure_taxonomy,
     _build_failure_taxonomy_tags,
     _load_expectation_spec,
     load_eval_task_specs,
@@ -625,6 +626,33 @@ def test_failure_taxonomy_tags_keep_all_failure_dimensions() -> None:
         "diagnostic_label:memory_pollution",
     ]
 
+
+def test_missing_task_verification_gets_stable_taxonomy_and_tags() -> None:
+    stop_reason_details = {
+        "verification_failure": {
+            "verification_mode": "missing_task_verification",
+        }
+    }
+
+    taxonomy = _build_failure_taxonomy(
+        outcome="failed_verification",
+        stop_reason="verification_failed",
+        failing_checks=["task_verification_configured"],
+        stop_reason_details=stop_reason_details,
+    )
+    tags = _build_failure_taxonomy_tags(
+        outcome="failed_verification",
+        stop_reason="verification_failed",
+        failing_checks=["task_verification_configured"],
+        diagnostic_labels=[],
+        stop_reason_details=stop_reason_details,
+    )
+
+    assert taxonomy == "verification:missing_task_verification"
+    assert "verification_mode:missing_task_verification" in tags
+    assert "verification_check:task_verification_configured" in tags
+
+
 def test_eval_batch_result_counts_structured_setup_and_verify_taxonomy() -> None:
     run_results = [
         EvalRunResult(
@@ -657,13 +685,33 @@ def test_eval_batch_result_counts_structured_setup_and_verify_taxonomy() -> None
                 "verification_check:verify_command_1",
             ],
         ),
+        EvalRunResult(
+            task_name="missing_verification",
+            run_id="run-missing-verification",
+            run_dir="runs/run-missing-verification",
+            passed=False,
+            step_count=8,
+            tool_call_count=5,
+            stop_reason="verification_failed",
+            outcome="failed_verification",
+            failing_checks=["task_verification_configured"],
+            failure_taxonomy="verification:missing_task_verification",
+            failure_taxonomy_tags=[
+                "outcome:failed_verification",
+                "stop_reason:verification_failed",
+                "verification_mode:missing_task_verification",
+                "verification_check_count:1",
+                "verification_check:task_verification_configured",
+            ],
+        ),
     ]
 
     batch_result = _build_eval_batch_result(eval_name="structured_failures", run_results=run_results)
 
-    assert batch_result.outcome_counts == {"failed_setup": 1, "failed_verification": 1}
-    assert batch_result.failure_distribution == {"setup_failed": 1, "verification_failed": 1}
+    assert batch_result.outcome_counts == {"failed_setup": 1, "failed_verification": 2}
+    assert batch_result.failure_distribution == {"setup_failed": 1, "verification_failed": 2}
     assert batch_result.failure_taxonomy_counts == {
         "setup:command_returncode": 1,
         "verification:verify_command_returncode": 1,
+        "verification:missing_task_verification": 1,
     }

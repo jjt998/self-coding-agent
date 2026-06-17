@@ -354,6 +354,10 @@ def _build_phase_4_report(
 
     verification_lines = []
     if verification_result:
+        if verification_result.details.get("verification_mode") == "missing_task_verification":
+            verification_lines.append(
+                "- 任务未配置 `verify_commands` 或 `verify_rules`，当前 run 无法判定任务是否完成。"
+            )
         for check in verification_result.checks:
             check_status = "通过" if check.passed else "未通过"
             verification_lines.append(f"- {check.name}：{check_status}。{check.detail}")

@@ -545,6 +545,7 @@ def test_cli_verify_failure_only_reflects_when_verification_is_missing(tmp_path:
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "reflect：已触发" in report_text
+    assert "任务未配置 `verify_commands` 或 `verify_rules`" in report_text
 
 
 def test_cli_uses_naive_recent_context_strategy_from_config(tmp_path: Path) -> None:

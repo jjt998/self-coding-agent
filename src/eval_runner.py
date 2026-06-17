@@ -441,6 +441,7 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
             stop_reason=stop_reason,
             failing_checks=failing_checks,
             diagnostic_labels=diagnostic_labels,
+            stop_reason_details=stop_reason_details,
         ),
         verify_count=verify_count,
         reflect_count=reflect_count,
@@ -938,6 +939,9 @@ def _build_failure_taxonomy(
     if outcome == "failed_verification":
         verification_failure = details.get("verification_failure", {})
         if isinstance(verification_failure, dict):
+            verification_mode = str(verification_failure.get("verification_mode", "")).strip()
+            if verification_mode == "missing_task_verification":
+                return "verification:missing_task_verification"
             failed_commands = verification_failure.get("failed_commands", [])
             if isinstance(failed_commands, list) and failed_commands:
                 return "verification:verify_command_returncode"
@@ -959,14 +963,22 @@ def _build_failure_taxonomy_tags(
     stop_reason: str,
     failing_checks: list[str],
     diagnostic_labels: list[str],
+    stop_reason_details: dict[str, Any] | None = None,
 ) -> list[str]:
     """把失败拆成多维标签，避免只看一个主 taxonomy 丢掉诊断细节。"""
     if outcome in {"passed_cleanly", "passed_with_warnings"}:
         return []
 
     tags = [f"outcome:{outcome}", f"stop_reason:{stop_reason}"]
+    details = stop_reason_details if isinstance(stop_reason_details, dict) else {}
     if outcome == "failed_setup":
         tags.append("setup_failure")
+    if outcome == "failed_verification":
+        verification_failure = details.get("verification_failure", {})
+        if isinstance(verification_failure, dict):
+            verification_mode = str(verification_failure.get("verification_mode", "")).strip()
+            if verification_mode:
+                tags.append(f"verification_mode:{verification_mode}")
     if failing_checks:
         tags.append(f"verification_check_count:{len(failing_checks)}")
         for check in failing_checks:
