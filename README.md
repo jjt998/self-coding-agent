@@ -39,6 +39,8 @@ $env:OPENAI_API_KEY = "你的 API key"
 
 ## 快速开始
 
+最小使用路径建议按这个顺序走：配置模型 -> 单次 run -> 编写 eval task -> 查看 report -> 运行 eval -> 运行 comparison -> 排障。完整手册见 `docs/USAGE_GUIDE.md`，MVP 验收命令见 `docs/MVP_ACCEPTANCE.md`。
+
 安装为本地可编辑包：
 
 ```powershell
@@ -129,6 +131,7 @@ $env:OPENAI_API_KEY = "你的 API key"
 - `timeout_seconds` 默认是 `30`；网络超时、DNS 错误、HTTP 非 2xx 都会在 trace/report 中显示安全摘要。
 - 常见 `model_error` 类型包括 `ModelConfigError`、`ModelRequestError`、`ModelResponseError`。
 - 测试环境可使用 `SELF_CODING_AGENT_FAKE_MODEL_RESPONSE` 注入假响应，仍需设置测试用 API key 环境变量。
+- 更完整的模型配置、eval task、report 和 comparison 使用说明见 `docs/USAGE_GUIDE.md`。
 
 ## eval task schema
 
@@ -219,6 +222,8 @@ eval 和 comparison 会额外生成：
 - `runtime:max_steps_reached`
 
 ## 测试
+
+MVP 冻结验收命令见 `docs/MVP_ACCEPTANCE.md`。
 
 运行核心回归：
 
