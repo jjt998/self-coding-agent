@@ -18,6 +18,7 @@ from eval_runner import (
     _build_failure_taxonomy_tags,
     _load_expectation_spec,
     load_eval_task_specs,
+    run_eval_batch,
 )
 
 
@@ -148,6 +149,8 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
     assert summary_data["runs"][1]["expectation_result"]["matched"] is True
 
     summary_text = (eval_dir / "summary.md").read_text(encoding="utf-8")
+
+
     assert "# 评测汇总" in summary_text
     assert "## 结果分层" in summary_text
     assert "## Expectation 对照" in summary_text
@@ -203,6 +206,52 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
     assert second_verification_payload["passed"] is True
     assert second_verification_payload["details"]["verification_mode"] == "task_verify_commands"
     assert second_verification_payload["checks"][0]["name"] == "verify_command_1"
+
+
+def test_eval_batch_uses_unique_output_dir_when_previous_run_exists(tmp_path: Path) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+    eval_task_file = tmp_path / "repeatable_batch.json"
+    eval_task_file.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "name": "repeatable",
+                        "task": "record a repeatable eval run",
+                        "task_type": "general",
+                        "verify_rules": [
+                            {"type": "file_exists", "name": "run evidence exists", "path": "run_evidence.md"}
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    first_eval_dir = run_eval_batch(
+        task_file=eval_task_file,
+        repo_root=str(repo_root),
+        output_root=str(output_root),
+        config_name="default",
+    )
+    second_eval_dir = run_eval_batch(
+        task_file=eval_task_file,
+        repo_root=str(repo_root),
+        output_root=str(output_root),
+        config_name="default",
+    )
+
+    assert first_eval_dir.name == "eval-repeatable_batch"
+    assert second_eval_dir.name.startswith("eval-repeatable_batch-")
+    assert second_eval_dir != first_eval_dir
+    assert (second_eval_dir / "summary.json").exists()
 
 
 def test_eval_batch_result_distinguishes_clean_pass_warning_pass_and_failure() -> None:

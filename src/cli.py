@@ -2,6 +2,17 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
+
+
+def _prefer_local_src_modules() -> None:
+    """优先从当前 src 目录加载本项目模块，避免 trace 等文件名撞上标准库。"""
+    src_dir = str(Path(__file__).resolve().parent)
+    if sys.path[0] != src_dir:
+        sys.path.insert(0, src_dir)
+
+
+_prefer_local_src_modules()
 
 from config import build_settings, load_named_config
 from env_loader import load_dotenv

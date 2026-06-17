@@ -157,6 +157,9 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "JSON 字段必须包含 summary、rationale、planned_actions、tool_calls。"
                         "tool_calls 里的 tool_name 只能是 search_text、read_file、apply_patch、run_command、git_diff，"
                         "tool_input 必须是对象。"
+                        "工具参数必须严格使用以下字段：search_text 使用 query 和可选 limit；"
+                        "read_file 使用 path；apply_patch 使用 path、old_text、new_text；"
+                        "run_command 使用 command；git_diff 使用可选 paths。"
                     ),
                 },
                 {

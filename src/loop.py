@@ -508,13 +508,19 @@ class LoopOrchestrator:
         missing_evidence = self._find_unacknowledged_reflect_constraints(
             decision_text=decision_text,
             constraints=constraints,
+            model_decision=model_decision,
         )
         if missing_evidence:
-            raise ModelResponseError(
-                "模型重规划未响应 reflect 约束："
-                + "、".join(missing_evidence),
-                provider=model_decision.provider,
-                model_name=model_decision.model_name,
+            self.trace_writer.write_event(
+                TraceEvent(
+                    event_type="reflect_constraints_not_acknowledged",
+                    payload={
+                        "provider": model_decision.provider,
+                        "model_name": model_decision.model_name,
+                        "missing_evidence": list(missing_evidence),
+                        "tool_sequence": [tool_call.tool_name for tool_call in model_decision.tool_calls],
+                    },
+                )
             )
 
         previous_sequence = [
@@ -548,11 +554,24 @@ class LoopOrchestrator:
         self,
         decision_text: str,
         constraints: dict[str, Any],
+        model_decision: ModelDecision,
     ) -> list[str]:
         """检查 failure reason、失败检查和关注点是否在模型计划中被回应。"""
         missing: list[str] = []
+        planned_tool_names = [tool_call.tool_name for tool_call in model_decision.tool_calls]
+        has_edit_or_diff_plan = any(tool_name in {"apply_patch", "git_diff"} for tool_name in planned_tool_names)
+        suggested_tools = {
+            str(item).strip()
+            for item in constraints.get("suggested_tools", [])
+            if str(item).strip()
+        }
+        uses_suggested_tool = bool(suggested_tools.intersection(planned_tool_names))
         failure_reason = str(constraints.get("failure_reason", "")).strip()
-        if failure_reason and failure_reason.lower() not in decision_text:
+        if (
+            failure_reason
+            and failure_reason.lower() not in decision_text
+            and not (failure_reason in {"no_progress_after_observe", "verification_failed"} and has_edit_or_diff_plan)
+        ):
             missing.append(f"failure_reason={failure_reason}")
 
         failed_check_names = [
@@ -565,7 +584,7 @@ class LoopOrchestrator:
             for check_name in failed_check_names
             if check_name.lower() not in decision_text
         ]
-        if unmentioned_checks:
+        if unmentioned_checks and not has_edit_or_diff_plan:
             missing.append("failed_check_names=" + ",".join(unmentioned_checks))
 
         must_address = [
@@ -578,7 +597,7 @@ class LoopOrchestrator:
             for focus in must_address
             if focus.lower() not in decision_text
         ]
-        if unmentioned_focus:
+        if unmentioned_focus and not (has_edit_or_diff_plan or uses_suggested_tool):
             missing.append("must_address=" + ",".join(unmentioned_focus))
         return missing
 
@@ -848,7 +867,10 @@ class LoopOrchestrator:
     ) -> list[ToolExecution]:
         """执行决策层产出的工具计划；工具计划必须来自模型决策。"""
         executions: list[ToolExecution] = []
-        planned_tool_calls = [(item.tool_name, item.tool_input) for item in model_decision.tool_calls]
+        planned_tool_calls = [
+            (item.tool_name, self._normalize_tool_input(tool_name=item.tool_name, tool_input=item.tool_input))
+            for item in model_decision.tool_calls
+        ]
 
         for tool_name, tool_input in planned_tool_calls:
             self.trace_writer.write_event(
@@ -873,6 +895,15 @@ class LoopOrchestrator:
                 )
             )
         return executions
+
+    def _normalize_tool_input(self, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
+        """兼容真实模型常见参数别名，避免工具调用因字段名轻微差异直接崩溃。"""
+        normalized = dict(tool_input)
+        if tool_name in {"read_file", "apply_patch"} and "path" not in normalized and "file_path" in normalized:
+            normalized["path"] = normalized.pop("file_path")
+        if tool_name == "git_diff" and "paths" not in normalized and "file_paths" in normalized:
+            normalized["paths"] = normalized.pop("file_paths")
+        return normalized
 
     def _current_tool_iteration(self) -> int:
         """返回当前工具调用所属轮次；工具 runner 本身不持有 runtime_state。"""

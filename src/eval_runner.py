@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
+from datetime import datetime
 from statistics import mean
 from typing import Any
 
@@ -266,7 +267,7 @@ def run_eval_batch(
     """按同一份任务文件批量执行 run，并产出 eval 级别的 JSON/Markdown 汇总。"""
     task_specs = load_eval_task_specs(task_file)
     eval_name = task_file.stem
-    eval_dir = Path(output_root) / f"eval-{eval_name}"
+    eval_dir = _make_unique_output_dir(Path(output_root) / f"eval-{eval_name}")
     runs_dir = eval_dir / "runs"
     eval_dir.mkdir(parents=True, exist_ok=False)
     runs_dir.mkdir(parents=True, exist_ok=False)
@@ -302,6 +303,23 @@ def run_eval_batch(
         encoding="utf-8",
     )
     return eval_dir
+
+
+def _make_unique_output_dir(base_dir: Path) -> Path:
+    """生成不会覆盖既有产物的输出目录；首次运行仍使用原始目录名。"""
+    if not base_dir.exists():
+        return base_dir
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    candidate = base_dir.with_name(f"{base_dir.name}-{timestamp}")
+    if not candidate.exists():
+        return candidate
+
+    for index in range(2, 1000):
+        numbered_candidate = base_dir.with_name(f"{base_dir.name}-{timestamp}-{index}")
+        if not numbered_candidate.exists():
+            return numbered_candidate
+    raise RuntimeError(f"无法为输出目录生成唯一名称：{base_dir}")
 
 
 def run_strategy_comparison(

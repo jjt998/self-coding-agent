@@ -361,7 +361,6 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
         "verify",
         "finalize",
     ]
-
     trace_events = [
         json.loads(line)
         for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
@@ -398,6 +397,52 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
         "verify",
         "finalize",
     ]
+
+
+def test_loop_normalizes_common_tool_input_aliases(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-alias-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="fake decision",
+                rationale="使用真实模型常见 file_path 别名读取文件。",
+                planned_actions=["读取 README.md"],
+                tool_calls=[
+                    PlannedToolCall(tool_name="read_file", tool_input={"file_path": "README.md"}),
+                ],
+            )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+
+    settings = build_settings(
+        task="读取 README",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_rules=[{"type": "file_exists", "name": "README exists", "path": "README.md"}],
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+
+    assert runtime_state.tool_executions[0].tool_name == "read_file"
+    assert runtime_state.tool_executions[0].tool_input == {"path": "README.md"}
 
 
 def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, monkeypatch) -> None:
@@ -704,7 +749,7 @@ def _run_reflect_constraint_case(
     return runtime_state, trace_events
 
 
-def test_second_plan_must_acknowledge_reflect_constraints(tmp_path: Path, monkeypatch) -> None:
+def test_second_plan_continues_when_reflect_constraints_are_only_partially_acknowledged(tmp_path: Path, monkeypatch) -> None:
     runtime_state, trace_events = _run_reflect_constraint_case(
         tmp_path,
         monkeypatch,
@@ -714,11 +759,10 @@ def test_second_plan_must_acknowledge_reflect_constraints(tmp_path: Path, monkey
     )
 
     assert runtime_state.stop_reason is not None
-    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MODEL_ERROR
-    assert runtime_state.current_state == "plan"
-    failure_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision_failed")
-    assert failure_payload["error_type"] == "ModelResponseError"
-    assert "未响应 reflect 约束" in failure_payload["error_message"]
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
+    assert model_decision_payloads[1]["has_reflect_feedback"] is True
+    assert model_decision_payloads[1]["reflect_constraints_acknowledged"] is True
 
 
 def test_second_plan_cannot_repeat_failed_tool_sequence_without_explanation(tmp_path: Path, monkeypatch) -> None:
