@@ -167,13 +167,19 @@ eval task 文件使用 JSON：
 - 文件文本：`file_contains`、`file_not_contains`
 - 文件行数：`file_line_count_at_least`、`file_line_count_at_most`
 - JSON 文件值：`json_file_value_equals`
+- JSON 结构：`json_path_exists`、`json_array_length_equals`、`json_array_length_at_least`、`json_array_length_at_most`、`json_object_key_exists`
 - diff：`diff_changed_file_count_at_least`、`diff_changed_file_count_at_most`、`diff_contains_file`
+- diff 文本：`diff_contains_text`、`diff_not_contains_text`
+- 命令输出 regex：`command_stdout_matches_regex`、`command_stderr_matches_regex`
 - 多文件聚合：`files_matching_count_at_least`、`files_matching_count_at_most`
 
 说明：
 
 - `json_file_value_equals` 的 `json_path` 使用简单点号路径，例如 `a.b.0.name`。
+- JSON 结构规则复用同一套简单点号路径，不支持完整 JSONPath。
 - diff 规则只消费当前 run 已有的 `git_diff` 工具结果，不会在 verify 阶段隐式重新生成 diff。
+- diff 文本规则匹配 `git_diff.tool_output.diffs[].diff` 中已有的统一 diff 文本。
+- regex 规则使用 Python 标准库 `re.search` 默认行为，不额外支持 flags。
 - 多文件聚合只统计 repo root 内可按 UTF-8 读取的文本文件。
 
 ## 运行产物

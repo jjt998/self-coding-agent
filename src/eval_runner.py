@@ -1112,7 +1112,15 @@ def _normalize_verify_rules(raw_value: Any) -> list[dict[str, Any]]:
         if expected_returncode is not None:
             normalized_rule["expected_returncode"] = expected_returncode
 
-        for field_name in ["min_line_count", "max_line_count", "min_count", "max_count"]:
+        for field_name in [
+            "min_line_count",
+            "max_line_count",
+            "min_count",
+            "max_count",
+            "expected_length",
+            "min_length",
+            "max_length",
+        ]:
             numeric_value = _normalize_optional_int(item.get(field_name))
             if numeric_value is not None:
                 normalized_rule[field_name] = numeric_value
@@ -1127,6 +1135,8 @@ def _normalize_verify_rules(raw_value: Any) -> list[dict[str, Any]]:
             "stderr_not_contains",
             "json_path",
             "glob",
+            "regex",
+            "key",
         ]:
             value = _normalize_optional_string(item.get(field_name))
             if value:

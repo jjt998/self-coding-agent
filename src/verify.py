@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
+import re
 import subprocess
 from typing import Any
 
@@ -215,11 +216,17 @@ def _build_verify_rule_checks(
         if rule_type == "command_stdout_not_contains":
             checks.append(_check_command_output_not_contains(rule_name, rule, command_results, stream_name="stdout"))
             continue
+        if rule_type == "command_stdout_matches_regex":
+            checks.append(_check_command_output_matches_regex(rule_name, rule, command_results, stream_name="stdout"))
+            continue
         if rule_type == "command_stderr_contains":
             checks.append(_check_command_output_contains(rule_name, rule, command_results, stream_name="stderr"))
             continue
         if rule_type == "command_stderr_not_contains":
             checks.append(_check_command_output_not_contains(rule_name, rule, command_results, stream_name="stderr"))
+            continue
+        if rule_type == "command_stderr_matches_regex":
+            checks.append(_check_command_output_matches_regex(rule_name, rule, command_results, stream_name="stderr"))
             continue
         if rule_type == "command_returncode":
             checks.append(_check_command_returncode(rule_name, rule, command_results))
@@ -245,6 +252,21 @@ def _build_verify_rule_checks(
         if rule_type == "json_file_value_equals":
             checks.append(_check_json_file_value_equals(rule_name, rule, repo_root))
             continue
+        if rule_type == "json_path_exists":
+            checks.append(_check_json_path_exists(rule_name, rule, repo_root))
+            continue
+        if rule_type == "json_array_length_equals":
+            checks.append(_check_json_array_length(rule_name, rule, repo_root, mode="equals"))
+            continue
+        if rule_type == "json_array_length_at_least":
+            checks.append(_check_json_array_length(rule_name, rule, repo_root, mode="at_least"))
+            continue
+        if rule_type == "json_array_length_at_most":
+            checks.append(_check_json_array_length(rule_name, rule, repo_root, mode="at_most"))
+            continue
+        if rule_type == "json_object_key_exists":
+            checks.append(_check_json_object_key_exists(rule_name, rule, repo_root))
+            continue
         if rule_type == "diff_changed_file_count_at_least":
             checks.append(_check_diff_changed_file_count(rule_name, rule, tool_executions, mode="at_least"))
             continue
@@ -253,6 +275,12 @@ def _build_verify_rule_checks(
             continue
         if rule_type == "diff_contains_file":
             checks.append(_check_diff_contains_file(rule_name, rule, tool_executions))
+            continue
+        if rule_type == "diff_contains_text":
+            checks.append(_check_diff_text(rule_name, rule, tool_executions, should_contain=True))
+            continue
+        if rule_type == "diff_not_contains_text":
+            checks.append(_check_diff_text(rule_name, rule, tool_executions, should_contain=False))
             continue
         if rule_type == "files_matching_count_at_least":
             checks.append(_check_files_matching_count(rule_name, rule, repo_root, mode="at_least"))
@@ -321,6 +349,39 @@ def _check_command_output_not_contains(
         detail=(
             f"检查 verify command #{_get_command_index(rule)} 的 {stream_name} 是否不包含 `{expected_text or '空'}`。"
             f" 实际首行：{_first_line(output)}"
+        ),
+    )
+
+
+def _check_command_output_matches_regex(
+    rule_name: str,
+    rule: dict[str, Any],
+    command_results: list[VerifyCommandResult],
+    stream_name: str,
+) -> VerificationCheck:
+    """Check a verify command output stream with Python re.search."""
+    command_result = _find_command_result(rule=rule, command_results=command_results)
+    regex_pattern = str(rule.get("regex") or "").strip()
+    if command_result is None:
+        return VerificationCheck(
+            name=rule_name,
+            passed=False,
+            detail="指定的 verify command 不存在，无法检查 regex 输出。",
+        )
+    if not regex_pattern:
+        return VerificationCheck(name=rule_name, passed=False, detail="verify rule missing regex.")
+
+    output = command_result.stdout if stream_name == "stdout" else command_result.stderr
+    try:
+        passed = re.search(regex_pattern, output) is not None
+    except re.error as error:
+        return VerificationCheck(name=rule_name, passed=False, detail=f"invalid regex `{regex_pattern}`: {error}.")
+    return VerificationCheck(
+        name=rule_name,
+        passed=passed,
+        detail=(
+            f"check verify command #{_get_command_index(rule)} {stream_name} matches regex `{regex_pattern}`. "
+            f"first line: {_first_line(output)}"
         ),
     )
 
@@ -439,6 +500,108 @@ def _check_file_text(rule_name: str, rule: dict[str, Any], repo_root: str, shoul
 
 def _check_json_file_value_equals(rule_name: str, rule: dict[str, Any], repo_root: str) -> VerificationCheck:
     """Check a JSON file value selected by simple dot-path syntax."""
+    json_payload = _load_json_rule_payload(rule_name=rule_name, rule=rule, repo_root=repo_root)
+    if isinstance(json_payload, VerificationCheck):
+        return json_payload
+    json_path, data = json_payload
+    found, actual_value, error_detail = _resolve_simple_json_path(data, json_path)
+    expected_value = rule.get("expected_value")
+    passed = found and actual_value == expected_value
+    detail = (
+        f"JSON path `{json_path}` actual value is {actual_value!r}; expected {expected_value!r}."
+        if found
+        else f"JSON path `{json_path}` was not found: {error_detail}."
+    )
+    return VerificationCheck(name=rule_name, passed=passed, detail=detail)
+
+
+def _check_json_path_exists(rule_name: str, rule: dict[str, Any], repo_root: str) -> VerificationCheck:
+    """Check that a simple JSON path resolves successfully."""
+    json_payload = _load_json_rule_payload(rule_name=rule_name, rule=rule, repo_root=repo_root)
+    if isinstance(json_payload, VerificationCheck):
+        return json_payload
+    json_path, data = json_payload
+    found, actual_value, error_detail = _resolve_simple_json_path(data, json_path)
+    return VerificationCheck(
+        name=rule_name,
+        passed=found,
+        detail=(
+            f"JSON path `{json_path}` exists with value type `{type(actual_value).__name__}`."
+            if found
+            else f"JSON path `{json_path}` was not found: {error_detail}."
+        ),
+    )
+
+
+def _check_json_array_length(
+    rule_name: str,
+    rule: dict[str, Any],
+    repo_root: str,
+    mode: str,
+) -> VerificationCheck:
+    """Check array length at a simple JSON path."""
+    json_payload = _load_json_rule_payload(rule_name=rule_name, rule=rule, repo_root=repo_root)
+    if isinstance(json_payload, VerificationCheck):
+        return json_payload
+    json_path, data = json_payload
+    found, actual_value, error_detail = _resolve_simple_json_path(data, json_path)
+    if not found:
+        return VerificationCheck(name=rule_name, passed=False, detail=f"JSON path `{json_path}` was not found: {error_detail}.")
+    if not isinstance(actual_value, list):
+        return VerificationCheck(
+            name=rule_name,
+            passed=False,
+            detail=f"JSON path `{json_path}` is `{type(actual_value).__name__}`, not array.",
+        )
+
+    actual_length = len(actual_value)
+    if mode == "equals":
+        expected_length = _normalize_int(rule.get("expected_length"))
+        passed = expected_length is not None and actual_length == expected_length
+        detail = f"JSON array `{json_path}` length is {actual_length}; expected {expected_length if expected_length is not None else 'unset'}."
+    elif mode == "at_least":
+        min_length = _normalize_int(rule.get("min_length"))
+        passed = min_length is not None and actual_length >= min_length
+        detail = f"JSON array `{json_path}` length is {actual_length}; expected at least {min_length if min_length is not None else 'unset'}."
+    else:
+        max_length = _normalize_int(rule.get("max_length"))
+        passed = max_length is not None and actual_length <= max_length
+        detail = f"JSON array `{json_path}` length is {actual_length}; expected at most {max_length if max_length is not None else 'unset'}."
+    return VerificationCheck(name=rule_name, passed=passed, detail=detail)
+
+
+def _check_json_object_key_exists(rule_name: str, rule: dict[str, Any], repo_root: str) -> VerificationCheck:
+    """Check that an object at a simple JSON path contains a key."""
+    json_payload = _load_json_rule_payload(rule_name=rule_name, rule=rule, repo_root=repo_root)
+    if isinstance(json_payload, VerificationCheck):
+        return json_payload
+    json_path, data = json_payload
+    key = str(rule.get("key") or "").strip()
+    if not key:
+        return VerificationCheck(name=rule_name, passed=False, detail="verify rule missing key.")
+    found, actual_value, error_detail = _resolve_simple_json_path(data, json_path)
+    if not found:
+        return VerificationCheck(name=rule_name, passed=False, detail=f"JSON path `{json_path}` was not found: {error_detail}.")
+    if not isinstance(actual_value, dict):
+        return VerificationCheck(
+            name=rule_name,
+            passed=False,
+            detail=f"JSON path `{json_path}` is `{type(actual_value).__name__}`, not object.",
+        )
+    passed = key in actual_value
+    return VerificationCheck(
+        name=rule_name,
+        passed=passed,
+        detail=f"JSON object `{json_path}` keys are {sorted(actual_value.keys())}; expected key `{key}`.",
+    )
+
+
+def _load_json_rule_payload(
+    rule_name: str,
+    rule: dict[str, Any],
+    repo_root: str,
+) -> tuple[str, Any] | VerificationCheck:
+    """Load JSON file and return the requested simple path with parsed data."""
     file_path = _resolve_rule_file_path(repo_root=repo_root, rule=rule)
     json_path = str(rule.get("json_path", "")).strip()
     if file_path is None:
@@ -452,16 +615,7 @@ def _check_json_file_value_equals(rule_name: str, rule: dict[str, Any], repo_roo
         data = json.loads(file_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         return VerificationCheck(name=rule_name, passed=False, detail=f"JSON parse failed: {error}.")
-
-    found, actual_value, error_detail = _resolve_simple_json_path(data, json_path)
-    expected_value = rule.get("expected_value")
-    passed = found and actual_value == expected_value
-    detail = (
-        f"JSON path `{json_path}` actual value is {actual_value!r}; expected {expected_value!r}."
-        if found
-        else f"JSON path `{json_path}` was not found: {error_detail}."
-    )
-    return VerificationCheck(name=rule_name, passed=passed, detail=detail)
+    return json_path, data
 
 
 def _resolve_simple_json_path(data: Any, json_path: str) -> tuple[bool, Any, str]:
@@ -531,6 +685,31 @@ def _check_diff_contains_file(
         name=rule_name,
         passed=passed,
         detail=f"diff changed files are {changed_paths}; expected `{expected_path or 'unset'}`.",
+    )
+
+
+def _check_diff_text(
+    rule_name: str,
+    rule: dict[str, Any],
+    tool_executions: list[ToolExecution],
+    should_contain: bool,
+) -> VerificationCheck:
+    """Check text inside the latest git_diff output without regenerating diff."""
+    diff_output = _find_latest_git_diff_output(tool_executions)
+    if diff_output is None:
+        return VerificationCheck(name=rule_name, passed=False, detail="No git_diff tool result is available.")
+
+    expected_text = str((rule.get("contains") if should_contain else rule.get("not_contains")) or "").strip()
+    diff_text = _extract_diff_text(diff_output)
+    if not expected_text:
+        return VerificationCheck(name=rule_name, passed=False, detail="verify rule missing diff text assertion.")
+    text_found = expected_text in diff_text
+    passed = text_found if should_contain else not text_found
+    action_text = "contains" if should_contain else "does not contain"
+    return VerificationCheck(
+        name=rule_name,
+        passed=passed,
+        detail=f"diff text {action_text} `{expected_text}`; diff length={len(diff_text)}.",
     )
 
 
@@ -612,6 +791,18 @@ def _extract_diff_paths(diff_output: dict[str, Any]) -> list[str]:
         if path_text:
             paths.append(path_text)
     return paths
+
+
+def _extract_diff_text(diff_output: dict[str, Any]) -> str:
+    """Extract concatenated diff text from git_diff output."""
+    raw_diffs = diff_output.get("diffs", [])
+    if not isinstance(raw_diffs, list):
+        return ""
+    diff_texts: list[str] = []
+    for item in raw_diffs:
+        if isinstance(item, dict) and isinstance(item.get("diff"), str):
+            diff_texts.append(item["diff"])
+    return "\n".join(diff_texts)
 
 
 def _normalize_relative_path_text(raw_value: Any) -> str:

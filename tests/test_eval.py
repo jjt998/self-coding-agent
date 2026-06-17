@@ -515,6 +515,33 @@ def test_load_eval_task_specs_preserves_structured_verify_rule_fields(tmp_path: 
                                 "type": "diff_changed_file_count_at_most",
                                 "max_count": 4,
                             },
+                            {
+                                "type": "command_stdout_matches_regex",
+                                "command_index": 1,
+                                "regex": "ok-[0-9]+",
+                            },
+                            {
+                                "type": "json_array_length_at_least",
+                                "path": "result.json",
+                                "json_path": "items",
+                                "min_length": "2",
+                            },
+                            {
+                                "type": "json_array_length_equals",
+                                "path": "result.json",
+                                "json_path": "items",
+                                "expected_length": 3,
+                            },
+                            {
+                                "type": "json_object_key_exists",
+                                "path": "result.json",
+                                "json_path": "metadata",
+                                "key": "status",
+                            },
+                            {
+                                "type": "diff_contains_text",
+                                "contains": "+status=ok",
+                            },
                         ],
                     }
                 ]
@@ -555,6 +582,26 @@ def test_load_eval_task_specs_preserves_structured_verify_rule_fields(tmp_path: 
             "glob": "docs/*.md",
         },
         {"type": "diff_changed_file_count_at_most", "max_count": 4},
+        {"type": "command_stdout_matches_regex", "command_index": "1", "regex": "ok-[0-9]+"},
+        {
+            "type": "json_array_length_at_least",
+            "path": "result.json",
+            "min_length": 2,
+            "json_path": "items",
+        },
+        {
+            "type": "json_array_length_equals",
+            "path": "result.json",
+            "expected_length": 3,
+            "json_path": "items",
+        },
+        {
+            "type": "json_object_key_exists",
+            "path": "result.json",
+            "json_path": "metadata",
+            "key": "status",
+        },
+        {"type": "diff_contains_text", "contains": "+status=ok"},
     ]
 
 
