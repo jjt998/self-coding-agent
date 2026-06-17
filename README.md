@@ -15,6 +15,7 @@
 - 结构化失败收口：支持 `setup_failed`、`verification_failed`、`model_error`、`max_steps_reached` 等 stop reason，并提供稳定 failure taxonomy。
 - Reflect feedback 重规划约束：下一轮模型计划必须回应上一轮失败证据，不能无解释重复失败工具序列。
 - 真实 loop 内核扫尾：当前代码不再保留 Phase 3 固定工具序列辅助函数，测试样例默认产物改为 `run_evidence.md`。
+- 模型返回日志：每次 plan 会在 `trace.jsonl` 写入 `model_raw_response`，记录模型显式返回的 JSON content，便于排查工具计划和 rationale。
 - eval batch：批量运行任务并生成聚合 `summary.json` / `summary.md`。
 - strategy comparison：对同一批任务执行多套配置并输出 delta。
 - experiment suite：把多组 comparison 固化成实验清单。
@@ -137,6 +138,7 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
 - `timeout_seconds` 默认是 `30`；网络超时、DNS 错误、HTTP 非 2xx 都会在 trace/report 中显示安全摘要。
 - 常见 `model_error` 类型包括 `ModelConfigError`、`ModelRequestError`、`ModelResponseError`。
 - 测试环境可使用 `SELF_CODING_AGENT_FAKE_MODEL_RESPONSE` 注入假响应，仍需设置测试用 API key 环境变量。
+- 排查模型为什么只读文件、不修改文件或没有响应 reflect feedback 时，优先查看 `trace.jsonl` 中的 `model_raw_response` 和 `model_decision`。前者是模型显式返回的原始 JSON content，后者是解析后的结构化决策。
 - 更完整的模型配置、eval task、report 和 comparison 使用说明见 `docs/USAGE_GUIDE.md`。
 
 ## eval task schema
@@ -206,7 +208,7 @@ eval task 文件使用 JSON：
 每次 run 会生成一个独立目录，主要包含：
 
 - `config_snapshot.json`：运行设置和配置快照。
-- `trace.jsonl`：结构化事件流，包括状态迁移、模型决策、工具调用、验证结果、stop reason。
+- `trace.jsonl`：结构化事件流，包括状态迁移、模型原始返回、模型决策、工具调用、验证结果、stop reason。
 - `report.md`：面向人阅读的运行报告。
 
 eval 和 comparison 会额外生成：

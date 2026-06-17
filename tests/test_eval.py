@@ -175,10 +175,13 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
     assert first_snapshot["workspace_mode"] == "per_task_sandbox"
     assert first_snapshot["source_repo_root"] == str(repo_root.resolve())
     sandbox_repo_root = Path(first_snapshot["repo_root"])
+    sandbox_dir = Path(first_snapshot["sandbox_dir"])
+    assert sandbox_dir.parent == repo_root.resolve() / ".agent_sandboxes"
+    assert sandbox_repo_root == sandbox_dir / "repo"
     assert sandbox_repo_root.exists()
     assert (sandbox_repo_root / "run_evidence.md").exists()
     assert (sandbox_repo_root / "setup_marker.txt").read_text(encoding="utf-8") == "sandbox-ready"
-    assert Path(first_snapshot["sandbox_dir"]).exists()
+    assert sandbox_dir.exists()
 
     first_trace_events = [
         json.loads(line)

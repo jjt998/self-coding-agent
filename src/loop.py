@@ -68,9 +68,10 @@ class RuntimeState:
     reflect_trigger_reasons: list[str] = field(default_factory=list)
     reflect_feedback: dict[str, Any] = field(default_factory=dict)
     reflect_feedback_history: list[dict[str, Any]] = field(default_factory=list)
+    repeated_failed_tool_sequence_count: int = 0
     current_iteration: int = 0
     iteration_count: int = 0
-    max_steps: int = 1
+    max_steps: int = 4
     context_snapshot: ContextSnapshot | None = None
     model_decision: ModelDecision | None = None
     model_decisions: list[ModelDecision] = field(default_factory=list)
@@ -489,6 +490,7 @@ class LoopOrchestrator:
         self,
         model_decision: ModelDecision,
         runtime_feedback: dict[str, Any],
+        runtime_state: RuntimeState,
     ) -> None:
         """校验模型在重规划时确实响应了上一轮 reflect 硬约束。"""
         reflect_feedback = runtime_feedback.get("previous_reflect_feedback", {})
@@ -530,6 +532,19 @@ class LoopOrchestrator:
         ]
         current_sequence = [tool_call.tool_name for tool_call in model_decision.tool_calls]
         if previous_sequence and current_sequence == previous_sequence:
+            runtime_state.repeated_failed_tool_sequence_count += 1
+            self.trace_writer.write_event(
+                TraceEvent(
+                    event_type="repeated_failed_tool_sequence",
+                    payload={
+                        "provider": model_decision.provider,
+                        "model_name": model_decision.model_name,
+                        "tool_sequence": list(current_sequence),
+                        "repeat_count": runtime_state.repeated_failed_tool_sequence_count,
+                        "allowed_repeat_count": 3,
+                    },
+                )
+            )
             rationale = model_decision.rationale.lower()
             explanation_markers = [
                 "重复",
@@ -543,12 +558,17 @@ class LoopOrchestrator:
                 "again",
                 "retry",
             ]
-            if not any(marker in rationale for marker in explanation_markers):
+            if (
+                runtime_state.repeated_failed_tool_sequence_count > 3
+                and not any(marker in rationale for marker in explanation_markers)
+            ):
                 raise ModelResponseError(
                     "模型重规划重复了上一轮失败工具序列，但 rationale 未解释重复原因。",
                     provider=model_decision.provider,
                     model_name=model_decision.model_name,
                 )
+        else:
+            runtime_state.repeated_failed_tool_sequence_count = 0
 
     def _find_unacknowledged_reflect_constraints(
         self,
@@ -763,9 +783,23 @@ class LoopOrchestrator:
             config_data=config_data,
             runtime_feedback=runtime_feedback,
         )
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="model_raw_response",
+                payload={
+                    "provider": runtime_state.model_decision.provider,
+                    "model_name": runtime_state.model_decision.model_name,
+                    "iteration": runtime_state.current_iteration,
+                    "content": runtime_state.model_decision.raw_response_content,
+                    "content_length": len(runtime_state.model_decision.raw_response_content),
+                    "parsed_ok": True,
+                },
+            )
+        )
         self._validate_reflect_constraints_acknowledged(
             model_decision=runtime_state.model_decision,
             runtime_feedback=runtime_feedback,
+            runtime_state=runtime_state,
         )
         runtime_state.model_decisions.append(runtime_state.model_decision)
         self.trace_writer.write_event(

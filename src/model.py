@@ -65,10 +65,12 @@ class ModelDecision:
     rationale: str
     planned_actions: list[str] = field(default_factory=list)
     tool_calls: list[PlannedToolCall] = field(default_factory=list)
+    raw_response_content: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """转换成普通字典，便于 trace 和报告复用。"""
         data = asdict(self)
+        data.pop("raw_response_content", None)
         data["tool_calls"] = [tool_call.to_dict() for tool_call in self.tool_calls]
         return data
 
@@ -109,6 +111,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         self.base_url = base_url.rstrip("/")
         self.api_key_env = api_key_env
         self.timeout_seconds = timeout_seconds
+        self._last_response_content = ""
         self.api_key = os.environ.get(api_key_env, "").strip()
         if not self.api_key:
             raise ModelConfigError(
@@ -134,8 +137,13 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             runtime_feedback=runtime_feedback,
         )
         response_payload = self._request_chat_completion(request_payload)
-        raw_decision = self._extract_decision_json(response_payload)
-        return self._parse_model_decision(raw_decision=raw_decision, task_type=task_type)
+        raw_decision, raw_response_content = self._extract_decision_json(response_payload)
+        self._last_response_content = raw_response_content
+        return self._parse_model_decision(
+            raw_decision=raw_decision,
+            task_type=task_type,
+            raw_response_content=raw_response_content,
+        )
 
     def _build_request_payload(
         self,
@@ -271,7 +279,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                 ),
             ) from error
 
-    def _extract_decision_json(self, response_payload: dict[str, Any]) -> dict[str, Any]:
+    def _extract_decision_json(self, response_payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
         """从 OpenAI 兼容响应中取出 message.content 并解析为决策 JSON。"""
         try:
             content = response_payload["choices"][0]["message"]["content"]
@@ -309,7 +317,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                 model_name=self.model_name,
                 details=self._diagnostic_details(field_path="choices[0].message.content"),
             )
-        return raw_decision
+        return raw_decision, content
 
     def _diagnostic_details(self, **extra: Any) -> dict[str, Any]:
         """生成不会泄露 API key 的模型排障信息。"""
@@ -321,9 +329,20 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             "timeout_seconds": self.timeout_seconds,
         }
         details.update(extra)
+        if (
+            self._last_response_content
+            and "response_excerpt" not in details
+            and str(details.get("field_path", "")).strip()
+        ):
+            details["response_excerpt"] = _truncate_text(self._last_response_content)
         return _safe_model_error_details(details)
 
-    def _parse_model_decision(self, raw_decision: dict[str, Any], task_type: str) -> ModelDecision:
+    def _parse_model_decision(
+        self,
+        raw_decision: dict[str, Any],
+        task_type: str,
+        raw_response_content: str = "",
+    ) -> ModelDecision:
         """校验模型决策字段，并转换成内部数据结构。"""
         summary = _required_string(raw_decision, "summary", self)
         rationale = _required_string(raw_decision, "rationale", self)
@@ -337,6 +356,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             rationale=rationale,
             planned_actions=planned_actions,
             tool_calls=tool_calls,
+            raw_response_content=raw_response_content,
         )
 
 

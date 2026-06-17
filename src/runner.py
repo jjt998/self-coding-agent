@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 import shutil
 import subprocess
-import tempfile
 
 from config import RunSettings
 from loop import LoopOrchestrator, RuntimeState, StopReason, StopReasonCode
@@ -139,7 +138,7 @@ def _prepare_execution_workspace(settings: RunSettings, run_dir: Path) -> None:
     if settings.workspace_mode != "per_task_sandbox":
         return
 
-    sandbox_root = Path(tempfile.mkdtemp(prefix=f"{settings.run_id}-self-coding-agent-"))
+    sandbox_root = _make_unique_sandbox_root(source_repo_root=source_repo_root, run_id=settings.run_id)
     sandbox_repo_root = sandbox_root / "repo"
     shutil.copytree(
         source_repo_root,
@@ -151,6 +150,22 @@ def _prepare_execution_workspace(settings: RunSettings, run_dir: Path) -> None:
     )
     settings.repo_root = str(sandbox_repo_root.resolve())
     settings.sandbox_dir = str(sandbox_root.resolve())
+
+
+def _make_unique_sandbox_root(source_repo_root: Path, run_id: str) -> Path:
+    """在目标仓库内部创建本次 run 专属 sandbox 根目录。"""
+    sandbox_parent = source_repo_root / ".agent_sandboxes"
+    sandbox_parent.mkdir(parents=True, exist_ok=True)
+    base_name = run_id
+    for index in range(1, 1000):
+        suffix = "" if index == 1 else f"-{index}"
+        sandbox_root = sandbox_parent / f"{base_name}{suffix}"
+        try:
+            sandbox_root.mkdir()
+        except FileExistsError:
+            continue
+        return sandbox_root
+    raise RuntimeError(f"无法为 run `{run_id}` 创建唯一 sandbox 目录。")
 
 
 def _build_sandbox_ignore(source_repo_root: Path, output_root: Path):
@@ -373,6 +388,22 @@ def _build_phase_4_report(
     else:
         reflect_feedback_summary = "- 未生成反思反馈。"
 
+    model_decision = runtime_state.model_decision
+    if model_decision:
+        model_tool_sequence = ", ".join(tool_call.tool_name for tool_call in model_decision.tool_calls) or "none"
+        model_actions = "；".join(model_decision.planned_actions) or "无"
+        model_response_summary = (
+            f"- provider：`{model_decision.provider}`\n"
+            f"- model：`{model_decision.model_name}`\n"
+            f"- summary：{model_decision.summary}\n"
+            f"- rationale：{model_decision.rationale}\n"
+            f"- planned_actions：{model_actions}\n"
+            f"- tool_calls：`{model_tool_sequence}`\n"
+            f"- 原始返回：见 `trace.jsonl` 中的 `model_raw_response` 事件。"
+        )
+    else:
+        model_response_summary = "- 尚未生成模型返回。"
+
     tool_lines = []
     for execution in runtime_state.tool_executions:
         tool_ok = execution.tool_output.get("ok")
@@ -481,6 +512,8 @@ def _build_phase_4_report(
         f"{changed_files_summary}\n"
         f"\n## 反思反馈\n\n"
         f"{reflect_feedback_summary}\n"
+        f"\n## 模型返回摘要\n\n"
+        f"{model_response_summary}\n"
         f"\n## 上下文摘要\n\n"
         f"{context_summary}\n"
         f"\n## 工具调用摘要\n\n"

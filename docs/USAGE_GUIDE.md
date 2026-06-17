@@ -86,9 +86,15 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 - `失败诊断`：setup、model、verify、max steps 等失败摘要。
 - `进展观察`：是否观察到文件变更、变更文件数、失败工具数。
 - `反思反馈`：最近一次 reflect trigger、失败检查、建议关注点。
+- `模型返回摘要`：最近一次模型显式返回的 summary、rationale、planned_actions 和 tool_calls。
 - `验证结果`：每条验证检查是否通过。
 
-`trace.jsonl` 是结构化事件流，适合脚本分析和定位细节。
+`trace.jsonl` 是结构化事件流，适合脚本分析和定位细节。排查模型为什么只读文件、不修改文件或没有响应 reflect feedback 时，优先查看：
+
+- `model_raw_response`：模型显式返回的原始 `choices[0].message.content`。
+- `model_decision`：解析后的结构化决策，包括 `rationale`、`planned_actions` 和 `tool_calls`。
+
+这里记录的是模型显式返回内容，不包含 provider 隐藏推理链，也不会记录 API key 或请求头。
 
 ## 5. 运行 eval batch
 

@@ -104,6 +104,12 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert model_decision_payload["model_name"] == "deepseek-v4-flash"
     assert model_decision_payload["planned_actions"][0].startswith("执行测试工具计划")
     assert "fix_failing_verification_checks" in model_decision_payload["planned_actions"][0]
+    raw_response_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_raw_response"]
+    assert len(raw_response_payloads) == 2
+    assert raw_response_payloads[0]["provider"] == "openai_compatible"
+    assert raw_response_payloads[0]["model_name"] == "deepseek-v4-flash"
+    assert raw_response_payloads[0]["iteration"] == 1
+    assert raw_response_payloads[0]["parsed_ok"] is True
 
     tool_results = [event["payload"] for event in trace_events if event["event_type"] == "tool_result"]
     assert len(tool_results) == 10
@@ -180,6 +186,8 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "`finalize`" in report_text
     assert "## 反思反馈" in report_text
+    assert "## 模型返回摘要" in report_text
+    assert "原始返回：见 `trace.jsonl` 中的 `model_raw_response` 事件。" in report_text
     assert "reflect：已触发" in report_text
     assert "## 进展观察" in report_text
     assert "是否观察到进展：是" in report_text
@@ -251,6 +259,8 @@ def test_cli_deletes_sandbox_after_success_by_default(tmp_path: Path) -> None:
     run_dir = Path(summary_data["runs"][0]["run_dir"])
     snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
     sandbox_dir = Path(snapshot["sandbox_dir"])
+    assert sandbox_dir.parent == repo_root.resolve() / ".agent_sandboxes"
+    assert Path(snapshot["repo_root"]) == sandbox_dir / "repo"
     assert not sandbox_dir.exists()
 
     trace_events = [
@@ -326,7 +336,10 @@ def test_cli_keeps_sandbox_after_failed_verify_command_under_default_policy(tmp_
     run_dir = Path(summary_data["runs"][0]["run_dir"])
     snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
     sandbox_dir = Path(snapshot["sandbox_dir"])
+    assert sandbox_dir.parent == repo_root.resolve() / ".agent_sandboxes"
+    assert Path(snapshot["repo_root"]) == sandbox_dir / "repo"
     assert sandbox_dir.exists()
+    assert (sandbox_dir / "repo").exists()
 
     trace_events = [
         json.loads(line)

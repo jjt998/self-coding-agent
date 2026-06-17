@@ -143,6 +143,8 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
     assert decision.planned_actions == ["搜索相关文件"]
     assert decision.tool_calls[0].tool_name == "search_text"
     assert decision.tool_calls[0].tool_input == {"query": "Demo", "limit": 5}
+    assert json.loads(decision.raw_response_content)["summary"] == "已生成真实模型决策。"
+    assert "raw_response_content" not in decision.to_dict()
 
 
 def test_openai_compatible_adapter_includes_runtime_feedback(monkeypatch) -> None:
@@ -346,6 +348,9 @@ def test_openai_compatible_adapter_rejects_invalid_response(monkeypatch) -> None
             assert error.details["field_path"] == field_path
             if tool_index is not None:
                 assert error.details["tool_call_index"] == tool_index
+            if field_path != "choices[0].message.content":
+                assert "response_excerpt" in error.details
+            assert "test-key" not in json.dumps(error.details, ensure_ascii=False)
         else:
             raise AssertionError("invalid model response should raise ModelResponseError")
 

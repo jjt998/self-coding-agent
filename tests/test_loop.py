@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import loop as loop_module
 from config import build_settings
-from model import ModelDecision, PlannedToolCall
+from model import ModelDecision, ModelResponseError, PlannedToolCall
 from trace import TraceWriter
 from verify import VerificationCheck, VerificationResult
 
@@ -246,6 +246,13 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert model_decision_payload["model_name"] == "demo-model"
     assert model_decision_payload["planned_actions"] == ["执行模型工具计划"]
     assert model_decision_payload["iteration"] == 1
+    raw_response_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_raw_response")
+    assert raw_response_payload["provider"] == "openai_compatible"
+    assert raw_response_payload["model_name"] == "demo-model"
+    assert raw_response_payload["iteration"] == 1
+    assert raw_response_payload["parsed_ok"] is True
+    assert raw_response_payload["content_length"] == len(raw_response_payload["content"])
+    assert json.loads(raw_response_payload["content"])["planned_actions"] == ["执行模型工具计划"]
     progress_payload = next(event["payload"] for event in trace_events if event["event_type"] == "progress_observed")
     assert progress_payload["progress_made"] is True
     assert progress_payload["changed_files"] == ["run_evidence.md"]
@@ -653,6 +660,9 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
     assert model_decision_payloads[1]["has_reflect_feedback"] is True
     assert model_decision_payloads[1]["reflect_feedback_summary"]["failure_reason"] == "verification_failed"
     assert model_decision_payloads[1]["reflect_feedback_summary"]["failed_check_names"] == ["fake_verify"]
+    raw_response_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_raw_response"]
+    assert [payload["iteration"] for payload in raw_response_payloads] == [1, 2]
+    assert all(payload["parsed_ok"] is True for payload in raw_response_payloads)
 
 
 def _run_reflect_constraint_case(
@@ -765,7 +775,7 @@ def test_second_plan_continues_when_reflect_constraints_are_only_partially_ackno
     assert model_decision_payloads[1]["reflect_constraints_acknowledged"] is True
 
 
-def test_second_plan_cannot_repeat_failed_tool_sequence_without_explanation(tmp_path: Path, monkeypatch) -> None:
+def test_second_plan_allows_repeated_failed_tool_sequence_within_budget(tmp_path: Path, monkeypatch) -> None:
     runtime_state, trace_events = _run_reflect_constraint_case(
         tmp_path,
         monkeypatch,
@@ -775,9 +785,49 @@ def test_second_plan_cannot_repeat_failed_tool_sequence_without_explanation(tmp_
     )
 
     assert runtime_state.stop_reason is not None
-    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MODEL_ERROR
-    failure_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision_failed")
-    assert "重复了上一轮失败工具序列" in failure_payload["error_message"]
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    repeated_payload = next(event["payload"] for event in trace_events if event["event_type"] == "repeated_failed_tool_sequence")
+    assert repeated_payload["repeat_count"] == 1
+    assert repeated_payload["allowed_repeat_count"] == 3
+
+
+def test_repeated_failed_tool_sequence_blocks_after_three_retries(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs"
+    run_dir.mkdir()
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize({})
+    orchestrator = loop_module.LoopOrchestrator(trace_writer=trace_writer)
+    runtime_state = loop_module.RuntimeState(task="repeat", task_type="general")
+    runtime_state.repeated_failed_tool_sequence_count = 3
+    model_decision = ModelDecision(
+        provider="openai_compatible",
+        model_name="fake-repeat-model",
+        task_type="general",
+        summary="repeat",
+        rationale="没有解释",
+        planned_actions=["repeat"],
+        tool_calls=[
+            PlannedToolCall(tool_name="read_file", tool_input={"path": "README.md"}),
+        ],
+    )
+    runtime_feedback = {
+        "previous_reflect_feedback": {
+            "replan_constraints": {
+                "avoid_exact_tool_sequence": ["read_file"],
+            }
+        }
+    }
+
+    try:
+        orchestrator._validate_reflect_constraints_acknowledged(
+            model_decision=model_decision,
+            runtime_feedback=runtime_feedback,
+            runtime_state=runtime_state,
+        )
+    except ModelResponseError as error:
+        assert "重复了上一轮失败工具序列" in str(error)
+    else:
+        raise AssertionError("fourth repeated failed tool sequence should fail")
 
 
 def test_second_plan_can_repeat_failed_tool_sequence_with_explanation(tmp_path: Path, monkeypatch) -> None:
@@ -843,3 +893,48 @@ def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, mon
     run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
     assert run_finished_payload["stop_reason"]["code"] == "model_error"
     assert run_finished_payload["stop_reason"]["details"]["api_key_env"] == "DEEPSEEK_API_KEY"
+
+
+def test_loop_model_error_includes_safe_raw_response_excerpt(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "secret-test-key")
+    monkeypatch.setenv(
+        "SELF_CODING_AGENT_FAKE_MODEL_RESPONSE",
+        json.dumps(
+            {"choices": [{"message": {"content": json.dumps({"summary": "少字段"}, ensure_ascii=False)}}]},
+            ensure_ascii=False,
+        ),
+    )
+
+    settings = build_settings(
+        task="触发模型响应错误",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MODEL_ERROR
+    trace_events = [
+        json.loads(line)
+        for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    failure_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision_failed")
+    assert failure_payload["error_type"] == "ModelResponseError"
+    assert failure_payload["field_path"] == "rationale"
+    assert "response_excerpt" in failure_payload
+    assert "少字段" in failure_payload["response_excerpt"]
+    assert "secret-test-key" not in json.dumps(failure_payload, ensure_ascii=False)
