@@ -122,6 +122,14 @@ $env:OPENAI_API_KEY = "你的 API key"
 - `high_weak_conflict_penalty`
 - `short_memory_summary`
 
+## 模型配置与排障
+
+- `api_key_env` 默认是 `OPENAI_API_KEY`；缺少该环境变量时会失败为 `model_error`，错误 details 会显示变量名但不会记录密钥值。
+- `base_url` 必须以 `http://` 或 `https://` 开头，默认是 `https://api.openai.com/v1`。
+- `timeout_seconds` 默认是 `30`；网络超时、DNS 错误、HTTP 非 2xx 都会在 trace/report 中显示安全摘要。
+- 常见 `model_error` 类型包括 `ModelConfigError`、`ModelRequestError`、`ModelResponseError`。
+- 测试环境可使用 `SELF_CODING_AGENT_FAKE_MODEL_RESPONSE` 注入假响应，仍需设置测试用 API key 环境变量。
+
 ## eval task schema
 
 eval task 文件使用 JSON：

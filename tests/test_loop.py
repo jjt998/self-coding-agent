@@ -793,5 +793,8 @@ def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, mon
     assert failure_payload["provider"] == "openai_compatible"
     assert failure_payload["model_name"] == "demo-model"
     assert failure_payload["error_type"] == "ModelConfigError"
+    assert failure_payload["api_key_env"] == "OPENAI_API_KEY"
+    assert "test-key" not in json.dumps(failure_payload, ensure_ascii=False)
     run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
     assert run_finished_payload["stop_reason"]["code"] == "model_error"
+    assert run_finished_payload["stop_reason"]["details"]["api_key_env"] == "OPENAI_API_KEY"

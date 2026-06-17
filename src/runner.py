@@ -321,6 +321,16 @@ def _build_phase_4_report(
         )
     elif stop_reason_code == "model_error":
         failure_diagnostic_lines.append(f"- 模型错误类型：`{stop_reason_details.get('error_type', 'unknown')}`")
+        failure_diagnostic_lines.append(f"- provider：`{stop_reason_details.get('provider', '')}`")
+        failure_diagnostic_lines.append(f"- model：`{stop_reason_details.get('model_name', '')}`")
+        if stop_reason_details.get("base_url"):
+            failure_diagnostic_lines.append(f"- base_url：`{stop_reason_details.get('base_url')}`")
+        if stop_reason_details.get("status_code"):
+            failure_diagnostic_lines.append(f"- HTTP 状态码：`{stop_reason_details.get('status_code')}`")
+        if stop_reason_details.get("field_path"):
+            failure_diagnostic_lines.append(f"- 响应字段路径：`{stop_reason_details.get('field_path')}`")
+        if stop_reason_details.get("request_error_type"):
+            failure_diagnostic_lines.append(f"- 请求错误类型：`{stop_reason_details.get('request_error_type')}`")
     elif stop_reason_code in {"verification_failed", "max_steps_reached"}:
         verification_failure = stop_reason_details.get("verification_failure", {})
         if isinstance(verification_failure, dict):

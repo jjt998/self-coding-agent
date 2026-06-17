@@ -16,10 +16,17 @@ ALLOWED_TOOL_NAMES = {"search_text", "read_file", "apply_patch", "run_command", 
 class ModelError(Exception):
     """模型决策层异常基类，供 loop 统一收口成 model_error。"""
 
-    def __init__(self, message: str, provider: str = "", model_name: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        provider: str = "",
+        model_name: str = "",
+        details: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.provider = provider
         self.model_name = model_name
+        self.details = _safe_model_error_details(details or {})
 
 
 class ModelConfigError(ModelError):
@@ -104,9 +111,10 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         self.api_key = os.environ.get(api_key_env, "").strip()
         if not self.api_key:
             raise ModelConfigError(
-                f"缺少模型 API key 环境变量：{api_key_env}",
+                f"缺少模型 API key 环境变量：{api_key_env}。请设置该环境变量后重试。",
                 provider=provider,
                 model_name=model_name,
+                details=self._diagnostic_details(api_key_env=api_key_env),
             )
 
     def decide(
@@ -188,6 +196,11 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     f"测试模型响应不是合法 JSON：{error}",
                     provider=self.provider,
                     model_name=self.model_name,
+                    details=self._diagnostic_details(
+                        source="SELF_CODING_AGENT_FAKE_MODEL_RESPONSE",
+                        field_path="fake_model_response",
+                        response_excerpt=_truncate_text(fake_response),
+                    ),
                 ) from error
 
         request = Request(
@@ -205,27 +218,40 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         except HTTPError as error:
             error_body = error.read().decode("utf-8", errors="replace")
             raise ModelRequestError(
-                f"模型请求返回 HTTP {error.code}：{error_body[:300]}",
+                f"模型请求返回 HTTP {error.code}。请检查 base_url、模型名、API key 权限和服务状态。",
                 provider=self.provider,
                 model_name=self.model_name,
+                details=self._diagnostic_details(
+                    status_code=error.code,
+                    response_excerpt=_truncate_text(error_body),
+                ),
             ) from error
         except URLError as error:
             raise ModelRequestError(
                 f"模型请求失败：{error.reason}",
                 provider=self.provider,
                 model_name=self.model_name,
+                details=self._diagnostic_details(
+                    request_error_type="URLError",
+                    request_error_reason=_truncate_text(str(error.reason)),
+                ),
             ) from error
         except TimeoutError as error:
             raise ModelRequestError(
-                "模型请求超时。",
+                f"模型请求超时，当前 timeout_seconds={self.timeout_seconds}。",
                 provider=self.provider,
                 model_name=self.model_name,
+                details=self._diagnostic_details(request_error_type="TimeoutError"),
             ) from error
         except OSError as error:
             raise ModelRequestError(
                 f"模型请求失败：{error}",
                 provider=self.provider,
                 model_name=self.model_name,
+                details=self._diagnostic_details(
+                    request_error_type=type(error).__name__,
+                    request_error_reason=_truncate_text(str(error)),
+                ),
             ) from error
 
         try:
@@ -235,6 +261,10 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                 f"模型 HTTP 响应不是合法 JSON：{error}",
                 provider=self.provider,
                 model_name=self.model_name,
+                details=self._diagnostic_details(
+                    field_path="http_response",
+                    response_excerpt=_truncate_text(response_text),
+                ),
             ) from error
 
     def _extract_decision_json(self, response_payload: dict[str, Any]) -> dict[str, Any]:
@@ -246,12 +276,14 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                 "模型响应缺少 choices[0].message.content。",
                 provider=self.provider,
                 model_name=self.model_name,
+                details=self._diagnostic_details(field_path="choices[0].message.content"),
             ) from error
         if not isinstance(content, str) or not content.strip():
             raise ModelResponseError(
                 "模型响应 content 为空或不是字符串。",
                 provider=self.provider,
                 model_name=self.model_name,
+                details=self._diagnostic_details(field_path="choices[0].message.content"),
             )
 
         try:
@@ -261,14 +293,31 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                 f"模型决策 content 不是合法 JSON：{error}",
                 provider=self.provider,
                 model_name=self.model_name,
+                details=self._diagnostic_details(
+                    field_path="choices[0].message.content",
+                    response_excerpt=_truncate_text(content),
+                ),
             ) from error
         if not isinstance(raw_decision, dict):
             raise ModelResponseError(
                 "模型决策 JSON 必须是对象。",
                 provider=self.provider,
                 model_name=self.model_name,
+                details=self._diagnostic_details(field_path="choices[0].message.content"),
             )
         return raw_decision
+
+    def _diagnostic_details(self, **extra: Any) -> dict[str, Any]:
+        """生成不会泄露 API key 的模型排障信息。"""
+        details = {
+            "provider": self.provider,
+            "model_name": self.model_name,
+            "base_url": self.base_url,
+            "api_key_env": self.api_key_env,
+            "timeout_seconds": self.timeout_seconds,
+        }
+        details.update(extra)
+        return _safe_model_error_details(details)
 
     def _parse_model_decision(self, raw_decision: dict[str, Any], task_type: str) -> ModelDecision:
         """校验模型决策字段，并转换成内部数据结构。"""
@@ -291,19 +340,39 @@ def build_model_adapter(config_data: dict[str, Any]) -> ModelAdapter:
     """根据配置构建真实模型适配器；当前只接受 OpenAI 兼容 provider。"""
     model_config = config_data.get("model")
     if not isinstance(model_config, dict):
-        raise ModelConfigError("缺少 model 配置。")
+        raise ModelConfigError("缺少 model 配置。", details={"field_path": "model"})
 
     provider = str(model_config.get("provider", "")).strip()
     if provider != "openai_compatible":
-        raise ModelConfigError(f"不支持的 model.provider：{provider or '空'}", provider=provider)
+        raise ModelConfigError(
+            f"不支持的 model.provider：{provider or '空'}",
+            provider=provider,
+            details={"field_path": "model.provider", "provider": provider},
+        )
 
     model_name = str(model_config.get("name", "")).strip()
     if not model_name:
-        raise ModelConfigError("缺少 model.name。", provider=provider)
+        raise ModelConfigError(
+            "缺少 model.name。",
+            provider=provider,
+            details={"field_path": "model.name", "provider": provider},
+        )
 
     base_url = str(model_config.get("base_url", "https://api.openai.com/v1")).strip()
     if not base_url:
         base_url = "https://api.openai.com/v1"
+    if not (base_url.startswith("http://") or base_url.startswith("https://")):
+        raise ModelConfigError(
+            "model.base_url 必须以 http:// 或 https:// 开头。",
+            provider=provider,
+            model_name=model_name,
+            details={
+                "field_path": "model.base_url",
+                "provider": provider,
+                "model_name": model_name,
+                "base_url": base_url,
+            },
+        )
     api_key_env = str(model_config.get("api_key_env", "OPENAI_API_KEY")).strip() or "OPENAI_API_KEY"
     timeout_seconds = _normalize_timeout_seconds(model_config.get("timeout_seconds"))
     return OpenAICompatibleModelAdapter(
@@ -328,6 +397,29 @@ def _normalize_timeout_seconds(raw_value: Any) -> int:
     return 30
 
 
+def _safe_model_error_details(details: dict[str, Any]) -> dict[str, Any]:
+    """清洗模型错误 details，避免把密钥或超长响应写进 trace。"""
+    safe_details: dict[str, Any] = {}
+    for key, value in details.items():
+        key_text = str(key)
+        if "key" in key_text.lower() and key_text != "api_key_env":
+            continue
+        if isinstance(value, str):
+            safe_details[key_text] = _truncate_text(value)
+        elif isinstance(value, (int, float, bool)) or value is None:
+            safe_details[key_text] = value
+        else:
+            safe_details[key_text] = _truncate_text(str(value))
+    return safe_details
+
+
+def _truncate_text(value: str, limit: int = 300) -> str:
+    """截断模型错误摘要，避免把大段响应写入 trace。"""
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "...[truncated]"
+
+
 def _required_string(raw_decision: dict[str, Any], field_name: str, adapter: OpenAICompatibleModelAdapter) -> str:
     """读取必填字符串字段。"""
     value = raw_decision.get(field_name)
@@ -336,6 +428,7 @@ def _required_string(raw_decision: dict[str, Any], field_name: str, adapter: Ope
             f"模型决策缺少必填字符串字段：{field_name}",
             provider=adapter.provider,
             model_name=adapter.model_name,
+            details=adapter._diagnostic_details(field_path=field_name),
         )
     return value.strip()
 
@@ -352,6 +445,7 @@ def _required_string_list(
             f"模型决策字段必须是字符串列表：{field_name}",
             provider=adapter.provider,
             model_name=adapter.model_name,
+            details=adapter._diagnostic_details(field_path=field_name),
         )
     normalized = [str(item).strip() for item in value if str(item).strip()]
     if not normalized:
@@ -359,6 +453,7 @@ def _required_string_list(
             f"模型决策字段不能为空：{field_name}",
             provider=adapter.provider,
             model_name=adapter.model_name,
+            details=adapter._diagnostic_details(field_path=field_name),
         )
     return normalized
 
@@ -371,6 +466,7 @@ def _required_tool_calls(raw_decision: dict[str, Any], adapter: OpenAICompatible
             "模型决策字段 tool_calls 必须是列表。",
             provider=adapter.provider,
             model_name=adapter.model_name,
+            details=adapter._diagnostic_details(field_path="tool_calls"),
         )
     tool_calls: list[PlannedToolCall] = []
     for index, item in enumerate(value, start=1):
@@ -379,6 +475,7 @@ def _required_tool_calls(raw_decision: dict[str, Any], adapter: OpenAICompatible
                 f"tool_calls[{index}] 必须是对象。",
                 provider=adapter.provider,
                 model_name=adapter.model_name,
+                details=adapter._diagnostic_details(field_path=f"tool_calls[{index}]", tool_call_index=index),
             )
         tool_name = str(item.get("tool_name", "")).strip()
         if tool_name not in ALLOWED_TOOL_NAMES:
@@ -386,6 +483,11 @@ def _required_tool_calls(raw_decision: dict[str, Any], adapter: OpenAICompatible
                 f"tool_calls[{index}] 使用了不支持的工具：{tool_name or '空'}",
                 provider=adapter.provider,
                 model_name=adapter.model_name,
+                details=adapter._diagnostic_details(
+                    field_path=f"tool_calls[{index}].tool_name",
+                    tool_call_index=index,
+                    tool_name=tool_name or "空",
+                ),
             )
         tool_input = item.get("tool_input")
         if not isinstance(tool_input, dict):
@@ -393,6 +495,11 @@ def _required_tool_calls(raw_decision: dict[str, Any], adapter: OpenAICompatible
                 f"tool_calls[{index}].tool_input 必须是对象。",
                 provider=adapter.provider,
                 model_name=adapter.model_name,
+                details=adapter._diagnostic_details(
+                    field_path=f"tool_calls[{index}].tool_input",
+                    tool_call_index=index,
+                    tool_name=tool_name,
+                ),
             )
         tool_calls.append(PlannedToolCall(tool_name=tool_name, tool_input=tool_input))
 
@@ -401,5 +508,6 @@ def _required_tool_calls(raw_decision: dict[str, Any], adapter: OpenAICompatible
             "模型决策至少需要包含一条 tool_call。",
             provider=adapter.provider,
             model_name=adapter.model_name,
+            details=adapter._diagnostic_details(field_path="tool_calls"),
         )
     return tool_calls

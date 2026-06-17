@@ -6,6 +6,11 @@ import sys
 from pathlib import Path
 from subprocess import run
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from config import build_settings
+from runner import execute_initial_run
+
 
 def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     output_root = tmp_path / "runs"
@@ -606,6 +611,48 @@ def test_cli_verify_failure_only_reflects_when_verification_is_missing(tmp_path:
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "reflect：已触发" in report_text
     assert "任务未配置 `verify_commands` 或 `verify_rules`" in report_text
+
+
+def test_report_shows_model_error_diagnostics_without_api_key_value(tmp_path: Path, monkeypatch) -> None:
+    output_root = tmp_path / "runs"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-test-key")
+    monkeypatch.delenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", raising=False)
+    settings = build_settings(
+        task="触发模型配置错误",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(output_root),
+        config_name="default",
+    )
+    config_data = {
+        "model": {
+            "provider": "openai_compatible",
+            "name": "demo-model",
+            "base_url": "bad-url",
+        }
+    }
+
+    run_dir = execute_initial_run(settings=settings, config_data=config_data)
+
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    failure_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision_failed")
+    assert failure_payload["error_type"] == "ModelConfigError"
+    assert failure_payload["field_path"] == "model.base_url"
+    assert failure_payload["base_url"] == "bad-url"
+    assert "secret-test-key" not in json.dumps(failure_payload, ensure_ascii=False)
+
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "## 失败诊断" in report_text
+    assert "模型错误类型：`ModelConfigError`" in report_text
+    assert "base_url：`bad-url`" in report_text
+    assert "secret-test-key" not in report_text
 
 
 def test_cli_uses_naive_recent_context_strategy_from_config(tmp_path: Path) -> None:

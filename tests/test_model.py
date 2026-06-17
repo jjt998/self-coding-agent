@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -81,8 +82,24 @@ def test_build_model_adapter_requires_api_key(monkeypatch) -> None:
         assert "OPENAI_API_KEY" in str(error)
         assert error.provider == "openai_compatible"
         assert error.model_name == "demo"
+        assert error.details["api_key_env"] == "OPENAI_API_KEY"
+        assert "test-key" not in json.dumps(error.details, ensure_ascii=False)
     else:
         raise AssertionError("missing API key should fail")
+
+
+def test_build_model_adapter_rejects_invalid_base_url(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    try:
+        build_model_adapter(
+            {"model": {"provider": "openai_compatible", "name": "demo", "base_url": "api.example.test/v1"}}
+        )
+    except ModelConfigError as error:
+        assert error.details["field_path"] == "model.base_url"
+        assert error.details["base_url"] == "api.example.test/v1"
+    else:
+        raise AssertionError("invalid base_url should fail")
 
 
 def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> None:
@@ -206,7 +223,7 @@ def test_openai_compatible_adapter_includes_reflect_feedback_constraints(monkeyp
     assert "必须在 rationale 或 planned_actions 中明确回应" in prompt_text
 
 
-def test_openai_compatible_adapter_raises_on_http_error(monkeypatch) -> None:
+def test_openai_compatible_adapter_raises_on_os_error(monkeypatch) -> None:
     def fake_urlopen(_request, timeout=None):
         raise OSError("network down")
 
@@ -225,8 +242,72 @@ def test_openai_compatible_adapter_raises_on_http_error(monkeypatch) -> None:
         adapter.decide(task="任务", task_type="general", context_snapshot=None, config_data={})
     except ModelRequestError as error:
         assert "模型请求失败" in str(error) or "network down" in str(error)
+        assert error.details["request_error_type"] == "OSError"
+        assert error.details["base_url"] == "https://example.test/v1"
+        assert error.details["timeout_seconds"] == 7
     else:
         raise AssertionError("HTTP failure should raise ModelRequestError")
+
+
+def test_openai_compatible_adapter_raises_on_http_status_error(monkeypatch) -> None:
+    def fake_urlopen(_request, timeout=None):
+        body = ("x" * 400).encode("utf-8")
+        raise HTTPError(
+            "https://example.test/v1/chat/completions",
+            429,
+            "Too Many Requests",
+            hdrs=None,
+            fp=_BytesBody(body),
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", raising=False)
+    monkeypatch.setattr(model_module, "urlopen", fake_urlopen)
+    adapter = OpenAICompatibleModelAdapter(
+        provider="openai_compatible",
+        model_name="demo-model",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+        timeout_seconds=7,
+    )
+
+    try:
+        adapter.decide(task="任务", task_type="general", context_snapshot=None, config_data={})
+    except ModelRequestError as error:
+        assert error.details["status_code"] == 429
+        assert error.details["response_excerpt"].endswith("...[truncated]")
+        assert len(error.details["response_excerpt"]) < 330
+    else:
+        raise AssertionError("HTTP status failure should raise ModelRequestError")
+
+
+def test_openai_compatible_adapter_raises_on_url_and_timeout_errors(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", raising=False)
+    adapter = OpenAICompatibleModelAdapter(
+        provider="openai_compatible",
+        model_name="demo-model",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+        timeout_seconds=7,
+    )
+
+    for raised_error, expected_type in [
+        (URLError("dns failed"), "URLError"),
+        (TimeoutError("slow"), "TimeoutError"),
+    ]:
+        monkeypatch.setattr(
+            model_module,
+            "urlopen",
+            lambda _request, timeout=None, error=raised_error: (_ for _ in ()).throw(error),
+        )
+        try:
+            adapter.decide(task="任务", task_type="general", context_snapshot=None, config_data={})
+        except ModelRequestError as error:
+            assert error.details["request_error_type"] == expected_type
+            assert error.details["timeout_seconds"] == 7
+        else:
+            raise AssertionError("request failure should raise ModelRequestError")
 
 
 def test_openai_compatible_adapter_rejects_invalid_response(monkeypatch) -> None:
@@ -239,16 +320,38 @@ def test_openai_compatible_adapter_rejects_invalid_response(monkeypatch) -> None
         timeout_seconds=7,
     )
 
-    for response_payload in [
-        {"choices": [{"message": {"content": "not json"}}]},
-        _openai_response({"summary": "少字段"}),
-        _openai_response({**_valid_decision(), "tool_calls": [{"tool_name": "unknown", "tool_input": {}}]}),
-        _openai_response({**_valid_decision(), "tool_calls": [{"tool_name": "search_text", "tool_input": "bad"}]}),
-    ]:
+    cases = [
+        ({"choices": [{"message": {"content": "not json"}}]}, "choices[0].message.content", None),
+        (_openai_response({"summary": "少字段"}), "rationale", None),
+        (
+            _openai_response({**_valid_decision(), "tool_calls": [{"tool_name": "unknown", "tool_input": {}}]}),
+            "tool_calls[1].tool_name",
+            1,
+        ),
+        (
+            _openai_response(
+                {**_valid_decision(), "tool_calls": [{"tool_name": "search_text", "tool_input": "bad"}]}
+            ),
+            "tool_calls[1].tool_input",
+            1,
+        ),
+    ]
+    for case in cases:
+        response_payload, field_path, tool_index = case
         monkeypatch.setenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", json.dumps(response_payload, ensure_ascii=False))
         try:
             adapter.decide(task="任务", task_type="general", context_snapshot=None, config_data={})
-        except ModelResponseError:
-            pass
+        except ModelResponseError as error:
+            assert error.details["field_path"] == field_path
+            if tool_index is not None:
+                assert error.details["tool_call_index"] == tool_index
         else:
             raise AssertionError("invalid model response should raise ModelResponseError")
+
+
+class _BytesBody:
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+    def read(self) -> bytes:
+        return self.body

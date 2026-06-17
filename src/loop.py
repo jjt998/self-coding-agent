@@ -327,6 +327,7 @@ class LoopOrchestrator:
             "model_name": error.model_name,
             "error_type": type(error).__name__,
             "error_message": str(error),
+            **error.details,
         }
         self.trace_writer.write_event(TraceEvent(event_type="model_decision_failed", payload=payload))
         runtime_state.stop_reason = StopReason(
