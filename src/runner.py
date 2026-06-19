@@ -366,8 +366,7 @@ def _build_phase_4_report(
     verification_status = "通过" if verification_result and verification_result.passed else "未通过"
     verification_summary = verification_result.summary if verification_result else "尚未生成验证结果。"
     context_snapshot = runtime_state.context_snapshot
-    progress_status = "是" if runtime_state.progress_made else "否"
-    observation_summary = runtime_state.observation_summary or "尚未生成进展观察结果。"
+    observation_summary = runtime_state.observation_summary or "尚未生成反思事实摘要。"
     changed_file_lines = [
         f"- `{path}`"
         for path in runtime_state.changed_files
@@ -375,19 +374,18 @@ def _build_phase_4_report(
     changed_files_summary = "\n".join(changed_file_lines) if changed_file_lines else "- 暂无变更文件。"
 
     reflect_feedback = runtime_state.reflect_feedback
-    reflect_constraints = reflect_feedback.get("replan_constraints", {}) if reflect_feedback else {}
-    if not isinstance(reflect_constraints, dict):
-        reflect_constraints = {}
-    reflect_failed_checks = reflect_constraints.get("failed_check_names", [])
-    reflect_focus = reflect_constraints.get("must_address", [])
-    reflect_sequence = reflect_constraints.get("avoid_exact_tool_sequence", [])
     if reflect_feedback:
+        observation = reflect_feedback.get("observation", {})
+        if not isinstance(observation, dict):
+            observation = {}
+        signals = reflect_feedback.get("signals", [])
+        failed_tools = reflect_feedback.get("failed_tools", [])
         reflect_feedback_summary = (
             f"- trigger: `{reflect_feedback.get('trigger', 'unknown')}`\n"
-            f"- failure reason: `{reflect_constraints.get('failure_reason', '')}`\n"
-            f"- failing checks: `{', '.join(str(item) for item in reflect_failed_checks) or 'none'}`\n"
-            f"- suggested focus: `{', '.join(str(item) for item in reflect_focus) or 'none'}`\n"
-            f"- avoid exact tool sequence: `{', '.join(str(item) for item in reflect_sequence) or 'none'}`"
+            f"- signals: `{', '.join(str(item) for item in signals) or 'none'}`\n"
+            f"- changed files: `{', '.join(str(item) for item in observation.get('changed_files', [])) or 'none'}`\n"
+            f"- failed tool count: `{observation.get('failed_tool_count', 0)}`\n"
+            f"- failed tools: `{', '.join(str(item.get('tool_name', 'unknown')) for item in failed_tools if isinstance(item, dict)) or 'none'}`"
         )
     else:
         reflect_feedback_summary = "- 未生成反思反馈。"
@@ -510,11 +508,10 @@ def _build_phase_4_report(
         f"- stop reason 说明：{stop_reason_text}\n"
         f"\n## 失败诊断\n\n"
         f"{failure_diagnostic_summary}\n"
-        f"\n## 进展观察\n\n"
-        f"- 是否观察到进展：{progress_status}\n"
+        f"\n## 反思事实摘要\n\n"
         f"- 变更文件数：`{len(runtime_state.changed_files)}`\n"
         f"- 失败工具数：`{runtime_state.failed_tool_count}`\n"
-        f"- 观察摘要：{observation_summary}\n"
+        f"- 事实摘要：{observation_summary}\n"
         f"{changed_files_summary}\n"
         f"\n## 反思反馈\n\n"
         f"{reflect_feedback_summary}\n"

@@ -521,7 +521,7 @@
         <article class="card model">
           <span class="tag">loop</span>
           <h3>多轮求解</h3>
-          <p>进入最多 <code>runtime.max_steps</code> 轮的 plan / act / observe / verify 循环。</p>
+          <p>进入 harness 内部最多 <code>runtime.max_steps</code> 轮的 plan / act / reflect / verify 循环；轮数预算不进入模型请求。</p>
         </article>
         <article class="card verify">
           <span class="tag">finalize</span>
@@ -603,25 +603,27 @@
     }
   },
   "runtime_feedback": {
-    "iteration": 2,
-    "previous_observation": "上一轮是否有进展",
-    "recent_tool_results": [
-      {
-        "tool_name": "read_file",
-        "path": "todo_app.py",
-        "line_count": 120,
-        "content_excerpt": "候选源码片段",
-        "excerpt_reason": "old_text_not_found_candidate"
-      },
-      {
-        "tool_name": "apply_patch",
-        "path": "todo_app.py",
-        "error": "old_text_not_found",
-        "failed_old_text_excerpt": "失败的 old_text 摘要"
-      }
-    ],
-    "previous_verification": "上一轮失败检查",
-    "previous_reflect_feedback": "上一轮反思约束",
+    "previous_reflect": {
+      "observation": "上一轮工具事实摘要",
+      "signals": ["failed_tool_observed"],
+      "recent_tool_results": [
+        {
+          "tool_name": "read_file",
+          "path": "todo_app.py",
+          "line_count": 120,
+          "content_excerpt": "候选源码片段",
+          "excerpt_reason": "old_text_not_found_candidate"
+        },
+        {
+          "tool_name": "apply_patch",
+          "path": "todo_app.py",
+          "error": "old_text_not_found",
+          "failed_old_text_excerpt": "失败的 old_text 摘要"
+        }
+      ],
+      "verification": "上一轮失败检查"
+    },
+    "previous_verification": "兼容保留的上一轮验证结果",
     "previous_cross_round_plan": "上一轮模型给出的跨轮安排"
   },
   "decision_schema": {
@@ -809,9 +811,9 @@
             <p>按 <code>tool_calls</code> 依次执行 <code>read_file</code>、<code>apply_patch</code>、<code>run_command</code>、<code>git_diff</code>。</p>
           </article>
           <article class="card state">
-            <span class="tag">observe</span>
-            <h3>进展观察</h3>
-            <p>根据本轮工具结果判断是否有文件变更或成功编辑，写入 <code>progress_observed</code>。</p>
+            <span class="tag">reflect</span>
+            <h3>事实压缩</h3>
+            <p>每轮 <code>act</code> 后固定执行，写入 <code>reflect_feedback</code>，只保真压缩事实和轻量 signals。</p>
           </article>
           <article class="card verify">
             <span class="tag">verify</span>
@@ -819,9 +821,9 @@
             <p>执行 <code>verify_commands</code> 和 <code>verify_rules</code>，写入 <code>verification_result</code>。</p>
           </article>
           <article class="card model">
-            <span class="tag">reflect</span>
-            <h3>反思反馈</h3>
-            <p>无进展或验证失败时写入 <code>reflect_feedback</code>，下一轮进入 <code>runtime_feedback</code>。</p>
+            <span class="tag">next plan</span>
+            <h3>事实回灌</h3>
+            <p>验证失败且仍有预算时，上一轮事实通过 <code>runtime_feedback.previous_reflect</code> 进入下一轮 plan。</p>
           </article>
         </div>
         <aside class="loop-note">
@@ -850,8 +852,8 @@
           <p><code>tool_called</code> 和 <code>tool_result</code> 显示实际执行了什么，以及是否 <code>ok</code>。</p>
         </article>
         <article class="mini">
-          <h3>进展判断</h3>
-          <p><code>progress_observed</code> 根据 <code>apply_patch.ok</code> 和 <code>git_diff.changed_file_count</code> 判断是否有真实进展。</p>
+          <h3>反思事实</h3>
+          <p><code>reflect_feedback</code> 记录工具结果、失败工具、变更文件和 signals；harness 不判断上一轮是否“有效”。</p>
         </article>
         <article class="mini risk-box">
           <h3>验证失败</h3>
@@ -859,7 +861,7 @@
         </article>
         <article class="mini">
           <h3>反思输入</h3>
-          <p><code>reflect_feedback</code> 进入下一轮 <code>runtime_feedback.previous_reflect_feedback</code>。</p>
+          <p><code>reflect_feedback</code> 进入下一轮 <code>runtime_feedback.previous_reflect</code>；模型看不到当前轮数、剩余轮数或最大轮数。</p>
         </article>
       </div>
     </section>

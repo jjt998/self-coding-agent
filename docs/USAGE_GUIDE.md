@@ -149,4 +149,6 @@ comparison 产物包含：
 - 不支持 `rule_based` provider。
 - CLI 单次运行暂不支持直接传入 `verify_commands` / `verify_rules`。
 - 默认 `runtime.max_steps = 2`，暂不开放更高预算。
+- `runtime.max_steps` 只由 harness 内部使用；模型请求不会看到当前轮数、剩余轮数或最大轮数。
+- 第二轮及后续模型只通过 `runtime_feedback.previous_reflect` 接收上一轮事实压缩，并通过 `previous_cross_round_plan` 接收上一轮跨轮安排。
 - 回归测试不依赖真实外网模型，使用 fake model 环境。

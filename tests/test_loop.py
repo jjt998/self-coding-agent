@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import loop as loop_module
 from config import build_settings
-from model import ModelDecision, ModelResponseError, PlannedToolCall
+from model import ModelDecision, PlannedToolCall
 from trace import TraceWriter
 from verify import VerificationCheck, VerificationResult
 
@@ -66,18 +66,20 @@ def _fake_model_response(tool_calls: list[dict] | None = None) -> str:
 
 
 def _constraint_aware_rationale(runtime_feedback: dict | None, *, repeat_reason: bool = True) -> str:
-    """为测试 fake 模型生成可通过 reflect 硬约束校验的说明文本。"""
-    reflect_feedback = (runtime_feedback or {}).get("previous_reflect_feedback", {})
-    constraints = reflect_feedback.get("replan_constraints", {}) if isinstance(reflect_feedback, dict) else {}
-    if not constraints:
+    """为测试 fake 模型生成会读取事实型 reflect 的说明文本。"""
+    reflect_feedback = (runtime_feedback or {}).get("previous_reflect", {})
+    if not reflect_feedback:
         return "首轮执行常规计划。"
     parts = [
-        str(constraints.get("failure_reason", "")),
-        " ".join(str(item) for item in constraints.get("failed_check_names", [])),
-        " ".join(str(item) for item in constraints.get("must_address", [])),
+        " ".join(str(item) for item in reflect_feedback.get("signals", [])),
+        " ".join(
+            str(check.get("name", ""))
+            for check in (reflect_feedback.get("verification", {}) or {}).get("checks", [])
+            if isinstance(check, dict) and not check.get("passed")
+        ),
     ]
     suffix = "，再次重复相同工具序列是因为测试需要保持同一工具计划。" if repeat_reason else ""
-    return "回应 reflect 约束：" + " ".join(item for item in parts if item).strip() + suffix
+    return "读取 previous_reflect 事实：" + " ".join(item for item in parts if item).strip() + suffix
 
 
 def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path: Path, monkeypatch) -> None:
@@ -136,8 +138,8 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
     )
 
     assert runtime_state.reflect_triggered is True
-    assert runtime_state.reflect_trigger_reason == "verification_failed"
-    assert runtime_state.reflect_count == 1
+    assert runtime_state.reflect_trigger_reason == "after_act"
+    assert runtime_state.reflect_count == 2
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.VERIFICATION_FAILED
     assert runtime_state.stop_reason.details["verification_failure"]["failing_check_names"] == ["说明文件可读"]
@@ -146,12 +148,11 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
         "analyze",
         "plan",
         "act",
-        "observe",
-        "verify",
         "reflect",
+        "verify",
         "plan",
         "act",
-        "observe",
+        "reflect",
         "verify",
         "finalize",
     ]
@@ -171,12 +172,11 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
         "analyze",
         "plan",
         "act",
-        "observe",
-        "verify",
         "reflect",
+        "verify",
         "plan",
         "act",
-        "observe",
+        "reflect",
         "verify",
         "finalize",
     ]
@@ -220,10 +220,9 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
         "run_command",
         "git_diff",
     ]
-    assert runtime_state.progress_made is True
     assert runtime_state.changed_files == ["run_evidence.md"]
     assert runtime_state.failed_tool_count == 0
-    assert runtime_state.reflect_triggered is False
+    assert runtime_state.reflect_triggered is True
     assert runtime_state.iteration_count == 1
     assert runtime_state.max_steps == 2
     assert runtime_state.completed_states == [
@@ -231,7 +230,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
         "analyze",
         "plan",
         "act",
-        "observe",
+        "reflect",
         "verify",
         "finalize",
     ]
@@ -253,10 +252,10 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert raw_response_payload["parsed_ok"] is True
     assert raw_response_payload["content_length"] == len(raw_response_payload["content"])
     assert json.loads(raw_response_payload["content"])["planned_actions"] == ["执行模型工具计划"]
-    progress_payload = next(event["payload"] for event in trace_events if event["event_type"] == "progress_observed")
-    assert progress_payload["progress_made"] is True
-    assert progress_payload["changed_files"] == ["run_evidence.md"]
-    assert progress_payload["failed_tool_count"] == 0
+    assert not any(event["event_type"] == "progress_observed" for event in trace_events)
+    reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback")
+    assert reflect_payload["observation"]["changed_files"] == ["run_evidence.md"]
+    assert reflect_payload["observation"]["failed_tool_count"] == 0
     ingest_payload = next(event["payload"] for event in trace_events if event["event_type"] == "task_ingested")
     assert ingest_payload["task"] == settings.task
     assert ingest_payload["task_type"] == settings.task_type
@@ -273,10 +272,9 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert ingest_payload["model_name"] == "demo-model"
     finalize_payload = next(event["payload"] for event in trace_events if event["event_type"] == "finalize_summary")
     assert finalize_payload["verification_passed"] is True
-    assert finalize_payload["progress_made"] is True
     assert finalize_payload["changed_files"] == ["run_evidence.md"]
     assert finalize_payload["failed_tool_count"] == 0
-    assert finalize_payload["reflect_count"] == 0
+    assert finalize_payload["reflect_count"] == 1
     assert finalize_payload["iteration_count"] == 1
     assert finalize_payload["max_steps"] == 2
     assert finalize_payload["tool_execution_count"] == 5
@@ -295,13 +293,13 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
         "analyze",
         "plan",
         "act",
-        "observe",
+        "reflect",
         "verify",
         "finalize",
     ]
 
 
-def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path, monkeypatch) -> None:
+def test_default_reflect_records_read_only_round_without_no_diff_signal(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
@@ -344,13 +342,12 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
         config_data=_model_config(),
     )
 
-    assert runtime_state.progress_made is False
     assert runtime_state.changed_files == []
     assert runtime_state.failed_tool_count == 0
     assert runtime_state.reflect_triggered is True
-    assert runtime_state.reflect_trigger_reason == "no_progress_after_observe"
+    assert runtime_state.reflect_trigger_reason == "after_act"
     assert runtime_state.reflect_count == 2
-    assert runtime_state.reflect_trigger_reasons == ["no_progress_after_observe", "no_progress_after_observe"]
+    assert runtime_state.reflect_trigger_reasons == ["after_act", "after_act"]
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.VERIFICATION_FAILED
     assert runtime_state.completed_states == [
@@ -358,12 +355,10 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
         "analyze",
         "plan",
         "act",
-        "observe",
         "reflect",
         "verify",
         "plan",
         "act",
-        "observe",
         "reflect",
         "verify",
         "finalize",
@@ -373,17 +368,12 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
         for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    progress_payloads = [event["payload"] for event in trace_events if event["event_type"] == "progress_observed"]
-    progress_payload = progress_payloads[0]
-    assert len(progress_payloads) == 2
-    assert progress_payload["progress_made"] is False
-    assert progress_payload["changed_files"] == []
-    assert progress_payload["failed_tool_count"] == 0
+    assert not any(event["event_type"] == "progress_observed" for event in trace_events)
     reflect_payloads = [event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback"]
-    assert reflect_payloads[0]["trigger"] == "no_progress_after_observe"
-    assert reflect_payloads[0]["replan_constraints"]["failure_reason"] == "no_progress_after_observe"
-    assert "produce_observable_file_change" in reflect_payloads[0]["replan_constraints"]["must_address"]
-    assert reflect_payloads[0]["replan_constraints"]["failed_check_names"] == []
+    assert reflect_payloads[0]["trigger"] == "after_act"
+    assert reflect_payloads[0]["signals"] == []
+    assert reflect_payloads[0]["observation"]["changed_files"] == []
+    assert reflect_payloads[0]["observation"]["failed_tool_count"] == 0
     transition_targets = [
         event["payload"]["to_state"]
         for event in trace_events
@@ -394,12 +384,10 @@ def test_default_reflect_triggers_when_observe_finds_no_progress(tmp_path: Path,
         "analyze",
         "plan",
         "act",
-        "observe",
         "reflect",
         "verify",
         "plan",
         "act",
-        "observe",
         "reflect",
         "verify",
         "finalize",
@@ -568,7 +556,7 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
         model_name = "fake-replan-model"
 
         def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect_feedback"))
+            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect"))
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -630,8 +618,8 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert runtime_state.iteration_count == 2
-    assert runtime_state.reflect_count == 1
-    assert runtime_state.reflect_trigger_reasons == ["verification_failed"]
+    assert runtime_state.reflect_count == 2
+    assert runtime_state.reflect_trigger_reasons == ["after_act", "after_act"]
     assert verification_calls["count"] == 2
 
     trace_events = [
@@ -649,18 +637,17 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
         "analyze",
         "plan",
         "act",
-        "observe",
-        "verify",
         "reflect",
+        "verify",
         "plan",
         "act",
-        "observe",
+        "reflect",
         "verify",
         "finalize",
     ]
     run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
     assert run_finished_payload["stop_reason"]["details"]["iteration_count"] == 2
-    assert run_finished_payload["stop_reason"]["details"]["reflect_count"] == 1
+    assert run_finished_payload["stop_reason"]["details"]["reflect_count"] == 2
 
 
 def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> None:
@@ -675,7 +662,7 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
 
         def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
             feedbacks.append(runtime_feedback or {})
-            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect_feedback"))
+            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect"))
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -738,19 +725,16 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert len(feedbacks) == 2
     assert feedbacks[0] == {}
-    assert feedbacks[1]["iteration"] == 2
-    assert feedbacks[1]["previous_observation"]["progress_made"] is True
+    assert "iteration" not in feedbacks[1]
+    assert "remaining_iterations" not in feedbacks[1]
+    assert "max_steps" not in feedbacks[1]
     assert feedbacks[1]["previous_verification"]["passed"] is False
-    assert feedbacks[1]["previous_reflect_feedback"]["trigger"] == "verification_failed"
-    assert feedbacks[1]["previous_reflect_feedback"]["verification_failure"]["failing_check_names"] == ["fake_verify"]
-    assert feedbacks[1]["previous_reflect_feedback"]["replan_constraints"]["failure_reason"] == "verification_failed"
-    assert feedbacks[1]["previous_reflect_feedback"]["replan_constraints"]["failed_check_names"] == ["fake_verify"]
-    assert feedbacks[1]["previous_reflect_feedback"]["replan_constraints"]["avoid_exact_tool_sequence"] == [
-        "apply_patch",
-        "git_diff",
-    ]
-    assert "fix_failing_verification_checks" in feedbacks[1]["previous_reflect_feedback"]["replan_constraints"]["must_address"]
-    assert feedbacks[1]["recent_tool_results"][0]["tool_name"] == "apply_patch"
+    assert "iteration" not in feedbacks[1]["previous_reflect"]
+    assert "iteration" not in feedbacks[1]["previous_reflect"]["observation"]
+    assert feedbacks[1]["previous_reflect"]["trigger"] == "after_act"
+    assert feedbacks[1]["previous_reflect"]["verification"]["passed"] is False
+    assert feedbacks[1]["previous_reflect"]["verification"]["checks"][0]["name"] == "fake_verify"
+    assert feedbacks[1]["previous_reflect"]["recent_tool_results"][0]["tool_name"] == "apply_patch"
 
     trace_events = [
         json.loads(line)
@@ -758,13 +742,11 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
         if line.strip()
     ]
     reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback")
-    assert reflect_payload["trigger"] == "verification_failed"
-    assert reflect_payload["verification_failure"]["failing_check_names"] == ["fake_verify"]
-    assert reflect_payload["replan_constraints"]["failure_reason"] == "verification_failed"
+    assert reflect_payload["trigger"] == "after_act"
+    assert reflect_payload["verification"] == {}
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
     assert model_decision_payloads[0]["has_reflect_feedback"] is False
     assert model_decision_payloads[1]["has_reflect_feedback"] is True
-    assert model_decision_payloads[1]["reflect_feedback_summary"]["failure_reason"] == "verification_failed"
     assert model_decision_payloads[1]["reflect_feedback_summary"]["failed_check_names"] == ["fake_verify"]
     raw_response_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_raw_response"]
     assert [payload["iteration"] for payload in raw_response_payloads] == [1, 2]
@@ -884,8 +866,9 @@ def test_runtime_feedback_includes_read_file_excerpt_after_old_text_not_found(
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert len(feedbacks) == 2
     second_feedback = feedbacks[1]
+    previous_reflect = second_feedback["previous_reflect"]
     read_summary = next(
-        item for item in second_feedback["recent_tool_results"] if item["tool_name"] == "read_file"
+        item for item in previous_reflect["recent_tool_results"] if item["tool_name"] == "read_file"
     )
     assert read_summary["path"] == "todo_app.py"
     assert read_summary["line_count"] == 9
@@ -895,24 +878,21 @@ def test_runtime_feedback_includes_read_file_excerpt_after_old_text_not_found(
     assert 'status = "todo" if task.get("done") else "done"' in read_summary["content_excerpt"]
 
     patch_summary = next(
-        item for item in second_feedback["recent_tool_results"] if item["tool_name"] == "apply_patch"
+        item for item in previous_reflect["recent_tool_results"] if item["tool_name"] == "apply_patch"
     )
     assert patch_summary["path"] == "todo_app.py"
     assert patch_summary["error"] == "old_text_not_found"
     assert 'status = "[done]" if task["done"] else "[todo]"' in patch_summary["failed_old_text_excerpt"]
     assert 'status = "done" if task.get("done") else "todo"' in patch_summary["new_text_excerpt"]
 
-    constraints = second_feedback["previous_reflect_feedback"]["replan_constraints"]
-    assert "use_exact_old_text_from_read_file" in constraints["must_address"]
-    failed_tool = constraints["failed_tools"][0]
+    assert "previous_reflect_feedback" not in second_feedback
+    assert "replan_constraints" not in previous_reflect
+    failed_tool = previous_reflect["failed_tools"][0]
     assert failed_tool["error"] == "old_text_not_found"
     assert failed_tool["failed_old_text_excerpt"] == patch_summary["failed_old_text_excerpt"]
-    assert "下一轮必须依据最近 read_file 片段复制真实 old_text，不要猜测源码。" in second_feedback[
-        "previous_reflect_feedback"
-    ]["suggested_focus"]
 
 
-def _run_reflect_constraint_case(
+def _run_factual_reflect_feedback_case(
     tmp_path: Path,
     monkeypatch,
     *,
@@ -929,7 +909,7 @@ def _run_reflect_constraint_case(
         model_name = "fake-reflect-constraint-model"
 
         def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect_feedback"))
+            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect"))
             if has_reflect_feedback:
                 tool_calls = [
                     PlannedToolCall(
@@ -983,7 +963,7 @@ def _run_reflect_constraint_case(
     monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
     monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
     settings = build_settings(
-        task="检查 reflect 约束",
+        task="检查 reflect 事实反馈",
         task_type="general",
         repo_root=str(repo_root),
         output_root=str(tmp_path / "runs"),
@@ -1006,8 +986,8 @@ def _run_reflect_constraint_case(
     return runtime_state, trace_events
 
 
-def test_second_plan_continues_when_reflect_constraints_are_only_partially_acknowledged(tmp_path: Path, monkeypatch) -> None:
-    runtime_state, trace_events = _run_reflect_constraint_case(
+def test_second_plan_continues_with_factual_reflect_feedback(tmp_path: Path, monkeypatch) -> None:
+    runtime_state, trace_events = _run_factual_reflect_feedback_case(
         tmp_path,
         monkeypatch,
         second_rationale="忽略上一轮失败，直接继续。",
@@ -1019,11 +999,11 @@ def test_second_plan_continues_when_reflect_constraints_are_only_partially_ackno
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
     assert model_decision_payloads[1]["has_reflect_feedback"] is True
-    assert model_decision_payloads[1]["reflect_constraints_acknowledged"] is True
+    assert "reflect_constraints_acknowledged" not in model_decision_payloads[1]
 
 
-def test_second_plan_allows_repeated_failed_tool_sequence_within_budget(tmp_path: Path, monkeypatch) -> None:
-    runtime_state, trace_events = _run_reflect_constraint_case(
+def test_second_plan_does_not_emit_repeated_sequence_constraint_event(tmp_path: Path, monkeypatch) -> None:
+    runtime_state, trace_events = _run_factual_reflect_feedback_case(
         tmp_path,
         monkeypatch,
         second_rationale="回应 verification_failed、fake_verify 和 fix_failing_verification_checks。",
@@ -1033,52 +1013,11 @@ def test_second_plan_allows_repeated_failed_tool_sequence_within_budget(tmp_path
 
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
-    repeated_payload = next(event["payload"] for event in trace_events if event["event_type"] == "repeated_failed_tool_sequence")
-    assert repeated_payload["repeat_count"] == 1
-    assert repeated_payload["allowed_repeat_count"] == 3
+    assert not any(event["event_type"] == "repeated_failed_tool_sequence" for event in trace_events)
 
 
-def test_repeated_failed_tool_sequence_blocks_after_three_retries(tmp_path: Path) -> None:
-    run_dir = tmp_path / "runs"
-    run_dir.mkdir()
-    trace_writer = TraceWriter(run_dir=run_dir)
-    trace_writer.initialize({})
-    orchestrator = loop_module.LoopOrchestrator(trace_writer=trace_writer)
-    runtime_state = loop_module.RuntimeState(task="repeat", task_type="general")
-    runtime_state.repeated_failed_tool_sequence_count = 3
-    model_decision = ModelDecision(
-        provider="openai_compatible",
-        model_name="fake-repeat-model",
-        task_type="general",
-        summary="repeat",
-        rationale="没有解释",
-        planned_actions=["repeat"],
-        tool_calls=[
-            PlannedToolCall(tool_name="read_file", tool_input={"path": "README.md"}),
-        ],
-    )
-    runtime_feedback = {
-        "previous_reflect_feedback": {
-            "replan_constraints": {
-                "avoid_exact_tool_sequence": ["read_file"],
-            }
-        }
-    }
-
-    try:
-        orchestrator._validate_reflect_constraints_acknowledged(
-            model_decision=model_decision,
-            runtime_feedback=runtime_feedback,
-            runtime_state=runtime_state,
-        )
-    except ModelResponseError as error:
-        assert "重复了上一轮失败工具序列" in str(error)
-    else:
-        raise AssertionError("fourth repeated failed tool sequence should fail")
-
-
-def test_second_plan_can_repeat_failed_tool_sequence_with_explanation(tmp_path: Path, monkeypatch) -> None:
-    runtime_state, trace_events = _run_reflect_constraint_case(
+def test_second_plan_can_repeat_tool_sequence_without_harness_hard_constraint(tmp_path: Path, monkeypatch) -> None:
+    runtime_state, trace_events = _run_factual_reflect_feedback_case(
         tmp_path,
         monkeypatch,
         second_rationale=(
@@ -1093,7 +1032,7 @@ def test_second_plan_can_repeat_failed_tool_sequence_with_explanation(tmp_path: 
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
     assert model_decision_payloads[1]["has_reflect_feedback"] is True
-    assert model_decision_payloads[1]["reflect_constraints_acknowledged"] is True
+    assert "reflect_constraints_acknowledged" not in model_decision_payloads[1]
 
 
 def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, monkeypatch) -> None:

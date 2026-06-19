@@ -215,7 +215,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     "content": (
                         "你是本地代码任务 harness 的决策层。"
                         "必须只返回 JSON 对象，不要 Markdown。"
-                        "JSON 字段必须包含 summary、rationale、planned_actions、tool_calls。"
+                        "JSON 字段必须包含 summary、rationale、planned_actions、cross_round_plan、tool_calls。"
                         "tool_calls 里的 tool_name 只能是 search_text、read_file、apply_patch、run_command、git_diff，"
                         "tool_input 必须是对象。"
                         "工具参数必须严格遵守 user message 里的 tool_schema；"
@@ -225,11 +225,10 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                 {
                     "role": "system",
                     "content": (
-                        "重规划硬约束：当 runtime_feedback.previous_reflect_feedback 存在时，"
-                        "下一轮 plan 必须在 rationale 或 planned_actions 中明确回应 "
-                        "replan_constraints.failure_reason、failed_check_names、must_address。"
-                        "除非 rationale 明确说明重复原因，否则不得重复 "
-                        "replan_constraints.avoid_exact_tool_sequence 中完全相同的失败工具序列。"
+                        "runtime_feedback.previous_reflect 是上一轮工具、diff、失败工具和验证结果的事实压缩。"
+                        "runtime_feedback.previous_cross_round_plan 是上一轮模型留下的跨轮安排。"
+                        "harness 只负责保真压缩事实，不替你判断上一轮是否有效；"
+                        "你需要在 rationale 中自行解释这些事实，并据此重规划当前轮 tool_calls。"
                     ),
                 },
                 {
@@ -239,6 +238,8 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "planned_actions 只写本轮 tool_calls 实际会执行的动作；"
                         "跨轮安排和下一轮意图写入 cross_round_plan；"
                         "tool_calls 是唯一执行源。"
+                        "在 Windows CLI 任务中，默认让 ASCII stdout/stderr 使用纯 ASCII 文本，"
+                        "除非任务明确要求 Unicode；避免 emoji、全角符号和非必要中文输出。"
                     ),
                 },
                 {

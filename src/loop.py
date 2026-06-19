@@ -21,7 +21,6 @@ class AgentState(str, Enum):
     ANALYZE = "analyze"
     PLAN = "plan"
     ACT = "act"
-    OBSERVE = "observe"
     REFLECT = "reflect"
     VERIFY = "verify"
     FINALIZE = "finalize"
@@ -62,14 +61,12 @@ class RuntimeState:
     current_state: str = "bootstrap"
     completed_states: list[str] = field(default_factory=list)
     step_count: int = 0
-    no_progress_count: int = 0
     reflect_triggered: bool = False
     reflect_trigger_reason: str = ""
     reflect_count: int = 0
     reflect_trigger_reasons: list[str] = field(default_factory=list)
     reflect_feedback: dict[str, Any] = field(default_factory=dict)
     reflect_feedback_history: list[dict[str, Any]] = field(default_factory=list)
-    repeated_failed_tool_sequence_count: int = 0
     current_iteration: int = 0
     iteration_count: int = 0
     max_steps: int = 4
@@ -80,7 +77,6 @@ class RuntimeState:
     cross_round_plan_history: list[list[str]] = field(default_factory=list)
     tool_executions: list[ToolExecution] = field(default_factory=list)
     recent_tool_executions: list[ToolExecution] = field(default_factory=list)
-    progress_made: bool = False
     changed_files: list[str] = field(default_factory=list)
     failed_tool_count: int = 0
     observation_summary: str = ""
@@ -106,7 +102,6 @@ class LoopOrchestrator:
         """执行最小多轮求解 loop，并返回最终运行态。"""
         runtime_state = RuntimeState(task=settings.task, task_type=settings.task_type)
         runtime_state.max_steps = self._get_max_steps(config_data=config_data)
-        reflect_strategy = self._get_reflect_strategy(config_data=config_data)
         context_builder = ContextBuilder(
             repo_root=settings.repo_root,
             strategy_config=config_data.get("context", {}),
@@ -133,9 +128,8 @@ class LoopOrchestrator:
         for iteration in range(1, runtime_state.max_steps + 1):
             runtime_state.current_iteration = iteration
             runtime_state.iteration_count = iteration
-            reflected_this_iteration = False
 
-            for state in [AgentState.PLAN, AgentState.ACT, AgentState.OBSERVE]:
+            for state in [AgentState.PLAN, AgentState.ACT]:
                 try:
                     self._execute_state(
                         state=state,
@@ -152,21 +146,16 @@ class LoopOrchestrator:
                     self._finish_with_model_error(runtime_state=runtime_state, error=error)
                     return runtime_state
 
-            if self._should_reflect_after_observe(
+            self._record_reflect_trigger(runtime_state=runtime_state, reason="after_act")
+            self._execute_state(
+                state=AgentState.REFLECT,
+                settings=settings,
                 runtime_state=runtime_state,
-                reflect_strategy=reflect_strategy,
-            ):
-                self._record_reflect_trigger(runtime_state=runtime_state, reason="no_progress_after_observe")
-                self._execute_state(
-                    state=AgentState.REFLECT,
-                    settings=settings,
-                    runtime_state=runtime_state,
-                    config_data=config_data,
-                    context_builder=context_builder,
-                    memory_manager=memory_manager,
-                    tool_runner=tool_runner,
-                )
-                reflected_this_iteration = True
+                config_data=config_data,
+                context_builder=context_builder,
+                memory_manager=memory_manager,
+                tool_runner=tool_runner,
+            )
 
             self._execute_state(
                 state=AgentState.VERIFY,
@@ -184,22 +173,6 @@ class LoopOrchestrator:
             if runtime_state.verification_result and not runtime_state.verification_result.passed:
                 stop_code = StopReasonCode.VERIFICATION_FAILED
                 stop_message = "验证失败，run 已停止。"
-
-            has_next_iteration = iteration < runtime_state.max_steps
-            if has_next_iteration and not reflected_this_iteration and self._should_reflect_after_verify(
-                runtime_state=runtime_state,
-                reflect_strategy=reflect_strategy,
-            ):
-                self._record_reflect_trigger(runtime_state=runtime_state, reason="verification_failed")
-                self._execute_state(
-                    state=AgentState.REFLECT,
-                    settings=settings,
-                    runtime_state=runtime_state,
-                    config_data=config_data,
-                    context_builder=context_builder,
-                    memory_manager=memory_manager,
-                    tool_runner=tool_runner,
-                )
 
         self._execute_state(
             state=AgentState.FINALIZE,
@@ -279,7 +252,6 @@ class LoopOrchestrator:
             "reflect_trigger_reasons": list(runtime_state.reflect_trigger_reasons),
             "verification_passed": verification_passed,
             "verification_failure": self._build_verification_failure_details(runtime_state=runtime_state),
-            "progress_made": runtime_state.progress_made,
             "changed_files": runtime_state.changed_files,
             "failed_tool_count": runtime_state.failed_tool_count,
             "reflect_feedback": dict(runtime_state.reflect_feedback),
@@ -301,29 +273,12 @@ class LoopOrchestrator:
                 return 2
         return 2
 
-    def _should_reflect_after_observe(self, runtime_state: RuntimeState, reflect_strategy: str) -> bool:
-        """判断 observe 后是否需要因为无进展触发 reflect。"""
-        return (
-            reflect_strategy == "low_progress_plus_verify_reflect"
-            and runtime_state.progress_made is False
-        )
-
-    def _should_reflect_after_verify(self, runtime_state: RuntimeState, reflect_strategy: str) -> bool:
-        """判断 verify 失败后是否需要触发 reflect。"""
-        return (
-            runtime_state.verification_result is not None
-            and not runtime_state.verification_result.passed
-            and reflect_strategy in {"verify_failure_only_reflect", "low_progress_plus_verify_reflect"}
-        )
-
     def _record_reflect_trigger(self, runtime_state: RuntimeState, reason: str) -> None:
-        """记录一次 reflect 触发，同时保留旧的单值字段兼容 eval。"""
+        """记录一次固定 reflect，同时保留旧的单值字段兼容 eval。"""
         runtime_state.reflect_triggered = True
         runtime_state.reflect_trigger_reason = reason
         runtime_state.reflect_trigger_reasons.append(reason)
         runtime_state.reflect_count += 1
-        if reason == "no_progress_after_observe":
-            runtime_state.no_progress_count += 1
 
     def _finish_with_model_error(self, runtime_state: RuntimeState, error: ModelError) -> None:
         """把模型决策失败收口成稳定 stop reason，并立即结束 run。"""
@@ -374,7 +329,7 @@ class LoopOrchestrator:
         runtime_state.current_state = to_state.value
 
     def _build_runtime_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """给下一轮 plan 提供上一轮执行反馈，避免模型盲目重复同一计划。"""
+        """给下一轮 plan 提供事实型反馈，不暴露轮数预算。"""
         if runtime_state.current_iteration <= 1 and not runtime_state.verification_result:
             return {}
         verification_payload = (
@@ -383,94 +338,48 @@ class LoopOrchestrator:
             else {}
         )
         return {
-            "iteration": runtime_state.current_iteration,
-            "remaining_iterations": max(runtime_state.max_steps - runtime_state.current_iteration + 1, 0),
-            "previous_observation": {
-                "progress_made": runtime_state.progress_made,
-                "changed_files": list(runtime_state.changed_files),
-                "failed_tool_count": runtime_state.failed_tool_count,
-                "summary": runtime_state.observation_summary,
-            },
+            "previous_reflect": self._build_previous_reflect(runtime_state=runtime_state),
             "previous_verification": verification_payload,
-            "previous_reflect_feedback": self._build_previous_reflect_feedback(runtime_state=runtime_state),
             "previous_cross_round_plan": list(runtime_state.cross_round_plan),
-            "recent_tool_results": [
-                self._summarize_tool_execution(
-                    execution=execution,
-                    recent_executions=runtime_state.recent_tool_executions,
-                )
-                for execution in runtime_state.recent_tool_executions
-            ],
         }
 
-    def _build_previous_reflect_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """返回最近一次 reflect 反馈，并补齐下一轮 plan 必须响应的约束。"""
+    def _build_previous_reflect(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """返回上一轮 reflect 事实，并把最新验证事实合并进去。"""
         if not runtime_state.reflect_feedback:
             return {}
         feedback = dict(runtime_state.reflect_feedback)
-        feedback["replan_constraints"] = self._build_replan_constraints(runtime_state=runtime_state)
+        feedback.pop("iteration", None)
+        observation = feedback.get("observation")
+        if isinstance(observation, dict):
+            sanitized_observation = dict(observation)
+            sanitized_observation.pop("iteration", None)
+            feedback["observation"] = sanitized_observation
+        feedback["verification"] = (
+            runtime_state.verification_result.to_dict()
+            if runtime_state.verification_result
+            else {}
+        )
         return feedback
 
-    def _build_replan_constraints(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """把最近失败证据压缩成模型可直接消费的重规划约束。"""
-        verification_failure = self._build_verification_failure_details(runtime_state=runtime_state)
-        failed_check_names = list(verification_failure.get("failing_check_names", []))
-        failed_tools = [
-            self._summarize_tool_execution(
-                execution=execution,
-                recent_executions=runtime_state.recent_tool_executions,
-            )
-            for execution in runtime_state.recent_tool_executions
-            if execution.tool_output.get("ok") is False
-            or (execution.tool_name == "run_command" and execution.tool_output.get("returncode", 0) != 0)
-        ]
-        previous_tool_sequence = [execution.tool_name for execution in runtime_state.recent_tool_executions]
-        suggested_tools: list[str] = []
-        if not runtime_state.progress_made:
-            suggested_tools.extend(["apply_patch", "git_diff"])
-        if failed_check_names:
-            suggested_tools.extend(["read_file", "apply_patch", "run_command", "git_diff"])
-        if failed_tools:
-            suggested_tools.append("run_command")
-
-        trigger = runtime_state.reflect_trigger_reason or "unknown"
-        if trigger == "no_progress_after_observe":
-            failure_reason = "no_progress_after_observe"
-        elif failed_check_names:
-            failure_reason = "verification_failed"
-        elif failed_tools:
-            failure_reason = "tool_failed"
-        else:
-            failure_reason = trigger
-
-        return {
-            "failure_reason": failure_reason,
-            "must_address": self._build_suggested_focus(
-                runtime_state=runtime_state,
-                verification_failure=verification_failure,
-                failed_tool_summaries=failed_tools,
-            ),
-            "avoid_exact_tool_sequence": previous_tool_sequence,
-            "failed_check_names": failed_check_names,
-            "failed_tools": failed_tools,
-            "suggested_focus_files": list(runtime_state.changed_files),
-            "suggested_tools": list(dict.fromkeys(suggested_tools)),
-        }
-
     def _summarize_reflect_feedback_for_trace(self, runtime_feedback: dict[str, Any]) -> dict[str, Any]:
-        """让 model_decision trace 保持精简，同时暴露重规划证据。"""
-        reflect_feedback = runtime_feedback.get("previous_reflect_feedback", {})
+        """让 model_decision trace 保持精简，同时暴露上一轮事实反馈。"""
+        reflect_feedback = runtime_feedback.get("previous_reflect", {})
         if not isinstance(reflect_feedback, dict) or not reflect_feedback:
             return {}
-        constraints = reflect_feedback.get("replan_constraints", {})
-        if not isinstance(constraints, dict):
-            constraints = {}
+        verification = reflect_feedback.get("verification", {})
+        failing_checks: list[str] = []
+        if isinstance(verification, dict):
+            failing_checks = [
+                str(check.get("name", "")).strip()
+                for check in verification.get("checks", [])
+                if isinstance(check, dict) and not bool(check.get("passed")) and str(check.get("name", "")).strip()
+            ]
         return {
             "trigger": reflect_feedback.get("trigger", ""),
-            "failure_reason": constraints.get("failure_reason", ""),
-            "failed_check_names": list(constraints.get("failed_check_names", [])),
-            "must_address": list(constraints.get("must_address", [])),
-            "avoid_exact_tool_sequence": list(constraints.get("avoid_exact_tool_sequence", [])),
+            "signals": list(reflect_feedback.get("signals", [])),
+            "changed_files": list((reflect_feedback.get("observation") or {}).get("changed_files", [])),
+            "failed_tool_count": (reflect_feedback.get("observation") or {}).get("failed_tool_count", 0),
+            "failed_check_names": failing_checks,
         }
 
     def _summarize_tool_execution(
@@ -612,141 +521,6 @@ class LoopOrchestrator:
             return text
         return text[:limit] + "...[truncated]"
 
-    def _validate_reflect_constraints_acknowledged(
-        self,
-        model_decision: ModelDecision,
-        runtime_feedback: dict[str, Any],
-        runtime_state: RuntimeState,
-    ) -> None:
-        """校验模型在重规划时确实响应了上一轮 reflect 硬约束。"""
-        reflect_feedback = runtime_feedback.get("previous_reflect_feedback", {})
-        if not isinstance(reflect_feedback, dict) or not reflect_feedback:
-            return
-        constraints = reflect_feedback.get("replan_constraints", {})
-        if not isinstance(constraints, dict) or not constraints:
-            return
-
-        decision_text = " ".join(
-            [
-                model_decision.rationale,
-                model_decision.summary,
-                " ".join(model_decision.planned_actions),
-            ]
-        ).lower()
-        missing_evidence = self._find_unacknowledged_reflect_constraints(
-            decision_text=decision_text,
-            constraints=constraints,
-            model_decision=model_decision,
-        )
-        if missing_evidence:
-            self.trace_writer.write_event(
-                TraceEvent(
-                    event_type="reflect_constraints_not_acknowledged",
-                    payload={
-                        "provider": model_decision.provider,
-                        "model_name": model_decision.model_name,
-                        "missing_evidence": list(missing_evidence),
-                        "tool_sequence": [tool_call.tool_name for tool_call in model_decision.tool_calls],
-                    },
-                )
-            )
-
-        previous_sequence = [
-            str(item).strip()
-            for item in constraints.get("avoid_exact_tool_sequence", [])
-            if str(item).strip()
-        ]
-        current_sequence = [tool_call.tool_name for tool_call in model_decision.tool_calls]
-        if previous_sequence and current_sequence == previous_sequence:
-            runtime_state.repeated_failed_tool_sequence_count += 1
-            self.trace_writer.write_event(
-                TraceEvent(
-                    event_type="repeated_failed_tool_sequence",
-                    payload={
-                        "provider": model_decision.provider,
-                        "model_name": model_decision.model_name,
-                        "tool_sequence": list(current_sequence),
-                        "repeat_count": runtime_state.repeated_failed_tool_sequence_count,
-                        "allowed_repeat_count": 3,
-                    },
-                )
-            )
-            rationale = model_decision.rationale.lower()
-            explanation_markers = [
-                "重复",
-                "相同",
-                "再次",
-                "仍需",
-                "继续",
-                "because",
-                "repeat",
-                "same",
-                "again",
-                "retry",
-            ]
-            if (
-                runtime_state.repeated_failed_tool_sequence_count > 3
-                and not any(marker in rationale for marker in explanation_markers)
-            ):
-                raise ModelResponseError(
-                    "模型重规划重复了上一轮失败工具序列，但 rationale 未解释重复原因。",
-                    provider=model_decision.provider,
-                    model_name=model_decision.model_name,
-                )
-        else:
-            runtime_state.repeated_failed_tool_sequence_count = 0
-
-    def _find_unacknowledged_reflect_constraints(
-        self,
-        decision_text: str,
-        constraints: dict[str, Any],
-        model_decision: ModelDecision,
-    ) -> list[str]:
-        """检查 failure reason、失败检查和关注点是否在模型计划中被回应。"""
-        missing: list[str] = []
-        planned_tool_names = [tool_call.tool_name for tool_call in model_decision.tool_calls]
-        has_edit_or_diff_plan = any(tool_name in {"apply_patch", "git_diff"} for tool_name in planned_tool_names)
-        suggested_tools = {
-            str(item).strip()
-            for item in constraints.get("suggested_tools", [])
-            if str(item).strip()
-        }
-        uses_suggested_tool = bool(suggested_tools.intersection(planned_tool_names))
-        failure_reason = str(constraints.get("failure_reason", "")).strip()
-        if (
-            failure_reason
-            and failure_reason.lower() not in decision_text
-            and not (failure_reason in {"no_progress_after_observe", "verification_failed"} and has_edit_or_diff_plan)
-        ):
-            missing.append(f"failure_reason={failure_reason}")
-
-        failed_check_names = [
-            str(item).strip()
-            for item in constraints.get("failed_check_names", [])
-            if str(item).strip()
-        ]
-        unmentioned_checks = [
-            check_name
-            for check_name in failed_check_names
-            if check_name.lower() not in decision_text
-        ]
-        if unmentioned_checks and not has_edit_or_diff_plan:
-            missing.append("failed_check_names=" + ",".join(unmentioned_checks))
-
-        must_address = [
-            str(item).strip()
-            for item in constraints.get("must_address", [])
-            if str(item).strip()
-        ]
-        unmentioned_focus = [
-            focus
-            for focus in must_address
-            if focus.lower() not in decision_text
-        ]
-        if unmentioned_focus and not (has_edit_or_diff_plan or uses_suggested_tool):
-            missing.append("must_address=" + ",".join(unmentioned_focus))
-        return missing
-
     def _run_state(
         self,
         state: AgentState,
@@ -757,7 +531,7 @@ class LoopOrchestrator:
         memory_manager: RuntimeMemoryManager,
         tool_runner: CoreToolRunner,
     ) -> dict[str, Any]:
-        """Route each state to a dedicated handler while preserving trace payloads."""
+        """把状态分发到独立处理器，同时保持 trace 载荷兼容。"""
         if state is AgentState.INGEST:
             return self._run_ingest(settings=settings, runtime_state=runtime_state, config_data=config_data)
         if state is AgentState.ANALYZE:
@@ -770,8 +544,6 @@ class LoopOrchestrator:
             return self._run_plan(runtime_state=runtime_state, config_data=config_data)
         if state is AgentState.ACT:
             return self._run_act(runtime_state=runtime_state, tool_runner=tool_runner)
-        if state is AgentState.OBSERVE:
-            return self._run_observe(runtime_state=runtime_state)
         if state is AgentState.REFLECT:
             return self._run_reflect(runtime_state=runtime_state)
         if state is AgentState.VERIFY:
@@ -786,7 +558,7 @@ class LoopOrchestrator:
         runtime_state: RuntimeState,
         config_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """Capture concrete run inputs before analysis starts."""
+        """在分析开始前记录本次运行的真实输入。"""
         model_config = config_data.get("model", {})
         if not isinstance(model_config, dict):
             model_config = {}
@@ -820,7 +592,7 @@ class LoopOrchestrator:
         context_builder: ContextBuilder,
         memory_manager: RuntimeMemoryManager,
     ) -> dict[str, Any]:
-        """Build memory and context evidence for model planning."""
+        """为模型规划构建 memory 和上下文证据。"""
         memory_query = memory_manager.build_query(
             task=runtime_state.task,
             task_type=runtime_state.task_type,
@@ -898,7 +670,7 @@ class LoopOrchestrator:
         }
 
     def _run_plan(self, runtime_state: RuntimeState, config_data: dict[str, Any]) -> dict[str, Any]:
-        """请求模型生成下一步工具计划，并校验 reflect 重规划约束。"""
+        """请求模型生成下一步工具计划，并记录上一轮事实反馈摘要。"""
         model_adapter = build_model_adapter(config_data=config_data)
         runtime_feedback = self._build_runtime_feedback(runtime_state=runtime_state)
         reflect_feedback_summary = self._summarize_reflect_feedback_for_trace(runtime_feedback=runtime_feedback)
@@ -934,11 +706,6 @@ class LoopOrchestrator:
                     },
                 )
             )
-        self._validate_reflect_constraints_acknowledged(
-            model_decision=runtime_state.model_decision,
-            runtime_feedback=runtime_feedback,
-            runtime_state=runtime_state,
-        )
         runtime_state.cross_round_plan = list(runtime_state.model_decision.cross_round_plan)
         runtime_state.cross_round_plan_history.append(list(runtime_state.model_decision.cross_round_plan))
         runtime_state.model_decisions.append(runtime_state.model_decision)
@@ -950,7 +717,6 @@ class LoopOrchestrator:
                     "iteration": runtime_state.current_iteration,
                     "has_reflect_feedback": bool(reflect_feedback_summary),
                     "reflect_feedback_summary": reflect_feedback_summary,
-                    "reflect_constraints_acknowledged": bool(reflect_feedback_summary),
                 },
             )
         )
@@ -964,7 +730,7 @@ class LoopOrchestrator:
         }
 
     def _run_act(self, runtime_state: RuntimeState, tool_runner: CoreToolRunner) -> dict[str, Any]:
-        """Execute the model-planned tool calls for the current iteration."""
+        """执行模型为当前轮规划的工具调用。"""
         self._active_iteration = runtime_state.current_iteration
         tool_calls = self._run_planned_tools(
             tool_runner=tool_runner,
@@ -977,12 +743,8 @@ class LoopOrchestrator:
             "tool_calls": [tool_call.to_trace_payload() for tool_call in tool_calls],
         }
 
-    def _run_observe(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """Interpret recent tool results as progress evidence."""
-        return self._observe_progress(runtime_state=runtime_state)
-
     def _run_reflect(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """Produce structured feedback for the next planning round."""
+        """为下一轮 plan 生成事实型反馈。"""
         reflect_feedback = self._build_reflect_feedback(runtime_state=runtime_state)
         runtime_state.reflect_feedback = reflect_feedback
         runtime_state.reflect_feedback_history.append(reflect_feedback)
@@ -995,7 +757,7 @@ class LoopOrchestrator:
         runtime_state: RuntimeState,
         config_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """Run task verification against the latest iteration's tool results."""
+        """基于最近一轮工具结果执行任务验证。"""
         verification_result = build_phase_4_verification(
             settings=settings,
             tool_executions=runtime_state.recent_tool_executions,
@@ -1015,13 +777,12 @@ class LoopOrchestrator:
         }
 
     def _run_finalize(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """Capture final runtime evidence before run_finished is emitted."""
+        """在写入 run_finished 前记录最终运行证据。"""
         verification_passed = bool(runtime_state.verification_result and runtime_state.verification_result.passed)
         payload = {
             "summary": "Final runtime evidence captured before run finish.",
             "final_status": "success" if verification_passed else "incomplete",
             "verification_passed": verification_passed,
-            "progress_made": runtime_state.progress_made,
             "changed_files": list(runtime_state.changed_files),
             "failed_tool_count": runtime_state.failed_tool_count,
             "reflect_count": runtime_state.reflect_count,
@@ -1165,13 +926,14 @@ class LoopOrchestrator:
         """返回当前工具调用所属轮次；工具 runner 本身不持有 runtime_state。"""
         return getattr(self, "_active_iteration", 0)
 
-    def _observe_progress(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """根据工具执行结果判断本轮是否已经产生真实进展。"""
+    def _build_tool_fact_observation(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """把本轮工具结果压缩成事实观察，不替模型判断是否有效。"""
         changed_files: list[str] = []
         successful_tools: list[str] = []
         failed_tools: list[dict[str, Any]] = []
         failed_execution_ids: set[int] = set()
-        apply_patch_succeeded = False
+        edit_attempted = False
+        latest_git_diff_changed_file_count: int | None = None
 
         for index, execution in enumerate(runtime_state.recent_tool_executions):
             tool_output = execution.tool_output
@@ -1179,11 +941,13 @@ class LoopOrchestrator:
 
             if ok is True:
                 successful_tools.append(execution.tool_name)
-                if execution.tool_name == "apply_patch":
-                    apply_patch_succeeded = True
+
+            if execution.tool_name == "apply_patch":
+                edit_attempted = True
 
             if execution.tool_name == "git_diff":
                 changed_file_count = int(tool_output.get("changed_file_count") or 0)
+                latest_git_diff_changed_file_count = changed_file_count
                 if changed_file_count > 0:
                     successful_tools.append(execution.tool_name)
                 for diff in tool_output.get("diffs", []):
@@ -1213,53 +977,66 @@ class LoopOrchestrator:
 
         changed_files = list(dict.fromkeys(changed_files))
         successful_tools = list(dict.fromkeys(successful_tools))
-        progress_made = bool(changed_files) or apply_patch_succeeded
         failed_tool_count = len(failed_execution_ids)
+        signals = self._build_reflect_signals(
+            edit_attempted=edit_attempted,
+            latest_git_diff_changed_file_count=latest_git_diff_changed_file_count,
+            failed_tool_count=failed_tool_count,
+        )
         observation_summary = self._build_observation_summary(
-            progress_made=progress_made,
             changed_files=changed_files,
             failed_tool_count=failed_tool_count,
             successful_tools=successful_tools,
+            signals=signals,
         )
 
-        runtime_state.progress_made = progress_made
         runtime_state.changed_files = changed_files
         runtime_state.failed_tool_count = failed_tool_count
         runtime_state.observation_summary = observation_summary
 
-        payload = {
+        return {
             "summary": observation_summary,
             "iteration": runtime_state.current_iteration,
-            "progress_made": progress_made,
             "changed_files": changed_files,
             "successful_tools": successful_tools,
             "failed_tools": failed_tools,
             "failed_tool_count": failed_tool_count,
+            "edit_attempted": edit_attempted,
+            "latest_git_diff_changed_file_count": latest_git_diff_changed_file_count,
+            "signals": signals,
         }
-        # 感觉这里和上游的state_result事件有点重复，但又不好合并，因为这个事件里有一些专门针对 observe 的字段，先保持分开，后续如果觉得冗余再调整。
-        self.trace_writer.write_event(TraceEvent(event_type="progress_observed", payload=payload))
-        return payload
+
+    def _build_reflect_signals(
+        self,
+        edit_attempted: bool,
+        latest_git_diff_changed_file_count: int | None,
+        failed_tool_count: int,
+    ) -> list[str]:
+        """生成轻量信号，只描述事实形态，不做进展好坏判断。"""
+        signals: list[str] = []
+        if edit_attempted and latest_git_diff_changed_file_count == 0:
+            signals.append("no_diff_after_edit_attempt")
+        if failed_tool_count > 0:
+            signals.append("failed_tool_observed")
+        return signals
 
     def _build_observation_summary(
         self,
-        progress_made: bool,
         changed_files: list[str],
         failed_tool_count: int,
         successful_tools: list[str],
+        signals: list[str],
     ) -> str:
-        """生成报告和 state_result 共用的进展观察摘要。"""
-        if progress_made:
-            return (
-                f"已观察到真实进展：变更文件 {len(changed_files)} 个，"
-                f"成功工具 {len(successful_tools)} 个，失败工具 {failed_tool_count} 个。"
-            )
+        """生成报告和 state_result 共用的事实观察摘要。"""
+        signal_text = "、".join(signals) if signals else "无"
         return (
-            f"未观察到文件变更或成功编辑进展；"
-            f"成功工具 {len(successful_tools)} 个，失败工具 {failed_tool_count} 个。"
+            f"本轮工具事实：变更文件 {len(changed_files)} 个，"
+            f"成功工具 {len(successful_tools)} 个，失败工具 {failed_tool_count} 个，"
+            f"signals={signal_text}。"
         )
 
     def _build_verification_failure_details(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """Extract stable details from the latest failed verification result."""
+        """从最近一次失败验证结果中提取稳定细节。"""
         verification_result = runtime_state.verification_result
         if not verification_result or verification_result.passed:
             return {}
@@ -1296,7 +1073,7 @@ class LoopOrchestrator:
         failing_checks: list[dict[str, Any]],
         verify_command_count: int,
     ) -> list[str]:
-        """Classify failed verify checks by stable rule family for stop reason details."""
+        """按稳定规则族分类失败的验证检查，用于 stop reason 细节。"""
         rule_types: list[str] = []
         for check in failing_checks:
             name = str(check.get("name", "")).strip()
@@ -1304,13 +1081,13 @@ class LoopOrchestrator:
                 continue
             if not name:
                 continue
-            # The rule type is not stored on checks yet; preserve a stable generic class.
+            # 当前 check 尚未保存规则类型，先保留稳定的通用分类。
             rule_types.append("verify_rule")
         return rule_types
 
     def _build_reflect_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """为下一轮 plan 生成结构化反思反馈。"""
-        verification_failure = self._build_verification_failure_details(runtime_state=runtime_state)
+        """为下一轮 plan 生成事实型 reflect 反馈。"""
+        observation = self._build_tool_fact_observation(runtime_state=runtime_state)
         failed_tool_summaries = [
             self._summarize_tool_execution(
                 execution=execution,
@@ -1320,53 +1097,24 @@ class LoopOrchestrator:
             if execution.tool_output.get("ok") is False
             or (execution.tool_name == "run_command" and execution.tool_output.get("returncode", 0) != 0)
         ]
-        suggested_focus: list[str] = []
-        if not runtime_state.progress_made:
-            suggested_focus.append("需要产生可观察的文件变更或成功编辑。")
-        if verification_failure.get("failing_check_names"):
-            suggested_focus.append("需要优先修复未通过的验证检查。")
-        if failed_tool_summaries:
-            suggested_focus.append("需要修复失败工具调用或命令返回码。")
-        if self._has_old_text_not_found_failure(failed_tool_summaries):
-            suggested_focus.append("下一轮必须依据最近 read_file 片段复制真实 old_text，不要猜测源码。")
-        if not suggested_focus:
-            suggested_focus.append("根据上一轮证据调整工具计划。")
+        recent_tool_results = [
+            self._summarize_tool_execution(
+                execution=execution,
+                recent_executions=runtime_state.recent_tool_executions,
+            )
+            for execution in runtime_state.recent_tool_executions
+        ]
 
         return {
-            "summary": "已生成结构化 reflect 反馈。",
+            "summary": "已生成事实型 reflect 反馈。",
             "iteration": runtime_state.current_iteration,
             "trigger": runtime_state.reflect_trigger_reason or "unknown",
-            "observation": {
-                "progress_made": runtime_state.progress_made,
-                "changed_files": list(runtime_state.changed_files),
-                "failed_tool_count": runtime_state.failed_tool_count,
-                "summary": runtime_state.observation_summary,
-            },
-            "verification_failure": verification_failure,
+            "observation": observation,
+            "signals": list(observation.get("signals", [])),
             "failed_tools": failed_tool_summaries,
-            "suggested_focus": suggested_focus,
-            "replan_constraints": self._build_replan_constraints(runtime_state=runtime_state),
+            "recent_tool_results": recent_tool_results,
+            "verification": {},
         }
-
-    def _build_suggested_focus(
-        self,
-        runtime_state: RuntimeState,
-        verification_failure: dict[str, Any],
-        failed_tool_summaries: list[dict[str, Any]],
-    ) -> list[str]:
-        """生成给模型消费的稳定重规划关注标签。"""
-        suggested_focus: list[str] = []
-        if not runtime_state.progress_made:
-            suggested_focus.append("produce_observable_file_change")
-        if verification_failure.get("failing_check_names"):
-            suggested_focus.append("fix_failing_verification_checks")
-        if failed_tool_summaries:
-            suggested_focus.append("fix_failed_tool_or_command")
-        if self._has_old_text_not_found_failure(failed_tool_summaries):
-            suggested_focus.append("use_exact_old_text_from_read_file")
-        if not suggested_focus:
-            suggested_focus.append("adjust_next_tool_plan_from_previous_evidence")
-        return suggested_focus
 
     def _has_old_text_not_found_failure(self, failed_tool_summaries: list[dict[str, Any]]) -> bool:
         """判断失败工具摘要里是否存在 old_text_not_found。"""

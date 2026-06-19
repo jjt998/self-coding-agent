@@ -188,7 +188,7 @@ def test_openai_compatible_adapter_includes_runtime_feedback(monkeypatch) -> Non
     assert "tool_schema" in user_payload
 
 
-def test_openai_compatible_adapter_includes_reflect_feedback_constraints(monkeypatch) -> None:
+def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch) -> None:
     captured = {}
 
     def fake_urlopen(request, timeout):
@@ -207,14 +207,13 @@ def test_openai_compatible_adapter_includes_reflect_feedback_constraints(monkeyp
     )
 
     runtime_feedback = {
-        "iteration": 2,
-        "previous_reflect_feedback": {
-            "trigger": "verification_failed",
-            "replan_constraints": {
-                "failure_reason": "verification_failed",
-                "avoid_exact_tool_sequence": ["read_file", "git_diff"],
-            },
+        "previous_reflect": {
+            "trigger": "after_act",
+            "signals": ["failed_tool_observed"],
+            "failed_tools": [{"tool_name": "apply_patch", "error": "old_text_not_found"}],
+            "verification": {"passed": False},
         },
+        "previous_cross_round_plan": ["先修复失败 patch，再运行验证"],
     }
     adapter.decide(
         task="Demo",
@@ -227,12 +226,14 @@ def test_openai_compatible_adapter_includes_reflect_feedback_constraints(monkeyp
     user_payload = json.loads(captured["body"]["messages"][-1]["content"])
     assert user_payload["runtime_feedback"] == runtime_feedback
     prompt_text = "\n".join(message["content"] for message in captured["body"]["messages"] if message["role"] == "system")
-    assert "runtime_feedback.previous_reflect_feedback" in prompt_text
-    assert "replan_constraints" in prompt_text
-    assert "avoid_exact_tool_sequence" in prompt_text
+    assert "runtime_feedback.previous_reflect" in prompt_text
+    assert "previous_cross_round_plan" in prompt_text
     assert "cross_round_plan" in prompt_text
-    assert "重规划硬约束" in prompt_text
-    assert "必须在 rationale 或 planned_actions 中明确回应" in prompt_text
+    assert "planned_actions" in prompt_text
+    assert "ASCII stdout/stderr" in prompt_text
+    assert "previous_reflect_feedback" not in prompt_text
+    assert "replan_constraints" not in prompt_text
+    assert "avoid_exact_tool_sequence" not in prompt_text
 
 
 def test_openai_compatible_adapter_rejects_tool_input_fields_not_declared_in_schema(monkeypatch) -> None:

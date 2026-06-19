@@ -353,51 +353,40 @@ memory_entry:
 - `analyze`：理解任务，并识别初始 repo 线索。
 - `plan`：在第一次行动前产出阶段性执行计划。
 - `act`：调用工具或执行修改。
-- `observe`：解释工具结果并更新 runtime memory。
-- `reflect`：分析低进展、验证失败或证据冲突。
+- `reflect`：每轮 `act` 后固定执行，保真压缩工具结果、diff 事实、失败工具和轻量 signals。
 - `verify`：运行验证检查。
 - `finalize`：输出最终状态、报告和可写入的 memory。
 
 ### 7.2 状态转移规则
 
 ```text
-ingest -> analyze -> plan -> act -> observe
+ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize
 
-observe -> act
-observe -> reflect
-observe -> verify
-
-verify -> finalize
-verify -> reflect
-
-reflect -> act
-reflect -> plan
-reflect -> finalize
+verify passed -> finalize
+verify failed and budget remains -> plan
+verify failed and budget exhausted -> finalize
 ```
 
 ### 7.3 Loop 不变量
 
 - 第一次 `act` 前必须先经过 `plan`。
 - 除非任务类型明确允许，否则 `finalize` 之前必须至少有一次 verify。
-- `reflect` 不是每一轮 loop 的固定步骤。
+- `reflect` 是每一轮 `act` 后的固定事实压缩步骤。
 - 每次工具调用都必须增加 `tool_call_count`。
 - 每次状态转移都必须写入 trace event。
 
-### 7.4 Reflect 触发条件
+### 7.4 Reflect 事实压缩
 
-- verify 失败。
-- 连续工具结果没有新信息。
-- 重复相同工具调用模式且没有状态变化。
-- 反复读相同文件或做相同搜索但没有新信号。
-- 工具结果与当前计划冲突。
-- 接近 step budget 或 tool-call budget。
+- harness 负责保真地压缩事实，LLM 负责解释事实并重规划。
+- 如果本轮有修改类工具且最新 `git_diff.changed_file_count == 0`，reflect 记录 `no_diff_after_edit_attempt`。
+- 如果本轮只有读取、搜索或其它信息收集工具，不产生 no-diff signal。
+- verify 失败结果会进入下一轮 `previous_reflect.verification`，但不再生成 `replan_constraints`、`must_address` 或 `avoid_exact_tool_sequence`。
 
-### 7.5 无进展规则
+### 7.5 模型可见预算
 
-- 连续三步没有新增候选文件、有效 diff 或更好的验证结果。
-- 连续两次代码修改后，验证结果没有改善。
-- 工具多次返回空结果且计划未更新。
-- 重复相同工具调用并得到相同输出。
+- `runtime.max_steps` 仍由 harness 内部控制最大求解轮数。
+- 模型请求里的 `runtime_feedback` 不暴露当前轮数、剩余轮数或最大轮数。
+- trace、report、stop reason 可继续记录轮数信息，供本地审计和诊断使用。
 
 ## 8. Context 架构
 
@@ -438,13 +427,11 @@ reflect -> finalize
 
 当前实现里，进入第二轮及后续 `plan` 的跨轮输入由 `runtime_feedback` 承载：
 
-- `previous_observation`：上一轮是否观察到进展、变更文件、失败工具数和观察摘要。
-- `recent_tool_results`：上一轮工具结果短摘要；`read_file` 会携带目标路径、行数和短源码片段，`apply_patch.old_text_not_found` 会携带失败 old_text 摘要。
+- `previous_reflect`：上一轮事实反馈，包含 observation、signals、failed_tools、recent_tool_results 和 verification。
 - `previous_verification`：上一轮验证结果和失败检查证据。
-- `previous_reflect_feedback`：上一轮反思反馈和 `replan_constraints`。
 - `previous_cross_round_plan`：上一轮模型给出的跨轮安排。
 
-这些字段共同组成下一轮模型的“运行上下文窗口”。其中 `recent_tool_results` 和 `previous_cross_round_plan` 是为了减少模型在第二轮继续猜测源码或忘记跨轮安排。
+这些字段共同组成下一轮模型的“运行上下文窗口”。其中 `previous_reflect.recent_tool_results` 和 `previous_cross_round_plan` 是为了减少模型在第二轮继续猜测源码或忘记跨轮安排；窗口中不会包含当前第几轮、还剩几轮或最大轮数。
 
 `memory_context`
 

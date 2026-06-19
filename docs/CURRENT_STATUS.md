@@ -10,6 +10,16 @@
 
 ## 当前情况
 
+- 最新 loop 形态已收敛为 `ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize`；独立 `observe` 状态、`progress_observed` 事件和 `progress_made` 进展判断已从当前链路中移除。
+- 每轮 `act` 后固定执行 `reflect`。reflect 只负责保真压缩事实：最近工具结果、失败工具、修改类工具尝试、最新 `git_diff` 结果、变更文件、失败工具数和轻量 `signals`。
+- 当本轮存在修改类工具且最新 `git_diff.changed_file_count == 0` 时，reflect 会记录 `no_diff_after_edit_attempt`；纯读取/搜索轮不会产生 no-diff signal。
+- 下一轮模型只接收事实型 `runtime_feedback.previous_reflect`、兼容保留的 `previous_verification` 和 `previous_cross_round_plan`；请求中不暴露当前轮数、剩余轮数或最大轮数。
+- verify 失败事实会进入下一轮 `previous_reflect.verification`，但不再生成 `replan_constraints`、`must_address` 或 `avoid_exact_tool_sequence`，也不再做 plan 后硬约束校验。
+- `planned_actions` 只描述本轮 `tool_calls` 实际会执行的动作；跨轮安排继续写入 `cross_round_plan` 并通过 `previous_cross_round_plan` 传给下一轮。
+- OpenAI compatible prompt 已加入原则：harness 负责保真地压缩事实，LLM 负责解释事实并重规划；Windows CLI 默认要求使用 ASCII stdout/stderr，除非任务明确要求 Unicode。
+
+> 说明：下面保留了 Phase 8/Phase 9 早期推进记录，其中部分段落描述的是历史状态；当前行为以上方最新条目为准。
+
 - `Phase 8` 已暂定完结，策略对比链路现在可以稳定产出 `summary.json` 与 `summary.md`。
 - comparison summary 已覆盖聚合指标 delta、failure taxonomy delta、verification failure delta、reflect trigger reason delta。
 - comparison summary 已覆盖 `task_deltas`，可按任务展开 outcome、passed、steps、tool calls、verify、reflect、reflect reason、failure taxonomy、failing checks、diagnostic labels 差异。

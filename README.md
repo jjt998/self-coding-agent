@@ -8,12 +8,12 @@
 
 - 单次任务运行：生成 `trace.jsonl`、`report.md`、`config_snapshot.json` 等运行产物。
 - OpenAI 兼容模型决策层：配置只支持 `openai_compatible`，默认使用 DeepSeek 的 OpenAI-compatible endpoint 和 `DEEPSEEK_API_KEY`。
-- 最小多轮 loop：默认 `runtime.max_steps = 2`，流程为 `ingest -> analyze -> (plan -> act -> observe -> verify/reflect)* -> finalize`。
+- 最小多轮 loop：默认 `runtime.max_steps = 2`，流程为 `ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize`。
 - 核心工具：`search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`。
-- 真实进展观察：基于 `apply_patch` 成功和 `git_diff` 变更判断是否有进展。
+- 反思事实压缩：每轮 `act` 后固定进入 `reflect`，记录工具结果、失败工具、diff 事实、轻量 signals 和验证事实；harness 不再判断“是否有进展”。
 - 任务级验证：支持 `verify_commands` 和结构化 `verify_rules`；未配置任务级验证时会以 `missing_task_verification` 失败，不再回退到演示型检查。
 - 结构化失败收口：支持 `setup_failed`、`verification_failed`、`model_error`、`max_steps_reached` 等 stop reason，并提供稳定 failure taxonomy。
-- Reflect feedback 重规划约束：下一轮模型计划必须回应上一轮失败证据，不能无解释重复失败工具序列。
+- Reflect feedback 事实输入：下一轮模型接收 `runtime_feedback.previous_reflect` 和 `previous_cross_round_plan`，由 LLM 自行解释事实并重规划；模型请求中不暴露当前轮数、剩余轮数或最大轮数。
 - 真实 loop 内核扫尾：当前代码不再保留 Phase 3 固定工具序列辅助函数，测试样例默认产物改为 `run_evidence.md`。
 - 模型返回日志：每次 plan 会在 `trace.jsonl` 写入 `model_raw_response`，记录模型显式返回的 JSON content，便于排查工具计划和 rationale。
 - 跨轮计划：模型响应支持 `cross_round_plan`，用于记录后续轮次安排；`planned_actions` 只描述本轮 `tool_calls` 实际会执行的动作。
@@ -132,6 +132,8 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
 - `verify_failure_only_reflect`
 - `high_weak_conflict_penalty`
 - `short_memory_summary`
+
+说明：当前 loop 已固定为每轮 `act` 后执行 `reflect`，`reflect.strategy` 仍会进入 eval/comparison 报告用于兼容旧配置命名，但不再决定“无进展才触发”或“验证失败才触发”的运行分支。
 
 ## 模型配置与排障
 
@@ -254,7 +256,7 @@ MVP 冻结验收命令见 `docs/MVP_ACCEPTANCE.md`。
 ## 当前限制
 
 - loop 已拆分为独立状态处理方法，并已清理旧 Phase 3 固定工具序列语义；后续仍需继续增强真实任务求解策略。
-- reflect feedback 已作为下一轮 plan 的硬约束；后续仍可继续增强反思策略质量。
+- reflect feedback 现在是下一轮 plan 的事实输入，不再作为 harness 硬约束；后续仍可继续增强事实压缩质量。
 - 默认最大求解轮数仍固定为 `2`，暂不开放更高预算。
 - CLI 暂不支持单次运行直接传入 `verify_commands` / `verify_rules`，该能力目前只在 eval task schema 中使用。
 

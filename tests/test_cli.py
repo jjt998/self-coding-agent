@@ -66,7 +66,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
         for event in trace_events
         if event["event_type"] == "state_transitioned"
     ]
-    assert transition_targets[:6] == ["ingest", "analyze", "plan", "act", "observe", "verify"]
+    assert transition_targets[:6] == ["ingest", "analyze", "plan", "act", "reflect", "verify"]
     assert transition_targets[-1] == "finalize"
     assert transition_targets.count("plan") >= 2
     assert transition_targets.count("verify") >= 2
@@ -110,11 +110,11 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert tool_results[4]["tool_output"]["changed_file_count"] == 1
     assert "run_evidence.md" in tool_results[4]["tool_output"]["diffs"][0]["path"]
 
-    progress_events = [event["payload"] for event in trace_events if event["event_type"] == "progress_observed"]
-    assert len(progress_events) >= 2
-    assert progress_events[0]["progress_made"] is True
-    assert progress_events[0]["changed_files"] == ["run_evidence.md"]
-    assert progress_events[0]["failed_tool_count"] == 0
+    reflect_events = [event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback"]
+    assert len(reflect_events) >= 2
+    assert reflect_events[0]["trigger"] == "after_act"
+    assert reflect_events[0]["observation"]["changed_files"] == ["run_evidence.md"]
+    assert reflect_events[0]["observation"]["failed_tool_count"] == 0
 
     verification_events = [event["payload"] for event in trace_events if event["event_type"] == "verification_result"]
     assert len(verification_events) >= 2
@@ -180,8 +180,10 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "## 模型返回摘要" in report_text
     assert "原始返回：见 `trace.jsonl` 中的 `model_raw_response` 事件。" in report_text
     assert "reflect：已触发" in report_text
-    assert "## 进展观察" in report_text
-    assert "是否观察到进展：是" in report_text
+    assert "## 反思事实摘要" in report_text
+    assert "变更文件数：`1`" in report_text
+    assert "失败工具数：`0`" in report_text
+    assert "事实摘要：" in report_text
     assert "## 上下文摘要" in report_text
     assert "`README.md`" in report_text
     assert "`LONG_GUIDE.md`" in report_text
@@ -737,12 +739,11 @@ def test_cli_verify_failure_only_reflects_when_verification_is_missing(tmp_path:
         "analyze",
         "plan",
         "act",
-        "observe",
-        "verify",
         "reflect",
+        "verify",
         "plan",
         "act",
-        "observe",
+        "reflect",
         "verify",
         "finalize",
     ]
@@ -751,7 +752,7 @@ def test_cli_verify_failure_only_reflects_when_verification_is_missing(tmp_path:
     assert verification_payload["details"]["verification_mode"] == "missing_task_verification"
     run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
     assert run_finished_payload["stop_reason"]["details"]["reflect_triggered"] is True
-    assert run_finished_payload["stop_reason"]["details"]["reflect_trigger_reason"] == "verification_failed"
+    assert run_finished_payload["stop_reason"]["details"]["reflect_trigger_reason"] == "after_act"
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "reflect：已触发" in report_text
