@@ -8,7 +8,7 @@ from typing import Any
 from context import ContextBuilder, ContextSnapshot
 from config import RunSettings
 from memory import RuntimeMemoryManager
-from model import ModelDecision, ModelError, ModelResponseError, build_model_adapter
+from model import ModelDecision, ModelError, ModelResponseError, TOOL_SCHEMAS, build_model_adapter
 from trace import TraceEvent, TraceWriter
 from tools import CoreToolRunner, ToolExecution
 from verify import VerificationResult, build_phase_4_verification
@@ -76,6 +76,8 @@ class RuntimeState:
     context_snapshot: ContextSnapshot | None = None
     model_decision: ModelDecision | None = None
     model_decisions: list[ModelDecision] = field(default_factory=list)
+    cross_round_plan: list[str] = field(default_factory=list)
+    cross_round_plan_history: list[list[str]] = field(default_factory=list)
     tool_executions: list[ToolExecution] = field(default_factory=list)
     recent_tool_executions: list[ToolExecution] = field(default_factory=list)
     progress_made: bool = False
@@ -145,7 +147,7 @@ class LoopOrchestrator:
                         tool_runner=tool_runner,
                     )
                 except ModelError as error:
-                    if state is not AgentState.PLAN:
+                    if state not in {AgentState.PLAN, AgentState.ACT}:
                         raise
                     self._finish_with_model_error(runtime_state=runtime_state, error=error)
                     return runtime_state
@@ -281,6 +283,7 @@ class LoopOrchestrator:
             "changed_files": runtime_state.changed_files,
             "failed_tool_count": runtime_state.failed_tool_count,
             "reflect_feedback": dict(runtime_state.reflect_feedback),
+            "cross_round_plan": list(runtime_state.cross_round_plan),
         }
 
     def _get_max_steps(self, config_data: dict[str, Any]) -> int:
@@ -390,6 +393,7 @@ class LoopOrchestrator:
             },
             "previous_verification": verification_payload,
             "previous_reflect_feedback": self._build_previous_reflect_feedback(runtime_state=runtime_state),
+            "previous_cross_round_plan": list(runtime_state.cross_round_plan),
             "recent_tool_results": [
                 self._summarize_tool_execution(
                     execution=execution,
@@ -935,6 +939,8 @@ class LoopOrchestrator:
             runtime_feedback=runtime_feedback,
             runtime_state=runtime_state,
         )
+        runtime_state.cross_round_plan = list(runtime_state.model_decision.cross_round_plan)
+        runtime_state.cross_round_plan_history.append(list(runtime_state.model_decision.cross_round_plan))
         runtime_state.model_decisions.append(runtime_state.model_decision)
         self.trace_writer.write_event(
             TraceEvent(
@@ -951,6 +957,7 @@ class LoopOrchestrator:
         return {
             "summary": runtime_state.model_decision.summary,
             "planned_actions": list(runtime_state.model_decision.planned_actions),
+            "cross_round_plan": list(runtime_state.model_decision.cross_round_plan),
             "rationale": runtime_state.model_decision.rationale,
             "provider": runtime_state.model_decision.provider,
             "model_name": runtime_state.model_decision.model_name,
@@ -1023,6 +1030,7 @@ class LoopOrchestrator:
             "max_steps": runtime_state.max_steps,
             "tool_execution_count": len(runtime_state.tool_executions),
             "model_decision_count": len(runtime_state.model_decisions),
+            "cross_round_plan": list(runtime_state.cross_round_plan),
             "completed_states_before_finalize": list(runtime_state.completed_states),
         }
         self.trace_writer.write_event(TraceEvent(event_type="finalize_summary", payload=payload))
@@ -1065,13 +1073,93 @@ class LoopOrchestrator:
         return executions
 
     def _normalize_tool_input(self, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-        """兼容真实模型常见参数别名，避免工具调用因字段名轻微差异直接崩溃。"""
+        """兼容常见参数别名，并拒绝结构化工具 schema 未声明的字段。"""
+        if tool_name not in TOOL_SCHEMAS:
+            raise ModelResponseError(f"未知工具：{tool_name}")
         normalized = dict(tool_input)
-        if tool_name in {"read_file", "apply_patch"} and "path" not in normalized and "file_path" in normalized:
-            normalized["path"] = normalized.pop("file_path")
-        if tool_name == "git_diff" and "paths" not in normalized and "file_paths" in normalized:
-            normalized["paths"] = normalized.pop("file_paths")
+        aliases = TOOL_SCHEMAS[tool_name].get("accepted_aliases", {})
+        if isinstance(aliases, dict):
+            for alias, canonical in aliases.items():
+                if alias in normalized and canonical not in normalized:
+                    normalized[canonical] = normalized.pop(alias)
+        allowed_fields = set(TOOL_SCHEMAS[tool_name].get("required", [])) | set(
+            TOOL_SCHEMAS[tool_name].get("optional", [])
+        )
+        extra_fields = sorted(field for field in normalized if field not in allowed_fields)
+        if extra_fields:
+            raise ModelResponseError(
+                f"模型工具计划给 {tool_name} 传入了未声明字段：{', '.join(extra_fields)}。"
+            )
+        missing_fields = [
+            field_name
+            for field_name in TOOL_SCHEMAS[tool_name].get("required", [])
+            if field_name not in normalized
+        ]
+        if missing_fields:
+            raise ModelResponseError(
+                f"模型工具计划给 {tool_name} 缺少必填字段：{', '.join(missing_fields)}。"
+            )
+        self._validate_tool_input_types(tool_name=tool_name, tool_input=normalized)
         return normalized
+
+    def _validate_tool_input_types(self, tool_name: str, tool_input: dict[str, Any]) -> None:
+        """在 act 前兜底校验工具入参类型，避免非法值打到工具层。"""
+        properties = TOOL_SCHEMAS[tool_name].get("properties", {})
+        if not isinstance(properties, dict):
+            return
+        for field_name, value in tool_input.items():
+            property_schema = properties.get(field_name, {})
+            if not isinstance(property_schema, dict):
+                continue
+            expected_type = property_schema.get("type")
+            if self._matches_tool_schema_type(
+                value=value,
+                expected_type=expected_type,
+                property_schema=property_schema,
+            ):
+                continue
+            raise ModelResponseError(
+                (
+                    f"模型工具计划给 {tool_name}.{field_name} 传入了错误类型："
+                    f"expected={self._format_expected_type(expected_type)} actual={type(value).__name__}。"
+                ),
+                details={
+                    "field_path": f"tool_input.{field_name}",
+                    "tool_name": tool_name,
+                    "expected_type": self._format_expected_type(expected_type),
+                    "actual_type": type(value).__name__,
+                },
+            )
+
+    def _matches_tool_schema_type(self, value: Any, expected_type: Any, property_schema: dict[str, Any]) -> bool:
+        """支持当前工具 schema 需要的最小 JSON 类型集合。"""
+        expected_types = expected_type if isinstance(expected_type, list) else [expected_type]
+        for item_type in expected_types:
+            if item_type == "string" and isinstance(value, str):
+                return True
+            if item_type == "integer" and isinstance(value, int) and not isinstance(value, bool):
+                return True
+            if item_type == "null" and value is None:
+                return True
+            if item_type == "array" and isinstance(value, list):
+                item_schema = property_schema.get("items", {})
+                if not isinstance(item_schema, dict) or "type" not in item_schema:
+                    return True
+                return all(
+                    self._matches_tool_schema_type(
+                        value=array_item,
+                        expected_type=item_schema.get("type"),
+                        property_schema=item_schema,
+                    )
+                    for array_item in value
+                )
+        return False
+
+    def _format_expected_type(self, expected_type: Any) -> str:
+        """把 schema 类型整理成稳定错误摘要。"""
+        if isinstance(expected_type, list):
+            return "|".join(str(item) for item in expected_type)
+        return str(expected_type)
 
     def _current_tool_iteration(self) -> int:
         """返回当前工具调用所属轮次；工具 runner 本身不持有 runtime_state。"""

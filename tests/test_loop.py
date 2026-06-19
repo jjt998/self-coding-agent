@@ -452,6 +452,64 @@ def test_loop_normalizes_common_tool_input_aliases(tmp_path: Path, monkeypatch) 
     assert runtime_state.tool_executions[0].tool_input == {"path": "README.md"}
 
 
+def test_loop_stops_with_model_error_when_tool_input_has_extra_field(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-invalid-tool-schema-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="fake decision",
+                rationale="错误地给 read_file 传入 limit。",
+                planned_actions=["读取 README.md"],
+                tool_calls=[
+                    PlannedToolCall(tool_name="read_file", tool_input={"path": "README.md", "limit": 20}),
+                ],
+            )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    settings = build_settings(
+        task="读取 README",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_rules=[{"type": "file_exists", "name": "README exists", "path": "README.md"}],
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MODEL_ERROR
+    assert runtime_state.tool_executions == []
+    trace_events = [
+        json.loads(line)
+        for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    failed_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision_failed")
+    assert failed_payload["error_type"] == "ModelResponseError"
+    assert "read_file" in failed_payload["error_message"]
+    assert "limit" in failed_payload["error_message"]
+
+
 def test_loop_accepts_string_run_command_from_model(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -1216,3 +1274,77 @@ def test_loop_model_error_includes_safe_raw_response_excerpt_for_invalid_tool_ca
     assert "response_excerpt" in failure_payload
     assert "非法工具计划" in failure_payload["response_excerpt"]
     assert "secret-test-key" not in json.dumps(failure_payload, ensure_ascii=False)
+
+
+def test_second_plan_receives_previous_cross_round_plan(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+    feedbacks: list[dict] = []
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-cross-round-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="fake decision",
+                rationale=_constraint_aware_rationale(runtime_feedback),
+                planned_actions=["本轮执行可观察文件修改"],
+                cross_round_plan=["如果验证失败，下一轮读取 README.md 后继续修复。"],
+                tool_calls=[
+                    PlannedToolCall(
+                        tool_name="apply_patch",
+                        tool_input={"path": "run_evidence.md", "old_text": None, "new_text": "# Run Evidence\n"},
+                    ),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["run_evidence.md"]}),
+                ],
+            )
+
+    verify_calls = {"count": 0}
+
+    def fake_verification(*, settings, tool_executions):
+        verify_calls["count"] += 1
+        passed = verify_calls["count"] >= 2
+        return VerificationResult(
+            passed=passed,
+            summary="ok" if passed else "fail",
+            checks=[VerificationCheck(name="fake_verify", passed=passed, detail="fake")],
+            details={},
+        )
+
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+
+    settings = build_settings(
+        task="验证跨轮计划进入下一轮 feedback",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data={**_model_config(), "runtime": {"max_steps": 2}},
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    assert feedbacks[0] == {}
+    assert feedbacks[1]["previous_cross_round_plan"] == ["如果验证失败，下一轮读取 README.md 后继续修复。"]
+    trace_events = [
+        json.loads(line)
+        for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
+    assert model_decision_payloads[0]["cross_round_plan"] == ["如果验证失败，下一轮读取 README.md 后继续修复。"]

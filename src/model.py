@@ -12,6 +12,56 @@ from env_loader import load_dotenv
 
 
 ALLOWED_TOOL_NAMES = {"search_text", "read_file", "apply_patch", "run_command", "git_diff"}
+TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
+    "search_text": {
+        "description": "在仓库文本文件中搜索精确字符串。",
+        "required": ["query"],
+        "optional": ["limit"],
+        "accepted_aliases": {},
+        "properties": {
+            "query": {"type": "string"},
+            "limit": {"type": "integer", "default": 20},
+        },
+    },
+    "read_file": {
+        "description": "读取仓库内单个 UTF-8 文本文件。",
+        "required": ["path"],
+        "optional": [],
+        "accepted_aliases": {"file_path": "path"},
+        "properties": {
+            "path": {"type": "string", "description": "仓库内相对路径。"},
+        },
+    },
+    "apply_patch": {
+        "description": "对仓库内文件执行一次文本替换；old_text 为 null 时创建或替换整个文件。",
+        "required": ["path", "old_text", "new_text"],
+        "optional": [],
+        "accepted_aliases": {"file_path": "path"},
+        "properties": {
+            "path": {"type": "string", "description": "仓库内相对路径。"},
+            "old_text": {"type": ["string", "null"], "description": "必须逐字匹配文件内容；新建文件时可为 null。"},
+            "new_text": {"type": "string"},
+        },
+    },
+    "run_command": {
+        "description": "在仓库根目录执行命令。",
+        "required": ["command"],
+        "optional": [],
+        "accepted_aliases": {},
+        "properties": {
+            "command": {"type": ["array", "string"], "description": "推荐 argv 数组；字符串命令也可兼容。"},
+        },
+    },
+    "git_diff": {
+        "description": "读取当前运行基线到现在的文本 diff。",
+        "required": [],
+        "optional": ["paths"],
+        "accepted_aliases": {"file_paths": "paths"},
+        "properties": {
+            "paths": {"type": "array", "items": {"type": "string"}},
+        },
+    },
+}
 
 
 class ModelError(Exception):
@@ -64,6 +114,7 @@ class ModelDecision:
     summary: str
     rationale: str
     planned_actions: list[str] = field(default_factory=list)
+    cross_round_plan: list[str] = field(default_factory=list)
     tool_calls: list[PlannedToolCall] = field(default_factory=list)
     raw_response_content: str = ""
     normalization_notes: list[dict[str, Any]] = field(default_factory=list)
@@ -167,9 +218,8 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "JSON 字段必须包含 summary、rationale、planned_actions、tool_calls。"
                         "tool_calls 里的 tool_name 只能是 search_text、read_file、apply_patch、run_command、git_diff，"
                         "tool_input 必须是对象。"
-                        "工具参数必须严格使用以下字段：search_text 使用 query 和可选 limit；"
-                        "read_file 使用 path；apply_patch 使用 path、old_text、new_text；"
-                        "run_command 使用 command；git_diff 使用可选 paths。"
+                        "工具参数必须严格遵守 user message 里的 tool_schema；"
+                        "不要给工具传入 tool_schema 未声明的字段。"
                     ),
                 },
                 {
@@ -183,6 +233,15 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     ),
                 },
                 {
+                    "role": "system",
+                    "content": (
+                        "请严格遵守 user message 中的 decision_schema："
+                        "planned_actions 只写本轮 tool_calls 实际会执行的动作；"
+                        "跨轮安排和下一轮意图写入 cross_round_plan；"
+                        "tool_calls 是唯一执行源。"
+                    ),
+                },
+                {
                     "role": "user",
                     "content": json.dumps(
                         {
@@ -190,6 +249,18 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                             "task_type": task_type,
                             "context_snapshot": context_payload,
                             "runtime_feedback": runtime_feedback or {},
+                            "decision_schema": {
+                                "summary": "字符串：本轮决策摘要。",
+                                "rationale": "字符串：解释为什么本轮这样安排。",
+                                "planned_actions": [
+                                    "字符串列表：只能描述本轮 tool_calls 实际会执行的动作。"
+                                ],
+                                "cross_round_plan": [
+                                    "字符串列表：跨轮安排、后续轮次意图、暂不执行的计划。"
+                                ],
+                                "tool_calls": "数组：唯一会被 act 阶段实际执行的工具调用。",
+                            },
+                            "tool_schema": TOOL_SCHEMAS,
                         },
                         ensure_ascii=False,
                     ),
@@ -353,6 +424,11 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             raw_decision=raw_decision,
             tool_calls=tool_calls,
         )
+        cross_round_plan, cross_round_notes = _normalize_optional_string_list(
+            raw_decision=raw_decision,
+            field_name="cross_round_plan",
+        )
+        normalization_notes.extend(cross_round_notes)
         return ModelDecision(
             provider=self.provider,
             model_name=self.model_name,
@@ -360,6 +436,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             summary=summary,
             rationale=rationale,
             planned_actions=planned_actions,
+            cross_round_plan=cross_round_plan,
             tool_calls=tool_calls,
             raw_response_content=raw_response_content,
             normalization_notes=normalization_notes,
@@ -439,6 +516,14 @@ def _safe_model_error_details(details: dict[str, Any]) -> dict[str, Any]:
             safe_details[key_text] = _truncate_text(value)
         elif isinstance(value, (int, float, bool)) or value is None:
             safe_details[key_text] = value
+        elif isinstance(value, list) and all(
+            isinstance(item, (str, int, float, bool)) or item is None
+            for item in value
+        ):
+            safe_details[key_text] = [
+                _truncate_text(item) if isinstance(item, str) else item
+                for item in value
+            ]
         else:
             safe_details[key_text] = _truncate_text(str(value))
     return safe_details
@@ -487,6 +572,72 @@ def _required_string_list(
             details=adapter._diagnostic_details(field_path=field_name),
         )
     return normalized
+
+
+def _validate_tool_input_types(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    adapter: OpenAICompatibleModelAdapter,
+    tool_call_index: int,
+) -> None:
+    """按工具 schema 校验入参类型，避免非法值进入工具执行层。"""
+    properties = TOOL_SCHEMAS[tool_name].get("properties", {})
+    if not isinstance(properties, dict):
+        return
+    for field_name, value in tool_input.items():
+        property_schema = properties.get(field_name, {})
+        if not isinstance(property_schema, dict):
+            continue
+        expected_type = property_schema.get("type")
+        if _matches_json_schema_type(value=value, expected_type=expected_type, property_schema=property_schema):
+            continue
+        raise ModelResponseError(
+            (
+                f"tool_calls[{tool_call_index}].tool_input.{field_name} 类型不符合工具 schema："
+                f"expected={_format_expected_type(expected_type)} actual={type(value).__name__}。"
+            ),
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+            details=adapter._diagnostic_details(
+                field_path=f"tool_calls[{tool_call_index}].tool_input.{field_name}",
+                tool_call_index=tool_call_index,
+                tool_name=tool_name,
+                expected_type=_format_expected_type(expected_type),
+                actual_type=type(value).__name__,
+            ),
+        )
+
+
+def _matches_json_schema_type(value: Any, expected_type: Any, property_schema: dict[str, Any]) -> bool:
+    """支持当前工具 schema 需要的最小 JSON 类型集合。"""
+    expected_types = expected_type if isinstance(expected_type, list) else [expected_type]
+    for item_type in expected_types:
+        if item_type == "string" and isinstance(value, str):
+            return True
+        if item_type == "integer" and isinstance(value, int) and not isinstance(value, bool):
+            return True
+        if item_type == "null" and value is None:
+            return True
+        if item_type == "array" and isinstance(value, list):
+            item_schema = property_schema.get("items", {})
+            if not isinstance(item_schema, dict) or "type" not in item_schema:
+                return True
+            return all(
+                _matches_json_schema_type(
+                    value=array_item,
+                    expected_type=item_schema.get("type"),
+                    property_schema=item_schema,
+                )
+                for array_item in value
+            )
+    return False
+
+
+def _format_expected_type(expected_type: Any) -> str:
+    """把 schema 类型整理成稳定错误摘要。"""
+    if isinstance(expected_type, list):
+        return "|".join(str(item) for item in expected_type)
+    return str(expected_type)
 
 
 def _normalize_planned_actions(
@@ -545,6 +696,30 @@ def _extract_action_text_from_dict(item: dict[str, Any]) -> str:
     return json.dumps(item, ensure_ascii=False)
 
 
+def _normalize_optional_string_list(
+    raw_decision: dict[str, Any],
+    field_name: str,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """把可选的字符串列表字段宽容归一化，缺失时保持空列表兼容旧模型。"""
+    value = raw_decision.get(field_name)
+    if value is None:
+        return [], []
+    if isinstance(value, list):
+        normalized = [str(item).strip() for item in value if str(item).strip()]
+        if normalized:
+            return normalized, []
+        return [], [{"field_path": field_name, "reason": "empty_list_normalized_to_empty"}]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()], [{"field_path": field_name, "reason": "coerced_string_to_single_item_list"}]
+    return [], [
+        {
+            "field_path": field_name,
+            "reason": "unusable_value_normalized_to_empty",
+            "raw_type": type(value).__name__,
+        }
+    ]
+
+
 def _planned_actions_from_tool_calls(tool_calls: list[PlannedToolCall]) -> list[str]:
     """当 planned_actions 不可用时，从真实执行工具计划派生可读说明。"""
     return [f"执行工具：{tool_call.tool_name}" for tool_call in tool_calls]
@@ -593,6 +768,12 @@ def _required_tool_calls(raw_decision: dict[str, Any], adapter: OpenAICompatible
                     tool_name=tool_name,
                 ),
             )
+        tool_input = _normalize_and_validate_tool_input(
+            tool_name=tool_name,
+            tool_input=tool_input,
+            adapter=adapter,
+            tool_call_index=index,
+        )
         tool_calls.append(PlannedToolCall(tool_name=tool_name, tool_input=tool_input))
 
     if not tool_calls:
@@ -603,3 +784,61 @@ def _required_tool_calls(raw_decision: dict[str, Any], adapter: OpenAICompatible
             details=adapter._diagnostic_details(field_path="tool_calls"),
         )
     return tool_calls
+
+
+def _normalize_and_validate_tool_input(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    adapter: OpenAICompatibleModelAdapter,
+    tool_call_index: int,
+) -> dict[str, Any]:
+    """按结构化工具 schema 归一化别名并拒绝未声明字段。"""
+    schema = TOOL_SCHEMAS[tool_name]
+    aliases = schema.get("accepted_aliases", {})
+    normalized = dict(tool_input)
+    if isinstance(aliases, dict):
+        for alias, canonical in aliases.items():
+            if alias in normalized and canonical not in normalized:
+                normalized[canonical] = normalized.pop(alias)
+
+    allowed_fields = set(schema.get("required", [])) | set(schema.get("optional", []))
+    extra_fields = sorted(field for field in normalized if field not in allowed_fields)
+    if extra_fields:
+        raise ModelResponseError(
+            f"tool_calls[{tool_call_index}].tool_input 包含未声明字段：{', '.join(extra_fields)}。",
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+            details=adapter._diagnostic_details(
+                field_path=f"tool_calls[{tool_call_index}].tool_input",
+                tool_call_index=tool_call_index,
+                tool_name=tool_name,
+                invalid_fields=extra_fields,
+                allowed_fields=sorted(allowed_fields),
+            ),
+        )
+
+    missing_fields = [
+        field_name
+        for field_name in schema.get("required", [])
+        if field_name not in normalized
+    ]
+    if missing_fields:
+        raise ModelResponseError(
+            f"tool_calls[{tool_call_index}].tool_input 缺少必填字段：{', '.join(missing_fields)}。",
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+            details=adapter._diagnostic_details(
+                field_path=f"tool_calls[{tool_call_index}].tool_input",
+                tool_call_index=tool_call_index,
+                tool_name=tool_name,
+                missing_fields=missing_fields,
+                allowed_fields=sorted(allowed_fields),
+            ),
+        )
+    _validate_tool_input_types(
+        tool_name=tool_name,
+        tool_input=normalized,
+        adapter=adapter,
+        tool_call_index=tool_call_index,
+    )
+    return normalized

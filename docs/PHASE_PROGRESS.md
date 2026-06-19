@@ -2,7 +2,7 @@
 
 ## 总览
 
-- 最后更新时间：2026-06-17
+- 最后更新时间：2026-06-19
 - 当前激活阶段：`Phase 9：真实任务最小闭环`
 - 当前阶段状态：`in_progress`
 
@@ -98,8 +98,8 @@
   - 当前 `verify_rules` 第二版已补齐一批更贴近真实任务的断言：命令 stdout/stderr 不包含检查、文件不存在检查、文件最小/最大行数检查
   - 回归测试新增覆盖：负向命令输出检查、文件不存在检查、文件行数上下界检查，以及对应 task spec 字段解析
   - 已重构 `src/model.py`，移除 `rule_based` adapter，当前只支持 `openai_compatible` 决策层
-  - 当前 OpenAI 兼容决策层会调用 `/chat/completions`，并要求模型返回 `summary`、`rationale`、`planned_actions`、`tool_calls` JSON
-  - 当前模型工具计划只允许 `search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`，且 `tool_input` 必须是对象
+  - 当前 OpenAI 兼容决策层会调用 `/chat/completions`，并要求模型返回 `summary`、`rationale`、`planned_actions`、`cross_round_plan`、`tool_calls` JSON
+  - 当前模型工具计划只允许 `search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`，且 `tool_input` 必须是对象，并会校验字段名、必填字段和字段类型
   - `src/loop.py` 的 `plan` 阶段现已捕获模型配置、请求和响应异常，并以 `stop_reason.code = model_error` 结束 run
   - `model_decision_failed` 已进入 trace，错误 details 包含 provider、model name、error type 和 error message，不记录 API key
   - `_run_planned_tools()` 已移除旧 Phase 3 固定工具序列回退逻辑，工具执行必须来自模型返回的合法 `tool_calls`
@@ -228,3 +228,13 @@
 - `docs/USAGE_GUIDE.md` 已固定 eval task 写法、report 阅读、eval summary 和 comparison delta 阅读方式。
 - `docs/MVP_ACCEPTANCE.md` 已固定全量 pytest、sample eval、sample comparison 三类 MVP 验收命令和当前边界/backlog。
 - 新增文档回归测试，防止关键使用命令、路径、限制和 backlog 在后续改动中丢失。
+
+### Phase 9 本轮新增：跨轮计划与工具入参类型校验
+
+- `ModelDecision` 新增 `cross_round_plan`，用于表达跨轮安排；`planned_actions` 明确收敛为本轮 `tool_calls` 的可读说明，不再承担跨轮任务队列职责。
+- `runtime_feedback` 新增 `previous_cross_round_plan`，第二轮及后续 plan 能看到上一轮模型给出的跨轮安排。
+- OpenAI compatible 请求新增 `decision_schema`，结构化说明 `tool_calls` 是唯一执行源、`planned_actions` 是本轮说明、`cross_round_plan` 是跨轮计划。
+- `model_decision` trace、plan state result、finalize 摘要、stop reason details 和 report 均会展示或保留跨轮计划。
+- 工具 schema 校验已从字段名扩展到字段类型，非法类型会进入 `ModelResponseError` / `model_error`，例如 `apply_patch.new_text = null` 不会再导致工具层 traceback。
+- `apply_patch` 工具本身也增加防御式非法输入返回，统一为 `ToolExecution(ok=false, error=invalid_tool_input)`。
+- 本轮保持边界：不新增 verify rule，不修改 loop 轮数，不做 `planned_actions` 与 `tool_calls` 的一致性强诊断。

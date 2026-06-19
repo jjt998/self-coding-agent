@@ -86,13 +86,19 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 - `失败诊断`：setup、model、verify、max steps 等失败摘要。
 - `进展观察`：是否观察到文件变更、变更文件数、失败工具数。
 - `反思反馈`：最近一次 reflect trigger、失败检查、建议关注点。
-- `模型返回摘要`：最近一次模型显式返回的 summary、rationale、planned_actions 和 tool_calls。
+- `模型返回摘要`：最近一次模型显式返回的 summary、rationale、planned_actions、cross_round_plan 和 tool_calls。
 - `验证结果`：每条验证检查是否通过。
 
 `trace.jsonl` 是结构化事件流，适合脚本分析和定位细节。排查模型为什么只读文件、不修改文件或没有响应 reflect feedback 时，优先查看：
 
 - `model_raw_response`：模型显式返回的原始 `choices[0].message.content`。
-- `model_decision`：解析后的结构化决策，包括 `rationale`、`planned_actions` 和 `tool_calls`。
+- `model_decision`：解析后的结构化决策，包括 `rationale`、`planned_actions`、`cross_round_plan` 和 `tool_calls`。
+
+字段定位说明：
+- `tool_calls` 是唯一会被 `act` 阶段实际执行的工具调用。
+- `planned_actions` 只描述本轮 `tool_calls` 实际会做的事情，不作为跨轮任务队列。
+- `cross_round_plan` 记录后续轮次安排；下一轮模型会通过 `runtime_feedback.previous_cross_round_plan` 看到上一轮跨轮计划。
+- `tool_input` 会按 `tool_schema` 校验字段名和类型，类型不匹配会以 `model_error` 收口，不会继续进入工具层 traceback。
 
 这里记录的是模型显式返回内容，不包含 provider 隐藏推理链，也不会记录 API key 或请求头。
 

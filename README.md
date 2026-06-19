@@ -16,6 +16,8 @@
 - Reflect feedback 重规划约束：下一轮模型计划必须回应上一轮失败证据，不能无解释重复失败工具序列。
 - 真实 loop 内核扫尾：当前代码不再保留 Phase 3 固定工具序列辅助函数，测试样例默认产物改为 `run_evidence.md`。
 - 模型返回日志：每次 plan 会在 `trace.jsonl` 写入 `model_raw_response`，记录模型显式返回的 JSON content，便于排查工具计划和 rationale。
+- 跨轮计划：模型响应支持 `cross_round_plan`，用于记录后续轮次安排；`planned_actions` 只描述本轮 `tool_calls` 实际会执行的动作。
+- 工具入参校验：模型返回的 `tool_input` 会按 `tool_schema` 校验字段名和类型，例如 `apply_patch.new_text = null` 会收口为 `model_error`，不再进入工具层 traceback。
 - eval batch：批量运行任务并生成聚合 `summary.json` / `summary.md`。
 - strategy comparison：对同一批任务执行多套配置并输出 delta。
 - experiment suite：把多组 comparison 固化成实验清单。
@@ -139,6 +141,8 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
 - 常见 `model_error` 类型包括 `ModelConfigError`、`ModelRequestError`、`ModelResponseError`。
 - 测试环境可使用 `SELF_CODING_AGENT_FAKE_MODEL_RESPONSE` 注入假响应，仍需设置测试用 API key 环境变量。
 - 排查模型为什么只读文件、不修改文件或没有响应 reflect feedback 时，优先查看 `trace.jsonl` 中的 `model_raw_response` 和 `model_decision`。前者是模型显式返回的原始 JSON content，后者是解析后的结构化决策。
+- `model_decision.planned_actions` 是本轮可读计划说明，不是跨轮任务队列；跨轮安排应查看 `cross_round_plan` 和下一轮 `runtime_feedback.previous_cross_round_plan`。
+- 工具 schema 会同时约束字段名和字段类型；非法字段、缺少必填字段或类型不匹配会进入 `ModelResponseError`，并在 details 中暴露 `field_path`、`tool_name`、`expected_type`、`actual_type` 等安全摘要。
 - 更完整的模型配置、eval task、report 和 comparison 使用说明见 `docs/USAGE_GUIDE.md`。
 
 ## eval task schema

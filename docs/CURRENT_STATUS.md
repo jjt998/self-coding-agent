@@ -2,7 +2,7 @@
 
 ## 最后更新时间
 
-- 日期：2026-06-17
+- 日期：2026-06-19
 
 ## 当前阶段
 
@@ -39,8 +39,8 @@
 - 当前真实验证已从“只看 verify 命令退出码”升级到“命令执行结果 + 结构化规则联合判定”，失败时会直接落到 `verification_result.checks`，便于 eval 和 trace 解释具体未满足条件。
 - 当前 `verify_rules` 第二批规则类型已补齐：除首批正向包含/存在检查外，现已支持命令输出“不包含”检查、文件“不存在”检查、文件最小/最大行数检查，能更自然表达“错误输出不应出现”“临时文件应被删除”“测试文件至少补到几行”等真实任务通过条件。
 - 当前已补上强制真实模型决策层第一版：`src/model.py` 不再保留 `rule_based` adapter，配置层只支持 `openai_compatible` provider。
-- 当前 OpenAI 兼容决策层会调用 `/chat/completions`，要求模型返回结构化 JSON：`summary`、`rationale`、`planned_actions`、`tool_calls`。
-- 当前模型工具计划已做最小校验：只允许 `search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`，且 `tool_input` 必须是对象。
+- 当前 OpenAI 兼容决策层会调用 `/chat/completions`，要求模型返回结构化 JSON：`summary`、`rationale`、`planned_actions`、`cross_round_plan`、`tool_calls`。
+- 当前模型工具计划已做 schema 校验：只允许 `search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`，且 `tool_input` 必须是对象，并会校验字段名、必填字段和字段类型。
 - 当前 `plan` 阶段模型配置、请求或响应失败会写入 `model_decision_failed` trace，并以 `stop_reason.code = model_error` 结束 run，不再回退到本地规则决策。
 - 当前所有 `configs/*.json` 已统一切到 `openai_compatible`，默认使用 DeepSeek endpoint，并通过 `.env` 或系统环境变量中的 `DEEPSEEK_API_KEY` 提供密钥；无 API key 是预期的模型配置错误。
 - 本轮已按测试环境规范使用 `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe` 完成回归：`tests/test_loop.py tests/test_model.py` 为 `12 passed`，`tests/test_cli.py tests/test_eval.py tests/test_verify.py` 为 `23 passed`，全量 `pytest -q` 为 `40 passed`。
@@ -215,3 +215,13 @@
 - 新增 `docs/MVP_ACCEPTANCE.md`，固定全量测试、sample eval smoke、sample comparison smoke 的验收命令和预期产物。
 - 新增 `tests/test_mvp_acceptance_docs.py`，确保 README、使用手册、MVP 验收文档持续包含关键命令、路径和边界说明。
 - MVP 当前边界已明确记录：不支持 `rule_based`、无 API key 会 `model_error`、CLI 单次运行暂不传 verify 参数、默认 `runtime.max_steps=2`、回归测试使用 fake model。
+
+## Phase 9 本轮新增进展：跨轮计划与工具入参类型校验
+
+- 模型决策 JSON 新增 `cross_round_plan`，用于记录跨轮安排和后续轮次意图；`planned_actions` 明确只描述本轮 `tool_calls` 实际会执行的动作。
+- 下一轮 `runtime_feedback` 新增 `previous_cross_round_plan`，模型可以在重规划时看到上一轮给出的跨轮安排，而不再把跨轮意图混入 `planned_actions`。
+- `model_decision` trace、plan state result、`finalize_summary` 和 `run_finished.stop_reason.details` 均会保留当前跨轮计划；报告的“模型返回摘要”也会展示 `cross_round_plan`。
+- OpenAI compatible 请求新增结构化 `decision_schema`，明确 `tool_calls` 是唯一执行源、`planned_actions` 是本轮说明、`cross_round_plan` 是跨轮计划。
+- 工具入参校验从“字段名/必填项”扩展到类型校验，覆盖 `string`、`integer`、`null`、`array` 以及数组元素类型；例如 `apply_patch.new_text = null` 会以 `ModelResponseError` / `model_error` 收口。
+- `CoreToolRunner.apply_patch()` 增加防御式输入检查，即使绕过模型校验传入非法值，也会返回结构化 `invalid_tool_input`，不再抛出 `TypeError` traceback。
+- 本轮不新增 `verify_rules`，不改变 `runtime.max_steps=2`，不做 `planned_actions` 与 `tool_calls` 的一致性硬诊断，继续交给 prompt 和模型自觉对齐。

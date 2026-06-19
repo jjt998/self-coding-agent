@@ -98,6 +98,18 @@ class CoreToolRunner:
 
     def apply_patch(self, path: str, old_text: str | None, new_text: str) -> ToolExecution:
         """对仓库内文件做一次最小文本替换；文件不存在时按新内容创建。"""
+        if not isinstance(path, str) or not isinstance(new_text, str) or not (
+            isinstance(old_text, str) or old_text is None
+        ):
+            return ToolExecution(
+                tool_name="apply_patch",
+                tool_input={"path": path, "old_text": old_text, "new_text": new_text},
+                tool_output={
+                    "ok": False,
+                    "error": "invalid_tool_input",
+                    "expected": "path:string, old_text:string|null, new_text:string",
+                },
+            )
         target_path = (self.repo_root / path).resolve()
         if not str(target_path).startswith(str(self.repo_root)):
             return ToolExecution(

@@ -621,7 +621,22 @@
       }
     ],
     "previous_verification": "上一轮失败检查",
-    "previous_reflect_feedback": "上一轮反思约束"
+    "previous_reflect_feedback": "上一轮反思约束",
+    "previous_cross_round_plan": "上一轮模型给出的跨轮安排"
+  },
+  "decision_schema": {
+    "planned_actions": "只能描述本轮 tool_calls 实际会做的事",
+    "cross_round_plan": "跨轮安排和后续轮次意图",
+    "tool_calls": "唯一会被 act 阶段实际执行的工具调用"
+  },
+  "tool_schema": {
+    "apply_patch": {
+      "required": ["path", "old_text", "new_text"],
+      "properties": {
+        "old_text": "string|null",
+        "new_text": "string"
+      }
+    }
   }
 }</code></article>
         <div class="context-stack">
@@ -635,7 +650,7 @@
           </article>
           <article class="context-layer risk-box">
             <strong>第二轮 plan：叠加 <code>runtime_feedback</code></strong>
-            下一轮会收到观察摘要、最近工具结果摘要、验证结果和 <code>reflect_feedback</code>；<span class="risk-text">旧风险是工具摘要过短，只告诉模型读了多少行，却没给关键源码片段。</span>
+            下一轮会收到观察摘要、最近工具结果摘要、验证结果、<code>reflect_feedback</code> 和 <code>previous_cross_round_plan</code>；<span class="risk-text">旧风险是工具摘要过短，只告诉模型读了多少行，却没给关键源码片段。</span>
             改进后，<code>read_file</code> 摘要会携带 <code>path</code>、短 <code>content_excerpt</code> 和行号范围。
           </article>
           <article class="context-layer risk-box">
@@ -714,6 +729,72 @@
     </section>
 
     <section>
+      <h2>模型决策契约与工具 schema</h2>
+      <p class="lead" style="margin-bottom: 18px;">
+        模型不是直接“自由发挥”调用 Python 函数，而是先返回一份结构化 JSON 决策。
+        <code>plan</code> 阶段解析这份 JSON，<code>act</code> 阶段只执行 <code>tool_calls</code>。
+        这层契约的目标是让跨轮计划、当前轮说明和真实工具执行分开，避免“文字说要修，但实际只读文件”的歧义继续扩大。
+      </p>
+      <table class="mode-table">
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>定位</th>
+            <th>是否执行</th>
+            <th>风险与缓解</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>summary</code></td>
+            <td>本轮模型决策摘要。</td>
+            <td>否</td>
+            <td>只用于 trace/report 阅读。</td>
+          </tr>
+          <tr>
+            <td><code>rationale</code></td>
+            <td>解释为什么本轮这样安排，也用于观察是否回应 reflect 证据。</td>
+            <td>否</td>
+            <td>不会获取 provider 隐藏推理链，只记录模型显式返回内容。</td>
+          </tr>
+          <tr>
+            <td><code>planned_actions</code></td>
+            <td>本轮 <code>tool_calls</code> 实际会做什么的可读说明。</td>
+            <td>否</td>
+            <td class="risk-cell">不是跨轮任务队列；如果模型把未来计划写在这里，页面和报告会误导人，但 loop 仍只执行 <code>tool_calls</code>。</td>
+          </tr>
+          <tr>
+            <td><code>cross_round_plan</code></td>
+            <td>跨轮安排、后续轮次意图、暂不执行的计划。</td>
+            <td>否</td>
+            <td>下一轮会通过 <code>runtime_feedback.previous_cross_round_plan</code> 回填给模型。</td>
+          </tr>
+          <tr>
+            <td><code>tool_calls</code></td>
+            <td>工具调用数组，包含 <code>tool_name</code> 和 <code>tool_input</code>。</td>
+            <td>是</td>
+            <td class="risk-cell">唯一执行源；工具名、字段名、必填项和字段类型都会被校验。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="grid-3" style="margin-top: 18px;">
+        <article class="mini">
+          <h3>字段名校验</h3>
+          <p>模型只能传入 <code>tool_schema</code> 声明过的字段。比如 <code>read_file</code> 只接受 <code>path</code>，常见别名 <code>file_path</code> 会先归一化。</p>
+        </article>
+        <article class="mini">
+          <h3>类型校验</h3>
+          <p><code>string</code>、<code>integer</code>、<code>null</code>、<code>array</code> 和数组元素类型都会被检查。</p>
+        </article>
+        <article class="mini risk-box">
+          <h3>已缓解的崩溃点</h3>
+          <p class="risk-text">如果模型返回 <code>apply_patch.new_text = null</code>，现在会收口为 <code>ModelResponseError</code> / <code>model_error</code>，不再进入 <code>Path.write_text(None)</code> traceback。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
       <h2>多轮 Loop 细节</h2>
       <div class="loop-wrap">
         <div class="loop">
@@ -761,7 +842,8 @@
         </article>
         <article class="mini">
           <h3>结构化模型决策</h3>
-          <p><code>model_decision</code> 保存解析后的 <code>summary</code>、<code>rationale</code>、<code>planned_actions</code>、<code>tool_calls</code>。</p>
+          <p><code>model_decision</code> 保存解析后的 <code>summary</code>、<code>rationale</code>、<code>planned_actions</code>、<code>cross_round_plan</code>、<code>tool_calls</code>。</p>
+          <p><code>planned_actions</code> 只解释本轮真实执行动作，<code>cross_round_plan</code> 才是跨轮安排；<code>tool_calls</code> 是唯一执行源。</p>
         </article>
         <article class="mini">
           <h3>工具调用结果</h3>
@@ -848,6 +930,7 @@
         <div class="check">先打开最新 eval 的 <code>summary.json</code>，确认 <code>stop_reason</code>、失败检查和 taxonomy。</div>
         <div class="check">再看单次 run 的 <code>report.md</code>，快速读取状态流、模型返回摘要、进展观察和验证结果。</div>
         <div class="check">回到 <code>trace.jsonl</code>，按顺序查 <code>model_raw_response</code>、<code>model_decision</code>、<code>tool_result</code>。</div>
+        <div class="check risk-text">如果是 <code>model_error</code>，先看 <code>model_decision_failed</code> 的 <code>field_path</code>、<code>tool_name</code>、<code>expected_type</code>、<code>actual_type</code>，判断是否是工具入参 schema 错误。</div>
         <div class="check risk-text">如果工具失败，定位 <code>error</code>，例如 <code>old_text_not_found</code>、命令返回码非 0、未知工具参数。</div>
         <div class="check risk-text">如果验证失败，查看 <code>verification_result.checks</code>，确认是命令输出、diff、文件内容还是规则不满足。</div>
         <div class="check risk-text">最后看 <code>reflect_feedback</code> 是否把失败证据足够具体地交给下一轮 plan。</div>

@@ -31,3 +31,15 @@ def test_run_command_returns_failed_tool_result_when_process_cannot_start(tmp_pa
     assert result.tool_output["ok"] is False
     assert result.tool_output["returncode"] is None
     assert result.tool_output["error_type"] == "FileNotFoundError"
+
+
+def test_apply_patch_returns_failed_tool_result_for_invalid_input(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    runner = CoreToolRunner(repo_root=str(repo_root))
+
+    result = runner.apply_patch(path="README.md", old_text=None, new_text=None)  # type: ignore[arg-type]
+
+    assert result.tool_name == "apply_patch"
+    assert result.tool_output["ok"] is False
+    assert result.tool_output["error"] == "invalid_tool_input"

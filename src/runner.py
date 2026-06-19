@@ -396,12 +396,14 @@ def _build_phase_4_report(
     if model_decision:
         model_tool_sequence = ", ".join(tool_call.tool_name for tool_call in model_decision.tool_calls) or "none"
         model_actions = "；".join(model_decision.planned_actions) or "无"
+        model_cross_round_plan = "；".join(model_decision.cross_round_plan) or "无"
         model_response_summary = (
             f"- provider：`{model_decision.provider}`\n"
             f"- model：`{model_decision.model_name}`\n"
             f"- summary：{model_decision.summary}\n"
             f"- rationale：{model_decision.rationale}\n"
             f"- planned_actions：{model_actions}\n"
+            f"- cross_round_plan：{model_cross_round_plan}\n"
             f"- tool_calls：`{model_tool_sequence}`\n"
             f"- 原始返回：见 `trace.jsonl` 中的 `model_raw_response` 事件。"
         )

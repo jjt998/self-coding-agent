@@ -279,13 +279,29 @@ plan_step:
 
 ```yaml
 model_decision:
-  decision_type: tool_call | update_plan | verify | reflect | finalize
-  reasoning_summary:
-  tool_name:
-  tool_args:
-  plan_update:
-  finalize_message:
+  provider:
+  model_name:
+  task_type:
+  summary:
+  rationale:
+  planned_actions:
+    - "本轮 tool_calls 实际会执行的动作说明"
+  cross_round_plan:
+    - "跨轮安排、后续轮次意图、暂不执行的计划"
+  tool_calls:
+    - tool_name:
+      tool_input:
+  raw_response_content:
+  normalization_notes:
 ```
+
+字段职责：
+
+- `tool_calls` 是唯一执行源，`act` 阶段只按这个数组调用工具。
+- `planned_actions` 是本轮可读计划说明，不是跨轮任务队列，也不驱动执行。
+- `cross_round_plan` 承载跨轮安排，下一轮会通过 `runtime_feedback.previous_cross_round_plan` 回填给模型。
+- `raw_response_content` 只写入本地 trace，用于排查模型显式返回内容，不包含 provider 隐藏推理链。
+- `normalization_notes` 记录展示字段的宽容归一化，例如缺失 `planned_actions` 时从 `tool_calls` 派生说明。
 
 ### 6.6 ToolResult
 
@@ -419,6 +435,16 @@ reflect -> finalize
 - 当前 diff 摘要
 - 已尝试路径
 - 当前活跃假设
+
+当前实现里，进入第二轮及后续 `plan` 的跨轮输入由 `runtime_feedback` 承载：
+
+- `previous_observation`：上一轮是否观察到进展、变更文件、失败工具数和观察摘要。
+- `recent_tool_results`：上一轮工具结果短摘要；`read_file` 会携带目标路径、行数和短源码片段，`apply_patch.old_text_not_found` 会携带失败 old_text 摘要。
+- `previous_verification`：上一轮验证结果和失败检查证据。
+- `previous_reflect_feedback`：上一轮反思反馈和 `replan_constraints`。
+- `previous_cross_round_plan`：上一轮模型给出的跨轮安排。
+
+这些字段共同组成下一轮模型的“运行上下文窗口”。其中 `recent_tool_results` 和 `previous_cross_round_plan` 是为了减少模型在第二轮继续猜测源码或忘记跨轮安排。
 
 `memory_context`
 
@@ -589,8 +615,34 @@ class BaseModelAdapter:
 - name
 - description
 - argument schema
+- accepted aliases
 - execution handler
 - permission constraints
+
+当前工具 schema 至少包含：
+
+- `required`：必填字段。
+- `optional`：可选字段。
+- `properties`：字段类型，例如 `string`、`integer`、`null`、`array` 和数组元素类型。
+- `accepted_aliases`：模型常见别名到规范字段的映射，例如 `file_path -> path`。
+
+校验发生在两层：
+
+- 模型响应解析阶段：拒绝未知工具、非对象 `tool_input`、未声明字段、缺少必填字段和类型不匹配字段。
+- `act` 前兜底阶段：对 fake adapter 或测试直接构造的 `ModelDecision` 再做一次 schema 校验。
+
+示例：
+
+```yaml
+apply_patch:
+  required: [path, old_text, new_text]
+  properties:
+    path: string
+    old_text: string | null
+    new_text: string
+```
+
+因此 `apply_patch.new_text = null` 会在模型决策层收口为 `ModelResponseError` / `model_error`，不会继续进入 `Path.write_text(None)` 这类工具层 traceback。
 
 每个工具结果应包含：
 
@@ -613,6 +665,7 @@ class BaseModelAdapter:
 - 危险命令模式必须阻断。
 - 命令执行必须包含 timeout 和 working directory 控制。
 - 工具失败必须结构化返回，不能用沉默异常吞掉。
+- 即使上游绕过 schema 校验，工具实现也应尽量返回结构化失败，例如 `apply_patch` 的 `invalid_tool_input`。
 
 ## 13. Trace 与 Replay
 
@@ -805,5 +858,6 @@ MVP 阶段不需要复杂存储后端，JSONL 和本地文件已经足够。
 - 如果 trace payload 策略不控制，trace 会很快变得噪音过多。
 - 如果过早放松 memory 写入规则，未来 run 会被污染。
 - 如果 success criteria 没有按任务类型区分，eval 会失去可信度。
+- 如果把可读计划说明和真实工具执行混为一谈，模型可能“文字上计划修复、实际只读文件”；当前通过 `planned_actions`、`cross_round_plan`、`tool_calls` 三字段拆分降低这个风险。
 
 MVP 架构选择故意偏保守，目标是在保证后续扩展点的同时，降低这些风险。
