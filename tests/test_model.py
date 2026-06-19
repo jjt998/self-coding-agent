@@ -141,6 +141,10 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
     assert user_payload["runtime_feedback"] == {}
     assert user_payload["tool_schema"]["read_file"]["required"] == ["path"]
     assert user_payload["tool_schema"]["read_file"]["optional"] == []
+    assert user_payload["tool_schema"]["read_file_range"]["required"] == ["path", "start_line", "end_line"]
+    assert user_payload["tool_schema"]["read_file_range"]["max_lines"] == 40
+    assert user_payload["tool_schema"]["replace_lines"]["required"] == ["path", "start_line", "end_line", "new_text"]
+    assert user_payload["tool_schema"]["replace_lines"]["properties"]["new_text"]["type"] == "string"
     assert user_payload["tool_schema"]["search_text"]["optional"] == ["limit"]
     assert "cross_round_plan" in user_payload["decision_schema"]
     assert "本轮 tool_calls" in user_payload["decision_schema"]["planned_actions"][0]
@@ -227,10 +231,19 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert user_payload["runtime_feedback"] == runtime_feedback
     prompt_text = "\n".join(message["content"] for message in captured["body"]["messages"] if message["role"] == "system")
     assert "runtime_feedback.previous_reflect" in prompt_text
+    assert "file_context_cache" in prompt_text
+    assert "最近五次读取片段" in prompt_text
     assert "previous_cross_round_plan" in prompt_text
     assert "cross_round_plan" in prompt_text
     assert "planned_actions" in prompt_text
     assert "ASCII stdout/stderr" in prompt_text
+    assert "content_mode=\"full\"" in prompt_text
+    assert "content_mode=\"excerpt\"" in prompt_text
+    assert "read_file_range" in prompt_text
+    assert "1 到 40 行" in prompt_text
+    assert "不要用它读取整个文件" in prompt_text
+    assert "replace_lines" in prompt_text
+    assert "old_text_not_found" in prompt_text
     assert "previous_reflect_feedback" not in prompt_text
     assert "replan_constraints" not in prompt_text
     assert "avoid_exact_tool_sequence" not in prompt_text
@@ -350,6 +363,52 @@ def test_openai_compatible_adapter_rejects_tool_input_type_mismatch(monkeypatch)
         assert error.details["actual_type"] == "NoneType"
     else:
         raise AssertionError("invalid apply_patch new_text should raise ModelResponseError")
+
+
+def test_openai_compatible_adapter_rejects_new_tool_input_type_mismatch(monkeypatch) -> None:
+    def fake_urlopen(request, timeout):
+        return _FakeHttpResponse(
+            _openai_response(
+                {
+                    "summary": "按行替换文件",
+                    "rationale": "new_text 不能是 null。",
+                    "planned_actions": ["本轮尝试按行替换"],
+                    "cross_round_plan": [],
+                    "tool_calls": [
+                        {
+                            "tool_name": "replace_lines",
+                            "tool_input": {
+                                "path": "README.md",
+                                "start_line": 1,
+                                "end_line": 1,
+                                "new_text": None,
+                            },
+                        }
+                    ],
+                }
+            )
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", raising=False)
+    monkeypatch.setattr(model_module, "urlopen", fake_urlopen)
+    adapter = OpenAICompatibleModelAdapter(
+        provider="openai_compatible",
+        model_name="demo-model",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+        timeout_seconds=7,
+    )
+
+    try:
+        adapter.decide(task="修复 README", task_type="general", context_snapshot=None, config_data={})
+    except ModelResponseError as error:
+        assert error.details["field_path"] == "tool_calls[1].tool_input.new_text"
+        assert error.details["tool_name"] == "replace_lines"
+        assert error.details["expected_type"] == "string"
+        assert error.details["actual_type"] == "NoneType"
+    else:
+        raise AssertionError("invalid replace_lines new_text should raise ModelResponseError")
 
 
 def test_openai_compatible_adapter_raises_on_os_error(monkeypatch) -> None:

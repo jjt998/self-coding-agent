@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
@@ -10,7 +11,7 @@ from config import RunSettings
 from memory import RuntimeMemoryManager
 from model import ModelDecision, ModelError, ModelResponseError, TOOL_SCHEMAS, build_model_adapter
 from trace import TraceEvent, TraceWriter
-from tools import CoreToolRunner, ToolExecution
+from tools import FULL_READ_FILE_MAX_CHARS, FULL_READ_FILE_MAX_LINES, CoreToolRunner, ToolExecution
 from verify import VerificationResult, build_phase_4_verification
 
 
@@ -77,6 +78,7 @@ class RuntimeState:
     cross_round_plan_history: list[list[str]] = field(default_factory=list)
     tool_executions: list[ToolExecution] = field(default_factory=list)
     recent_tool_executions: list[ToolExecution] = field(default_factory=list)
+    file_context_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     changed_files: list[str] = field(default_factory=list)
     failed_tool_count: int = 0
     observation_summary: str = ""
@@ -347,7 +349,7 @@ class LoopOrchestrator:
         """返回上一轮 reflect 事实，并把最新验证事实合并进去。"""
         if not runtime_state.reflect_feedback:
             return {}
-        feedback = dict(runtime_state.reflect_feedback)
+        feedback = deepcopy(runtime_state.reflect_feedback)
         feedback.pop("iteration", None)
         observation = feedback.get("observation")
         if isinstance(observation, dict):
@@ -397,7 +399,7 @@ class LoopOrchestrator:
             summary["error"] = output.get("error")
         if "returncode" in output:
             summary["returncode"] = output.get("returncode")
-        if execution.tool_name in {"read_file", "apply_patch"}:
+        if execution.tool_name in {"read_file", "read_file_range", "apply_patch", "replace_lines"}:
             path = execution.tool_input.get("path")
             if path:
                 summary["path"] = path
@@ -412,12 +414,27 @@ class LoopOrchestrator:
             summary["match_count"] = output.get("match_count", 0)
         if execution.tool_name == "read_file":
             summary["line_count"] = output.get("line_count", 0)
+            for field_name in ["content_mode", "read_coverage", "content_truncated", "structure_summary"]:
+                if field_name in output:
+                    summary[field_name] = output[field_name]
             summary.update(
                 self._build_read_file_excerpt_summary(
                     execution=execution,
                     recent_executions=recent_executions or [],
                 )
             )
+        if execution.tool_name == "read_file_range":
+            for field_name in [
+                "line_count",
+                "content_mode",
+                "content_excerpt",
+                "read_coverage",
+                "excerpt_line_start",
+                "excerpt_line_end",
+                "content_truncated",
+            ]:
+                if field_name in output:
+                    summary[field_name] = output[field_name]
         if execution.tool_name == "apply_patch" and output.get("error") == "old_text_not_found":
             summary["failed_old_text_excerpt"] = self._truncate_model_feedback_text(
                 execution.tool_input.get("old_text"),
@@ -427,6 +444,17 @@ class LoopOrchestrator:
                 execution.tool_input.get("new_text"),
                 limit=1200,
             )
+        if execution.tool_name == "replace_lines":
+            for field_name in [
+                "action",
+                "start_line",
+                "end_line",
+                "line_count_before",
+                "line_count_after",
+                "bytes_written",
+            ]:
+                if field_name in output:
+                    summary[field_name] = output[field_name]
         return summary
 
     def _build_read_file_excerpt_summary(
@@ -435,6 +463,15 @@ class LoopOrchestrator:
         recent_executions: list[ToolExecution],
     ) -> dict[str, Any]:
         """为 read_file 生成短源码片段，优先覆盖 old_text_not_found 的目标位置。"""
+        content_mode = execution.tool_output.get("content_mode", "")
+        if content_mode == "excerpt" and "content" not in execution.tool_output:
+            return {
+                "content_excerpt": execution.tool_output.get("content_excerpt", ""),
+                "excerpt_line_start": execution.tool_output.get("excerpt_line_start", 0),
+                "excerpt_line_end": execution.tool_output.get("excerpt_line_end", 0),
+                "excerpt_reason": "large_file_structure_summary",
+            }
+
         content = str(execution.tool_output.get("content", ""))
         lines = content.splitlines()
         if not lines:
@@ -443,6 +480,9 @@ class LoopOrchestrator:
                 "excerpt_line_start": 0,
                 "excerpt_line_end": 0,
                 "excerpt_reason": "empty_file",
+                "read_coverage": "0-0",
+                "content_mode": "full",
+                "content_truncated": False,
             }
 
         related_patch = self._find_related_old_text_failure(
@@ -454,6 +494,16 @@ class LoopOrchestrator:
             best_index = self._find_best_excerpt_line_index(lines=lines, needle=old_text)
             start_index = max(best_index - 5, 0)
             excerpt_reason = "old_text_not_found_candidate"
+        elif len(lines) <= FULL_READ_FILE_MAX_LINES or len(content) <= FULL_READ_FILE_MAX_CHARS:
+            return {
+                "content_excerpt": content,
+                "excerpt_line_start": 1,
+                "excerpt_line_end": len(lines),
+                "excerpt_reason": "full_file",
+                "read_coverage": f"1-{len(lines)}",
+                "content_mode": "full",
+                "content_truncated": False,
+            }
         else:
             start_index = 0
             excerpt_reason = "leading_excerpt"
@@ -942,7 +992,7 @@ class LoopOrchestrator:
             if ok is True:
                 successful_tools.append(execution.tool_name)
 
-            if execution.tool_name == "apply_patch":
+            if execution.tool_name in {"apply_patch", "replace_lines"}:
                 edit_attempted = True
 
             if execution.tool_name == "git_diff":
@@ -1087,6 +1137,7 @@ class LoopOrchestrator:
 
     def _build_reflect_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
         """为下一轮 plan 生成事实型 reflect 反馈。"""
+        self._update_file_context_cache(runtime_state=runtime_state)
         observation = self._build_tool_fact_observation(runtime_state=runtime_state)
         failed_tool_summaries = [
             self._summarize_tool_execution(
@@ -1113,8 +1164,64 @@ class LoopOrchestrator:
             "signals": list(observation.get("signals", [])),
             "failed_tools": failed_tool_summaries,
             "recent_tool_results": recent_tool_results,
+            "file_context_cache": runtime_state.file_context_cache,
             "verification": {},
         }
+
+    def _update_file_context_cache(self, runtime_state: RuntimeState) -> None:
+        """累计同一文件最近五次读取片段，供下一轮模型做跨轮定位。"""
+        for execution in runtime_state.recent_tool_executions:
+            snippet = self._build_file_context_snippet(execution=execution)
+            if not snippet:
+                continue
+            path = snippet["path"]
+            cache_entry = runtime_state.file_context_cache.setdefault(
+                path,
+                {
+                    "path": path,
+                    "line_count": snippet.get("line_count", 0),
+                    "snippets": [],
+                },
+            )
+            if snippet.get("line_count"):
+                cache_entry["line_count"] = snippet["line_count"]
+            snippets = list(cache_entry.get("snippets", []))
+            snippets.append({key: value for key, value in snippet.items() if key != "path"})
+            cache_entry["snippets"] = snippets[-5:]
+            cache_entry["covered_ranges"] = [
+                item.get("read_coverage", "")
+                for item in cache_entry["snippets"]
+                if item.get("read_coverage")
+            ]
+
+    def _build_file_context_snippet(self, execution: ToolExecution) -> dict[str, Any]:
+        """把读取类工具结果转成可累计的文件片段。"""
+        if execution.tool_name not in {"read_file", "read_file_range"}:
+            return {}
+        if execution.tool_output.get("ok") is not True:
+            return {}
+        path = execution.tool_input.get("path")
+        if not path:
+            return {}
+        output = execution.tool_output
+        content = output.get("content") if execution.tool_name == "read_file" else output.get("content_excerpt")
+        if content is None:
+            content = output.get("content_excerpt", "")
+        snippet: dict[str, Any] = {
+            "path": path,
+            "tool_name": execution.tool_name,
+            "content_mode": output.get("content_mode", ""),
+            "read_coverage": output.get("read_coverage", ""),
+            "excerpt_line_start": output.get("excerpt_line_start", 0),
+            "excerpt_line_end": output.get("excerpt_line_end", 0),
+            "line_count": output.get("line_count", 0),
+            "content_excerpt": self._truncate_model_feedback_text(content, limit=4000),
+        }
+        if output.get("content_truncated") is not None:
+            snippet["content_truncated"] = output.get("content_truncated")
+        if output.get("structure_summary"):
+            snippet["structure_summary"] = output.get("structure_summary")
+        return snippet
 
     def _has_old_text_not_found_failure(self, failed_tool_summaries: list[dict[str, Any]]) -> bool:
         """判断失败工具摘要里是否存在 old_text_not_found。"""

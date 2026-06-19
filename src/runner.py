@@ -380,12 +380,24 @@ def _build_phase_4_report(
             observation = {}
         signals = reflect_feedback.get("signals", [])
         failed_tools = reflect_feedback.get("failed_tools", [])
+        recent_tool_results = reflect_feedback.get("recent_tool_results", [])
+        recent_tool_lines: list[str] = []
+        if isinstance(recent_tool_results, list):
+            for item in recent_tool_results[-5:]:
+                if not isinstance(item, dict):
+                    continue
+                parts = [f"tool={item.get('tool_name', 'unknown')}"]
+                for field_name in ["path", "content_mode", "read_coverage", "content_truncated", "error"]:
+                    if field_name in item:
+                        parts.append(f"{field_name}={item.get(field_name)}")
+                recent_tool_lines.append("; ".join(parts))
         reflect_feedback_summary = (
             f"- trigger: `{reflect_feedback.get('trigger', 'unknown')}`\n"
             f"- signals: `{', '.join(str(item) for item in signals) or 'none'}`\n"
             f"- changed files: `{', '.join(str(item) for item in observation.get('changed_files', [])) or 'none'}`\n"
             f"- failed tool count: `{observation.get('failed_tool_count', 0)}`\n"
-            f"- failed tools: `{', '.join(str(item.get('tool_name', 'unknown')) for item in failed_tools if isinstance(item, dict)) or 'none'}`"
+            f"- failed tools: `{', '.join(str(item.get('tool_name', 'unknown')) for item in failed_tools if isinstance(item, dict)) or 'none'}`\n"
+            f"- recent tool results: `{ ' | '.join(recent_tool_lines) if recent_tool_lines else 'none' }`"
         )
     else:
         reflect_feedback_summary = "- 未生成反思反馈。"

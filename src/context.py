@@ -6,6 +6,9 @@ import re
 from typing import Any
 
 
+STRUCTURE_SUMMARY_MAX_ITEMS = 80
+
+
 def _is_text_file(path: Path) -> bool:
     """判断文件是否适合按文本处理，避免把二进制文件拉进上下文。"""
     if not path.is_file():
@@ -15,6 +18,67 @@ def _is_text_file(path: Path) -> bool:
     except (OSError, UnicodeDecodeError):
         return False
     return True
+
+
+def _truncate_structure_line(value: str, limit: int = 240) -> str:
+    """截断结构摘要里的单行文本，避免初始上下文过长。"""
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "...[truncated]"
+
+
+def _build_structure_summary(relative_path: str, content: str) -> list[dict[str, Any]]:
+    """为召回文件生成轻量结构摘要，帮助模型按行号继续读取。"""
+    lines = content.splitlines()
+    if Path(relative_path).suffix.lower() == ".py":
+        return _build_python_structure_summary(lines)
+    return _build_generic_structure_summary(lines)
+
+
+def _build_python_structure_summary(lines: list[str]) -> list[dict[str, Any]]:
+    """提取 Python 文件中的 class/def 名称和行号。"""
+    items: list[dict[str, Any]] = []
+    pattern = re.compile(r"^(?P<indent>\s*)(?P<kind>class|def)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
+    for line_number, line in enumerate(lines, start=1):
+        match = pattern.match(line)
+        if not match:
+            continue
+        items.append(
+            {
+                "line_number": line_number,
+                "kind": match.group("kind"),
+                "name": match.group("name"),
+                "indent": len(match.group("indent")),
+                "line": line.strip(),
+            }
+        )
+        if len(items) >= STRUCTURE_SUMMARY_MAX_ITEMS:
+            break
+    return items
+
+
+def _build_generic_structure_summary(lines: list[str]) -> list[dict[str, Any]]:
+    """为普通文本提取 heading、分节行和非空行索引。"""
+    items: list[dict[str, Any]] = []
+    for line_number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        kind = "non_empty"
+        if stripped.startswith("#"):
+            kind = "heading"
+        elif stripped.endswith(":") and len(stripped) <= 120:
+            kind = "section"
+        items.append(
+            {
+                "line_number": line_number,
+                "kind": kind,
+                "line": _truncate_structure_line(stripped),
+            }
+        )
+        if len(items) >= STRUCTURE_SUMMARY_MAX_ITEMS:
+            break
+    return items
 
 
 def _extract_task_keywords(task: str) -> list[str]:
@@ -41,6 +105,7 @@ class FileContext:
     total_line_count: int
     included_line_count: int
     was_clipped: bool
+    structure_summary: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """转换成便于写入 trace 和报告的字典。"""
@@ -230,6 +295,7 @@ class ContextBuilder:
                 content=content,
                 injection_mode=injection_mode,
             )
+            structure_summary = _build_structure_summary(relative_path=relative_path, content=content)
             candidate_files.append(
                 FileContext(
                     path=relative_path,
@@ -241,6 +307,7 @@ class ContextBuilder:
                     total_line_count=len(content.splitlines()),
                     included_line_count=included_line_count,
                     was_clipped=was_clipped,
+                    structure_summary=structure_summary,
                 )
             )
 
@@ -270,6 +337,7 @@ class ContextBuilder:
                 content=content,
                 injection_mode=injection_mode,
             )
+            structure_summary = _build_structure_summary(relative_path=relative_path, content=content)
             selected_files.append(
                 FileContext(
                     path=relative_path,
@@ -281,6 +349,7 @@ class ContextBuilder:
                     total_line_count=line_count,
                     included_line_count=included_line_count,
                     was_clipped=was_clipped,
+                    structure_summary=structure_summary,
                 )
             )
         return selected_files, len(candidate_paths)

@@ -11,7 +11,15 @@ from context import ContextSnapshot
 from env_loader import load_dotenv
 
 
-ALLOWED_TOOL_NAMES = {"search_text", "read_file", "apply_patch", "run_command", "git_diff"}
+ALLOWED_TOOL_NAMES = {
+    "search_text",
+    "read_file",
+    "read_file_range",
+    "apply_patch",
+    "replace_lines",
+    "run_command",
+    "git_diff",
+}
 TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     "search_text": {
         "description": "在仓库文本文件中搜索精确字符串。",
@@ -32,6 +40,18 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "path": {"type": "string", "description": "仓库内相对路径。"},
         },
     },
+    "read_file_range": {
+        "description": "读取仓库内 UTF-8 文本文件的闭区间行号范围；当 read_file 返回 content_mode=\"excerpt\" 且缺少关键区域时使用。",
+        "required": ["path", "start_line", "end_line"],
+        "optional": [],
+        "max_lines": 40,
+        "accepted_aliases": {"file_path": "path"},
+        "properties": {
+            "path": {"type": "string", "description": "仓库内相对路径。"},
+            "start_line": {"type": "integer", "description": "起始行号，1-based，包含该行。"},
+            "end_line": {"type": "integer", "description": "结束行号，1-based，包含该行。"},
+        },
+    },
     "apply_patch": {
         "description": "对仓库内文件执行一次文本替换；old_text 为 null 时创建或替换整个文件。",
         "required": ["path", "old_text", "new_text"],
@@ -41,6 +61,18 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "path": {"type": "string", "description": "仓库内相对路径。"},
             "old_text": {"type": ["string", "null"], "description": "必须逐字匹配文件内容；新建文件时可为 null。"},
             "new_text": {"type": "string"},
+        },
+    },
+    "replace_lines": {
+        "description": "按闭区间行号替换仓库内 UTF-8 文本文件内容；当同一文件连续出现 old_text_not_found 时优先使用。",
+        "required": ["path", "start_line", "end_line", "new_text"],
+        "optional": [],
+        "accepted_aliases": {"file_path": "path"},
+        "properties": {
+            "path": {"type": "string", "description": "仓库内相对路径。"},
+            "start_line": {"type": "integer", "description": "起始行号，1-based，包含该行。"},
+            "end_line": {"type": "integer", "description": "结束行号，1-based，包含该行。"},
+            "new_text": {"type": "string", "description": "替换后的文本，可以包含多行。"},
         },
     },
     "run_command": {
@@ -226,6 +258,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     "role": "system",
                     "content": (
                         "runtime_feedback.previous_reflect 是上一轮工具、diff、失败工具和验证结果的事实压缩。"
+                        "runtime_feedback.previous_reflect.file_context_cache 会按文件保留最近五次读取片段，供你跨轮引用已读源码。"
                         "runtime_feedback.previous_cross_round_plan 是上一轮模型留下的跨轮安排。"
                         "harness 只负责保真压缩事实，不替你判断上一轮是否有效；"
                         "你需要在 rationale 中自行解释这些事实，并据此重规划当前轮 tool_calls。"
@@ -240,6 +273,15 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "tool_calls 是唯一执行源。"
                         "在 Windows CLI 任务中，默认让 ASCII stdout/stderr 使用纯 ASCII 文本，"
                         "除非任务明确要求 Unicode；避免 emoji、全角符号和非必要中文输出。"
+                    ),
+                },
+                {
+                    "role": "system",
+                    "content": (
+                        "文件上下文规则：当 read_file 返回 content_mode=\"full\" 时，说明文件足够小且内容已完整可见，不要重复读取同一文件；"
+                        "当 read_file 返回 content_mode=\"excerpt\" 时，说明文件过大，只能看到结构摘要或片段，若缺少关键区域，请使用 read_file_range(path,start_line,end_line) 精确补齐；read_file_range 每次只能读取 1 到 40 行，不要用它读取整个文件。"
+                        "编辑规则：如果同一文件连续多次出现 old_text_not_found，尤其接近 3 次时，优先基于最近源码行号使用 replace_lines，"
+                        "不要继续猜测大段 apply_patch.old_text。"
                     ),
                 },
                 {

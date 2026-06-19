@@ -892,6 +892,317 @@ def test_runtime_feedback_includes_read_file_excerpt_after_old_text_not_found(
     assert failed_tool["failed_old_text_excerpt"] == patch_summary["failed_old_text_excerpt"]
 
 
+def test_runtime_feedback_includes_full_small_read_file_content(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "small.py").write_text("def main():\n    return 'ok'\n", encoding="utf-8")
+    feedbacks: list[dict] = []
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-small-read-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            if runtime_feedback:
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="second",
+                    rationale="已经看到完整小文件内容。",
+                    planned_actions=["查看 diff"],
+                    tool_calls=[PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["small.py"]})],
+                )
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="first",
+                rationale="读取小文件。",
+                planned_actions=["读取 small.py"],
+                tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "small.py"})],
+            )
+
+    verification_calls = {"count": 0}
+
+    def fake_verification(*, settings, tool_executions):
+        verification_calls["count"] += 1
+        passed = verification_calls["count"] == 2
+        return VerificationResult(
+            passed=passed,
+            summary="ok" if passed else "retry",
+            checks=[VerificationCheck(name="fake_verify", passed=passed, detail="fake")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="读取小文件",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    loop_module.LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=_model_config())
+
+    read_summary = feedbacks[1]["previous_reflect"]["recent_tool_results"][0]
+    assert read_summary["tool_name"] == "read_file"
+    assert read_summary["content_mode"] == "full"
+    assert read_summary["content_truncated"] is False
+    assert read_summary["read_coverage"] == "1-2"
+    assert read_summary["content_excerpt"] == "def main():\n    return 'ok'\n"
+    assert read_summary["excerpt_reason"] == "full_file"
+
+
+def test_runtime_feedback_includes_large_read_file_structure_summary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    lines = ["class LargeService:", "    pass", ""]
+    lines.extend(f"def handler_{index}():  # {'x' * 80}" for index in range(1, 230))
+    (repo_root / "large.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    feedbacks: list[dict] = []
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-large-read-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            if runtime_feedback:
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="second",
+                    rationale="已经看到大文件结构摘要。",
+                    planned_actions=["按范围读取"],
+                    tool_calls=[
+                        PlannedToolCall(
+                            tool_name="read_file_range",
+                            tool_input={"path": "large.py", "start_line": 1, "end_line": 5},
+                        )
+                    ],
+                )
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="first",
+                rationale="读取大文件。",
+                planned_actions=["读取 large.py"],
+                tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "large.py"})],
+            )
+
+    verification_calls = {"count": 0}
+
+    def fake_verification(*, settings, tool_executions):
+        verification_calls["count"] += 1
+        passed = verification_calls["count"] == 2
+        return VerificationResult(
+            passed=passed,
+            summary="ok" if passed else "retry",
+            checks=[VerificationCheck(name="fake_verify", passed=passed, detail="fake")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="读取大文件",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    loop_module.LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=_model_config())
+
+    read_summary = feedbacks[1]["previous_reflect"]["recent_tool_results"][0]
+    assert read_summary["tool_name"] == "read_file"
+    assert read_summary["content_mode"] == "excerpt"
+    assert read_summary["content_truncated"] is True
+    assert read_summary["read_coverage"] == "1-20"
+    assert read_summary["excerpt_reason"] == "large_file_structure_summary"
+    assert read_summary["structure_summary"][0]["kind"] == "class"
+    assert read_summary["structure_summary"][0]["name"] == "LargeService"
+    assert "content" not in read_summary
+
+
+def test_runtime_feedback_includes_range_and_replace_lines_results(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "app.py").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    feedbacks: list[dict] = []
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-range-edit-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            if runtime_feedback:
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="second",
+                    rationale="已经收到 range 与 replace_lines 结果。",
+                    planned_actions=["查看 diff"],
+                    tool_calls=[PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["app.py"]})],
+                )
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="first",
+                rationale="先读取范围，再按行替换。",
+                planned_actions=["读取范围并替换行"],
+                tool_calls=[
+                    PlannedToolCall(
+                        tool_name="read_file_range",
+                        tool_input={"path": "app.py", "start_line": 1, "end_line": 2},
+                    ),
+                    PlannedToolCall(
+                        tool_name="replace_lines",
+                        tool_input={"path": "app.py", "start_line": 2, "end_line": 2, "new_text": "TWO"},
+                    ),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["app.py"]}),
+                ],
+            )
+
+    verification_calls = {"count": 0}
+
+    def fake_verification(*, settings, tool_executions):
+        verification_calls["count"] += 1
+        passed = verification_calls["count"] == 2
+        return VerificationResult(
+            passed=passed,
+            summary="ok" if passed else "retry",
+            checks=[VerificationCheck(name="fake_verify", passed=passed, detail="fake")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="按行替换",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    loop_module.LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=_model_config())
+
+    recent_tool_results = feedbacks[1]["previous_reflect"]["recent_tool_results"]
+    range_summary = next(item for item in recent_tool_results if item["tool_name"] == "read_file_range")
+    replace_summary = next(item for item in recent_tool_results if item["tool_name"] == "replace_lines")
+    assert range_summary["content_mode"] == "range"
+    assert range_summary["content_excerpt"] == "one\ntwo"
+    assert range_summary["read_coverage"] == "1-2"
+    assert replace_summary["action"] == "replace_lines"
+    assert replace_summary["start_line"] == 2
+    assert replace_summary["end_line"] == 2
+    assert replace_summary["line_count_before"] == 3
+    assert replace_summary["line_count_after"] == 3
+
+
+def test_runtime_feedback_keeps_last_five_file_context_snippets(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "app.py").write_text("\n".join(f"line {index}" for index in range(1, 80)) + "\n", encoding="utf-8")
+    feedbacks: list[dict] = []
+    read_ranges = [(1, 5), (6, 10), (11, 15), (16, 20), (21, 25), (26, 30)]
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-file-context-cache-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            call_index = len(feedbacks) - 1
+            start_line, end_line = read_ranges[min(call_index, len(read_ranges) - 1)]
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="读取下一段",
+                rationale="累计同文件读取片段。",
+                planned_actions=["读取 app.py 的一个范围"],
+                tool_calls=[
+                    PlannedToolCall(
+                        tool_name="read_file_range",
+                        tool_input={"path": "app.py", "start_line": start_line, "end_line": end_line},
+                    )
+                ],
+            )
+
+    def fake_verification(*, settings, tool_executions):
+        return VerificationResult(
+            passed=False,
+            summary="继续读取",
+            checks=[VerificationCheck(name="fake_verify", passed=False, detail="fake")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="累计读取上下文",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data={"runtime": {"max_steps": 6}, **_model_config()},
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.VERIFICATION_FAILED
+    assert len(feedbacks) == 6
+    final_cache = runtime_state.reflect_feedback["file_context_cache"]["app.py"]
+    assert final_cache["covered_ranges"] == ["6-10", "11-15", "16-20", "21-25", "26-30"]
+    assert len(final_cache["snippets"]) == 5
+    assert final_cache["snippets"][0]["content_excerpt"].startswith("line 6")
+    assert final_cache["snippets"][-1]["content_excerpt"].startswith("line 26")
+    previous_cache = feedbacks[-1]["previous_reflect"]["file_context_cache"]["app.py"]
+    assert previous_cache["covered_ranges"] == ["1-5", "6-10", "11-15", "16-20", "21-25"]
+
+
 def _run_factual_reflect_feedback_case(
     tmp_path: Path,
     monkeypatch,

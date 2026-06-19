@@ -81,3 +81,11 @@
 - 预期改善：减少 Windows 控制台编码导致的非业务失败，让模型把注意力集中在功能语义和验证规则上；对于 CLI demo、eval task 和真实 Windows 仓库任务，验证通过率应更稳定。
 - 实际反馈：本次 run 的第 5 轮人工观察到模型将非 ASCII 输出替换为 ASCII 后，`python todo_app.py complete 1` 返回 0，验证全部通过。该经验还未正式写入 prompt/runtime rule，因此作为待固化改进项继续观察。
 - 是否固化：尚未固化到模型提示或 runtime rule；已作为明确 backlog 记录，下一轮可实施并用同类 Windows CLI 任务回归验证。
+
+### 2026-06-19：结构摘要、指定行读取与文件上下文累计缓解重复读文件和 old_text_not_found
+- Situation（背景）：真实 run 中反复出现两个相关问题：模型反复调用 `read_file`，以及 `apply_patch` 经常失败为 `old_text_not_found`。追根到底，两者都和上下文注入不足有关。harness 过去常只给文件前几十行摘要、总行数和少量片段，而模型做准确替换时需要真实源码证据，包括函数位置、相邻代码、缩进和完整 old_text。拿不到这些信息时，模型会反复读文件，或者根据摘要自行“编”一段看似合理但文件中不存在的 `old_text`。
+- Task（目标）：目标不是简单禁止重复读文件，也不是用按行替换工具绕开所有 `old_text_not_found`。真正目标是让模型以可控方式拿到必要源码上下文，再基于真实代码做修改。同时，保留一个低摩擦编辑兜底，用来处理已经定位准确但文本精确匹配不可靠的场景。
+- Action（动作）：初始 `context_snapshot.repo_context.selected_files` 增加 `structure_summary`，让模型第一轮就能看到 Python `def/class` 名称和行号；`read_file` 对非小文件返回 `content_mode="excerpt"` 和结构摘要；`read_file_range` 支持按行号读取具体片段，并限制单次只能读取 1-40 行，避免变相全文读取；`file_context_cache` 按文件累计最近 5 次读取片段，让同一文件跨轮已读源码继续可见。同时保留 `replace_lines`，但它定位为 fallback：根因修复仍然是让模型看到真实上下文；`replace_lines` 更适合在乱码、换行、不可见字符、编码差异等导致 `apply_patch.old_text` 明明逻辑正确却匹配不到时，作为按行号替换的兜底手段。
+- Result（结果）：这次改进把问题从“模型总是重复读文件”推进为“模型能否根据结构摘要合理选择需要的上下文”。模型不再只能在摘要和全文之间二选一，而是可以先看结构，再按目标函数附近读取片段，并跨轮保留已读内容。这降低了乱编 `old_text` 的概率，也降低了 `old_text_not_found` 的发生概率。相关回归测试已通过：`tests/test_loop.py tests/test_model.py tests/test_context.py -q` 为 `38 passed`，全量 `pytest -q` 为 `108 passed`。
+- Benefit（收益）：对于上下文不足导致的 `old_text_not_found`，根本解法是结构摘要、指定行读取和累计注入；对于编码或不可见字符导致的文本匹配失败，`replace_lines` 才是兜底工具。当前收益是源码证据供给更连续、更可控，trace 中也能看到模型究竟读过哪些文件片段。
+- 是否固化：已固化为当前 harness 行为。仍需继续观察大型仓库任务中，模型是否能稳定判断“需要哪些上下文”而不是追求全部上下文；这部分是后续真实任务验证重点。
