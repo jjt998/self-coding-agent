@@ -4,6 +4,7 @@
 
 ## 使用规则
 
+- 当你明确说“把这次改动写到 `harness_improvement_log` 中”或同义表达时，默认触发本文档记录规范：用 STAR 法则追加一条改进记录，必须覆盖背景/问题、采取的动作、真实 run 或测试结果、带来的收益和是否固化；除非你额外指定格式，否则不再反复确认。
 - 当一次改进已经通过真实 run 或测试观察到效果后，由你明确说“更新到改进文档中”，再追加记录。
 - 未经确认的想法只放在“待观察问题”里，不写成已固化结论。
 - 记录里可以保留稳定机器字段，例如 `runtime_feedback`、`old_text_not_found`、`verify_rules`。
@@ -39,6 +40,15 @@
 - 工具入参类型校验是否能稳定把非法工具输入收口为 `ModelResponseError/model_error`，避免 Python traceback 泄漏到工具层。
 
 ## 改进记录
+
+### 2026-06-19：合并 `observe` 与 `reflect`，让 harness 只压缩事实而不替模型判断进展
+
+- Situation（背景）：demo todo app 的真实 eval run `eval-demo_todo_app_complete_task_batch-20260619-180233/run-20260619-180233-2890e1a3` 暴露了一个典型问题：第 1 轮模型只执行 `read_file(todo_app.py)` 和 `read_file(tasks.json)`，这是合理的信息收集；第 2 轮模型尝试 `apply_patch`，但因为 `old_text_not_found` 失败，随后 `git_diff.changed_file_count = 0`。旧链路里 `observe` 会承担“是否有进展”的判断，容易把纯读取轮和真正失败的修改轮都粗糙归类为“无进展”。
+- Task（目标）：把 loop 从 `plan -> act -> observe -> verify/reflect` 收敛为 `plan -> act -> reflect -> verify`，让 harness 负责保真地压缩事实，让 LLM 自己解释上一轮是否有效并重规划；同时避免把当前轮数、剩余轮数或最大轮数暴露给模型。
+- Action（动作）：删除独立 `observe` 状态、`progress_observed` 事件和 `progress_made` 判断；每轮 `act` 后固定进入 `reflect`；`reflect_feedback` 只记录 `observation`、`signals`、`failed_tools`、`recent_tool_results`、`verification` 等事实。新增 `no_diff_after_edit_attempt` signal：只有本轮存在修改类工具且最新 `git_diff.changed_file_count == 0` 时才产生；纯读取/搜索轮不产生 no-diff signal。下一轮模型只接收 `runtime_feedback.previous_reflect`、兼容保留的 `previous_verification` 和 `previous_cross_round_plan`，并从模型请求中移除轮数预算字段。
+- Result（结果）：在真实 run 中，第 1 轮纯读取被压缩为 `signals=[]`、`changed_files=[]`、`failed_tool_count=0`，没有被 harness 误判；第 2 轮 patch 失败被压缩为 `signals=["no_diff_after_edit_attempt", "failed_tool_observed"]`，并在 `recent_tool_results` 中保留 `read_file(todo_app.py, excerpt_reason=old_text_not_found_candidate)` 与 `apply_patch(todo_app.py, error=old_text_not_found)`，比旧的“无进展”判断更可解释。回归测试已通过：`tests/test_loop.py tests/test_model.py tests/test_cli.py -q` 为 `47 passed`，全量 `pytest -q` 为 `88 passed`。
+- Benefit（收益）：上下文反馈从“harness 替模型下判断”变成“harness 保真压缩事实”，降低了纯读取/搜索轮被误判的风险；失败修改轮也能用更精确的 signal 表达“尝试编辑但没有 diff”。下一轮模型看到的是事实包而不是硬约束或预算提示，更符合真实 agent harness 的职责边界，也让 trace/report 的排查顺序稳定为 `plan -> act -> reflect -> verify`。
+- 是否固化：已固化为当前 Phase 9 loop 内核行为，并同步更新 README、架构书、使用手册、RUN_CHAIN.html、当前状态和进度文档；后续观察重点是模型是否能更稳定利用 `previous_reflect.recent_tool_results` 中的源码片段与失败工具摘要完成重规划。
 
 ### 2026-06-19：`read_file` 关键片段与 `old_text_not_found` 反馈驱动重规划
 
