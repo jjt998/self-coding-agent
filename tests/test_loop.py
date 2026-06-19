@@ -713,6 +713,147 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
     assert all(payload["parsed_ok"] is True for payload in raw_response_payloads)
 
 
+def test_runtime_feedback_includes_read_file_excerpt_after_old_text_not_found(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "todo_app.py").write_text(
+        "\n".join(
+            [
+                "import json",
+                "",
+                "def format_task(task):",
+                "    title = task.get('title', '')",
+                '    status = "todo" if task.get("done") else "done"',
+                "    return f\"{status}: {title}\"",
+                "",
+                "def main():",
+                "    print(format_task({'title': 'demo', 'done': False}))",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    feedbacks: list[dict] = []
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-old-text-feedback-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            has_feedback = bool(runtime_feedback)
+            if has_feedback:
+                rationale = (
+                    "回应 verification_failed、fake_verify、fix_failing_verification_checks、"
+                    "fix_failed_tool_or_command、use_exact_old_text_from_read_file，"
+                    "根据 read_file 片段复制真实 old_text 后重试。"
+                )
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="使用 read_file 证据修复 old_text。",
+                    rationale=rationale,
+                    planned_actions=[rationale],
+                    tool_calls=[
+                        PlannedToolCall(
+                            tool_name="apply_patch",
+                            tool_input={
+                                "path": "todo_app.py",
+                                "old_text": '    status = "todo" if task.get("done") else "done"',
+                                "new_text": '    status = "done" if task.get("done") else "todo"',
+                            },
+                        ),
+                        PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["todo_app.py"]}),
+                    ],
+                )
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="首轮尝试修复状态显示。",
+                rationale="先读取文件，再尝试 patch。",
+                planned_actions=["读取 todo_app.py 并修复状态显示"],
+                tool_calls=[
+                    PlannedToolCall(tool_name="read_file", tool_input={"path": "todo_app.py"}),
+                    PlannedToolCall(
+                        tool_name="apply_patch",
+                        tool_input={
+                            "path": "todo_app.py",
+                            "old_text": '    status = "[done]" if task["done"] else "[todo]"',
+                            "new_text": '    status = "done" if task.get("done") else "todo"',
+                        },
+                    ),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["todo_app.py"]}),
+                ],
+            )
+
+    verification_calls = {"count": 0}
+
+    def fake_verification(*, settings, tool_executions):
+        verification_calls["count"] += 1
+        passed = verification_calls["count"] == 2
+        return VerificationResult(
+            passed=passed,
+            summary="验证通过" if passed else "验证失败",
+            checks=[VerificationCheck(name="fake_verify", passed=passed, detail="按轮次模拟验证结果。")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="修复 todo 状态显示",
+        task_type="bug_fix",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    assert len(feedbacks) == 2
+    second_feedback = feedbacks[1]
+    read_summary = next(
+        item for item in second_feedback["recent_tool_results"] if item["tool_name"] == "read_file"
+    )
+    assert read_summary["path"] == "todo_app.py"
+    assert read_summary["line_count"] == 9
+    assert read_summary["excerpt_reason"] == "old_text_not_found_candidate"
+    assert read_summary["excerpt_line_start"] >= 1
+    assert read_summary["excerpt_line_end"] <= 9
+    assert 'status = "todo" if task.get("done") else "done"' in read_summary["content_excerpt"]
+
+    patch_summary = next(
+        item for item in second_feedback["recent_tool_results"] if item["tool_name"] == "apply_patch"
+    )
+    assert patch_summary["path"] == "todo_app.py"
+    assert patch_summary["error"] == "old_text_not_found"
+    assert 'status = "[done]" if task["done"] else "[todo]"' in patch_summary["failed_old_text_excerpt"]
+    assert 'status = "done" if task.get("done") else "todo"' in patch_summary["new_text_excerpt"]
+
+    constraints = second_feedback["previous_reflect_feedback"]["replan_constraints"]
+    assert "use_exact_old_text_from_read_file" in constraints["must_address"]
+    failed_tool = constraints["failed_tools"][0]
+    assert failed_tool["error"] == "old_text_not_found"
+    assert failed_tool["failed_old_text_excerpt"] == patch_summary["failed_old_text_excerpt"]
+    assert "下一轮必须依据最近 read_file 片段复制真实 old_text，不要猜测源码。" in second_feedback[
+        "previous_reflect_feedback"
+    ]["suggested_focus"]
+
+
 def _run_reflect_constraint_case(
     tmp_path: Path,
     monkeypatch,

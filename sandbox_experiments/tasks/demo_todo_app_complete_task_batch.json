@@ -1,0 +1,72 @@
+{
+  "tasks": [
+    {
+      "name": "demo_todo_app_add_complete_command",
+      "task": "在 todo_app.py 中新增 complete <id> 子命令。complete 应读取 tasks.json，把指定 id 的任务标记为 done=true，保存文件，并输出可读确认信息。保留现有 list 和 add 行为；当任务不存在时应返回非 0 并输出清晰错误。",
+      "task_type": "feature",
+      "sandbox_retention": "keep_on_success",
+      "verify_commands": [
+        [
+          "python",
+          "todo_app.py",
+          "complete",
+          "1"
+        ],
+        [
+          "python",
+          "todo_app.py",
+          "list"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "complete command exits successfully",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "complete command confirms task",
+          "command_index": 1,
+          "contains": "Completed task #1"
+        },
+        {
+          "type": "json_file_value_equals",
+          "name": "task one is marked done",
+          "path": "tasks.json",
+          "json_path": "0.done",
+          "expected_value": true
+        },
+        {
+          "type": "command_returncode",
+          "name": "list command still exits successfully",
+          "command_index": 2,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "completed task is shown as done",
+          "command_index": 2,
+          "contains": "1. [done] Write project notes"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "other task remains todo",
+          "command_index": 2,
+          "contains": "2. [todo] Review pull request"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "todo app source changed",
+          "path": "todo_app.py"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 1
+      }
+    }
+  ]
+}

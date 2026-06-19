@@ -58,3 +58,29 @@ def test_mvp_acceptance_freezes_commands_boundaries_and_backlog() -> None:
         "下一阶段 Backlog",
     ]:
         assert expected in acceptance
+
+
+def test_harness_improvement_log_and_run_chain_cover_feedback_evidence() -> None:
+    log_text = _read_text("docs/HARNESS_IMPROVEMENT_LOG.md")
+    run_chain = _read_text("docs/RUN_CHAIN.html")
+
+    for expected in [
+        "Harness 改进文档",
+        "问题现象",
+        "改进动作",
+        "预期改善",
+        "实际反馈",
+        "是否固化",
+        "old_text_not_found",
+        "runtime_feedback.recent_tool_results",
+    ]:
+        assert expected in log_text
+
+    for expected in [
+        "content_excerpt",
+        "failed_old_text_excerpt",
+        "old_text_not_found_candidate",
+        "候选源码片段",
+        "失败的 old_text 摘要",
+    ]:
+        assert expected in run_chain

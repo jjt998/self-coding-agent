@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
@@ -390,7 +391,10 @@ class LoopOrchestrator:
             "previous_verification": verification_payload,
             "previous_reflect_feedback": self._build_previous_reflect_feedback(runtime_state=runtime_state),
             "recent_tool_results": [
-                self._summarize_tool_execution(execution)
+                self._summarize_tool_execution(
+                    execution=execution,
+                    recent_executions=runtime_state.recent_tool_executions,
+                )
                 for execution in runtime_state.recent_tool_executions
             ],
         }
@@ -408,7 +412,10 @@ class LoopOrchestrator:
         verification_failure = self._build_verification_failure_details(runtime_state=runtime_state)
         failed_check_names = list(verification_failure.get("failing_check_names", []))
         failed_tools = [
-            self._summarize_tool_execution(execution)
+            self._summarize_tool_execution(
+                execution=execution,
+                recent_executions=runtime_state.recent_tool_executions,
+            )
             for execution in runtime_state.recent_tool_executions
             if execution.tool_output.get("ok") is False
             or (execution.tool_name == "run_command" and execution.tool_output.get("returncode", 0) != 0)
@@ -462,7 +469,11 @@ class LoopOrchestrator:
             "avoid_exact_tool_sequence": list(constraints.get("avoid_exact_tool_sequence", [])),
         }
 
-    def _summarize_tool_execution(self, execution: ToolExecution) -> dict[str, Any]:
+    def _summarize_tool_execution(
+        self,
+        execution: ToolExecution,
+        recent_executions: list[ToolExecution] | None = None,
+    ) -> dict[str, Any]:
         """压缩工具结果，避免把大段 stdout、文件内容或 diff 原样塞回模型。"""
         output = execution.tool_output
         summary: dict[str, Any] = {
@@ -473,6 +484,10 @@ class LoopOrchestrator:
             summary["error"] = output.get("error")
         if "returncode" in output:
             summary["returncode"] = output.get("returncode")
+        if execution.tool_name in {"read_file", "apply_patch"}:
+            path = execution.tool_input.get("path")
+            if path:
+                summary["path"] = path
         if execution.tool_name == "git_diff":
             summary["changed_file_count"] = output.get("changed_file_count", 0)
             summary["changed_files"] = [
@@ -484,7 +499,114 @@ class LoopOrchestrator:
             summary["match_count"] = output.get("match_count", 0)
         if execution.tool_name == "read_file":
             summary["line_count"] = output.get("line_count", 0)
+            summary.update(
+                self._build_read_file_excerpt_summary(
+                    execution=execution,
+                    recent_executions=recent_executions or [],
+                )
+            )
+        if execution.tool_name == "apply_patch" and output.get("error") == "old_text_not_found":
+            summary["failed_old_text_excerpt"] = self._truncate_model_feedback_text(
+                execution.tool_input.get("old_text"),
+                limit=1200,
+            )
+            summary["new_text_excerpt"] = self._truncate_model_feedback_text(
+                execution.tool_input.get("new_text"),
+                limit=1200,
+            )
         return summary
+
+    def _build_read_file_excerpt_summary(
+        self,
+        execution: ToolExecution,
+        recent_executions: list[ToolExecution],
+    ) -> dict[str, Any]:
+        """为 read_file 生成短源码片段，优先覆盖 old_text_not_found 的目标位置。"""
+        content = str(execution.tool_output.get("content", ""))
+        lines = content.splitlines()
+        if not lines:
+            return {
+                "content_excerpt": "",
+                "excerpt_line_start": 0,
+                "excerpt_line_end": 0,
+                "excerpt_reason": "empty_file",
+            }
+
+        related_patch = self._find_related_old_text_failure(
+            read_execution=execution,
+            recent_executions=recent_executions,
+        )
+        if related_patch:
+            old_text = str(related_patch.tool_input.get("old_text") or "")
+            best_index = self._find_best_excerpt_line_index(lines=lines, needle=old_text)
+            start_index = max(best_index - 5, 0)
+            excerpt_reason = "old_text_not_found_candidate"
+        else:
+            start_index = 0
+            excerpt_reason = "leading_excerpt"
+
+        excerpt_lines = lines[start_index : start_index + 20]
+        excerpt_text = "\n".join(excerpt_lines)
+        while len(excerpt_text) > 4000 and len(excerpt_lines) > 1:
+            excerpt_lines = excerpt_lines[:-1]
+            excerpt_text = "\n".join(excerpt_lines)
+        if len(excerpt_text) > 4000:
+            excerpt_text = excerpt_text[:4000] + "...[truncated]"
+        end_index = start_index + len(excerpt_lines)
+        return {
+            "content_excerpt": excerpt_text,
+            "excerpt_line_start": start_index + 1,
+            "excerpt_line_end": end_index,
+            "excerpt_reason": excerpt_reason,
+        }
+
+    def _find_related_old_text_failure(
+        self,
+        read_execution: ToolExecution,
+        recent_executions: list[ToolExecution],
+    ) -> ToolExecution | None:
+        """寻找同一文件上的 old_text_not_found，作为 read_file 片段选择依据。"""
+        read_path = read_execution.tool_input.get("path")
+        if not read_path:
+            return None
+        for execution in reversed(recent_executions):
+            if execution.tool_name != "apply_patch":
+                continue
+            if execution.tool_output.get("error") != "old_text_not_found":
+                continue
+            if execution.tool_input.get("path") == read_path:
+                return execution
+        return None
+
+    def _find_best_excerpt_line_index(self, lines: list[str], needle: str) -> int:
+        """用简单 token 重叠找到最可能对应失败 old_text 的源码行。"""
+        needle_tokens = self._tokenize_feedback_text(needle)
+        if not needle_tokens:
+            return 0
+        best_index = 0
+        best_score = -1
+        for index, line in enumerate(lines):
+            line_tokens = self._tokenize_feedback_text(line)
+            score = len(needle_tokens & line_tokens)
+            if score > best_score:
+                best_index = index
+                best_score = score
+        return best_index
+
+    def _tokenize_feedback_text(self, text: str) -> set[str]:
+        """把失败文本压成粗粒度 token，用于选择候选源码片段。"""
+        return {
+            token.lower()
+            for token in re.split(r"[^A-Za-z0-9_\u4e00-\u9fff]+", text)
+            if token.strip()
+        }
+
+    def _truncate_model_feedback_text(self, value: Any, limit: int) -> str:
+        """截断进入模型反馈的长文本，避免 trace 和 prompt 被大块内容淹没。"""
+        text = "" if value is None else str(value)
+        if len(text) <= limit:
+            return text
+        return text[:limit] + "...[truncated]"
 
     def _validate_reflect_constraints_acknowledged(
         self,
@@ -1099,10 +1221,13 @@ class LoopOrchestrator:
         return rule_types
 
     def _build_reflect_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """Build structured reflect feedback for the next planning round."""
+        """为下一轮 plan 生成结构化反思反馈。"""
         verification_failure = self._build_verification_failure_details(runtime_state=runtime_state)
         failed_tool_summaries = [
-            self._summarize_tool_execution(execution)
+            self._summarize_tool_execution(
+                execution=execution,
+                recent_executions=runtime_state.recent_tool_executions,
+            )
             for execution in runtime_state.recent_tool_executions
             if execution.tool_output.get("ok") is False
             or (execution.tool_name == "run_command" and execution.tool_output.get("returncode", 0) != 0)
@@ -1114,6 +1239,8 @@ class LoopOrchestrator:
             suggested_focus.append("需要优先修复未通过的验证检查。")
         if failed_tool_summaries:
             suggested_focus.append("需要修复失败工具调用或命令返回码。")
+        if self._has_old_text_not_found_failure(failed_tool_summaries):
+            suggested_focus.append("下一轮必须依据最近 read_file 片段复制真实 old_text，不要猜测源码。")
         if not suggested_focus:
             suggested_focus.append("根据上一轮证据调整工具计划。")
 
@@ -1139,7 +1266,7 @@ class LoopOrchestrator:
         verification_failure: dict[str, Any],
         failed_tool_summaries: list[dict[str, Any]],
     ) -> list[str]:
-        """Build stable focus tags for model-facing replan constraints."""
+        """生成给模型消费的稳定重规划关注标签。"""
         suggested_focus: list[str] = []
         if not runtime_state.progress_made:
             suggested_focus.append("produce_observable_file_change")
@@ -1147,6 +1274,16 @@ class LoopOrchestrator:
             suggested_focus.append("fix_failing_verification_checks")
         if failed_tool_summaries:
             suggested_focus.append("fix_failed_tool_or_command")
+        if self._has_old_text_not_found_failure(failed_tool_summaries):
+            suggested_focus.append("use_exact_old_text_from_read_file")
         if not suggested_focus:
             suggested_focus.append("adjust_next_tool_plan_from_previous_evidence")
         return suggested_focus
+
+    def _has_old_text_not_found_failure(self, failed_tool_summaries: list[dict[str, Any]]) -> bool:
+        """判断失败工具摘要里是否存在 old_text_not_found。"""
+        return any(
+            summary.get("tool_name") == "apply_patch"
+            and summary.get("error") == "old_text_not_found"
+            for summary in failed_tool_summaries
+        )
