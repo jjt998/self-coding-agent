@@ -10,7 +10,7 @@ from context import ContextBuilder, ContextSnapshot
 from config import RunSettings
 from memory import RuntimeMemoryManager
 from model import ModelDecision, ModelError, ModelResponseError, TOOL_SCHEMAS, build_model_adapter
-from trace import TraceEvent, TraceWriter
+from runtime_trace import TraceEvent, TraceWriter
 from tools import FULL_READ_FILE_MAX_CHARS, FULL_READ_FILE_MAX_LINES, CoreToolRunner, ToolExecution
 from verify import VerificationResult, build_phase_4_verification
 

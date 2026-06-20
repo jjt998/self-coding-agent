@@ -10,7 +10,7 @@ from typing import Any
 from config import RunSettings
 from loop import LoopOrchestrator, RuntimeState, StopReason, StopReasonCode
 from memory import LongTermMemoryEntry, LongTermMemoryStore, _extract_keywords, _normalize_file_paths
-from trace import TraceEvent, TraceWriter
+from runtime_trace import TraceEvent, TraceWriter
 
 
 @dataclass(slots=True)

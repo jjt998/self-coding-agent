@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import loop as loop_module
 from config import build_settings
 from model import ModelDecision, ModelTokenUsage, PlannedToolCall
-from trace import TraceWriter
+from runtime_trace import TraceWriter
 from verify import VerificationCheck, VerificationResult
 
 
