@@ -82,6 +82,16 @@ class RuntimeState:
     changed_files: list[str] = field(default_factory=list)
     failed_tool_count: int = 0
     observation_summary: str = ""
+    token_usage: dict[str, Any] = field(
+        default_factory=lambda: {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "request_count": 0,
+            "complete": True,
+            "missing_usage_count": 0,
+        }
+    )
     verification_result: VerificationResult | None = None
     stop_reason: StopReason | None = None
 
@@ -258,6 +268,7 @@ class LoopOrchestrator:
             "failed_tool_count": runtime_state.failed_tool_count,
             "reflect_feedback": dict(runtime_state.reflect_feedback),
             "cross_round_plan": list(runtime_state.cross_round_plan),
+            "token_usage": dict(runtime_state.token_usage),
         }
 
     def _get_max_steps(self, config_data: dict[str, Any]) -> int:
@@ -289,6 +300,7 @@ class LoopOrchestrator:
             "model_name": error.model_name,
             "error_type": type(error).__name__,
             "error_message": str(error),
+            "token_usage": dict(runtime_state.token_usage),
             **error.details,
         }
         self.trace_writer.write_event(TraceEvent(event_type="model_decision_failed", payload=payload))
@@ -731,6 +743,7 @@ class LoopOrchestrator:
             config_data=config_data,
             runtime_feedback=runtime_feedback,
         )
+        self._accumulate_token_usage(runtime_state=runtime_state, model_decision=runtime_state.model_decision)
         self.trace_writer.write_event(
             TraceEvent(
                 event_type="model_raw_response",
@@ -741,6 +754,7 @@ class LoopOrchestrator:
                     "content": runtime_state.model_decision.raw_response_content,
                     "content_length": len(runtime_state.model_decision.raw_response_content),
                     "parsed_ok": True,
+                    "token_usage": runtime_state.model_decision.token_usage.to_dict(),
                 },
             )
         )
@@ -767,6 +781,7 @@ class LoopOrchestrator:
                     "iteration": runtime_state.current_iteration,
                     "has_reflect_feedback": bool(reflect_feedback_summary),
                     "reflect_feedback_summary": reflect_feedback_summary,
+                    "run_token_usage": dict(runtime_state.token_usage),
                 },
             )
         )
@@ -777,6 +792,8 @@ class LoopOrchestrator:
             "rationale": runtime_state.model_decision.rationale,
             "provider": runtime_state.model_decision.provider,
             "model_name": runtime_state.model_decision.model_name,
+            "token_usage": runtime_state.model_decision.token_usage.to_dict(),
+            "run_token_usage": dict(runtime_state.token_usage),
         }
 
     def _run_act(self, runtime_state: RuntimeState, tool_runner: CoreToolRunner) -> dict[str, Any]:
@@ -843,9 +860,22 @@ class LoopOrchestrator:
             "model_decision_count": len(runtime_state.model_decisions),
             "cross_round_plan": list(runtime_state.cross_round_plan),
             "completed_states_before_finalize": list(runtime_state.completed_states),
+            "token_usage": dict(runtime_state.token_usage),
         }
         self.trace_writer.write_event(TraceEvent(event_type="finalize_summary", payload=payload))
         return payload
+
+    def _accumulate_token_usage(self, runtime_state: RuntimeState, model_decision: ModelDecision) -> None:
+        """把单次模型 usage 聚合到整次 run。"""
+        runtime_state.token_usage["request_count"] += 1
+        if not model_decision.token_usage.available:
+            runtime_state.token_usage["complete"] = False
+            runtime_state.token_usage["missing_usage_count"] += 1
+            return
+
+        runtime_state.token_usage["prompt_tokens"] += model_decision.token_usage.prompt_tokens
+        runtime_state.token_usage["completion_tokens"] += model_decision.token_usage.completion_tokens
+        runtime_state.token_usage["total_tokens"] += model_decision.token_usage.total_tokens
 
     def _run_planned_tools(
         self,

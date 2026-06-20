@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import loop as loop_module
 from config import build_settings
-from model import ModelDecision, PlannedToolCall
+from model import ModelDecision, ModelTokenUsage, PlannedToolCall
 from trace import TraceWriter
 from verify import VerificationCheck, VerificationResult
 
@@ -29,7 +29,7 @@ def test_src_no_longer_contains_phase3_stub_loop_markers() -> None:
     assert "Phase 3 工具闭环" not in src_text
 
 
-def _fake_model_response(tool_calls: list[dict] | None = None) -> str:
+def _fake_model_response(tool_calls: list[dict] | None = None, usage: dict | None = None) -> str:
     decision = {
         "summary": "已生成真实模型决策。",
         "rationale": "按模型返回的工具计划执行。",
@@ -60,7 +60,10 @@ def _fake_model_response(tool_calls: list[dict] | None = None) -> str:
         ],
     }
     return json.dumps(
-        {"choices": [{"message": {"content": json.dumps(decision, ensure_ascii=False)}}]},
+        {
+            "choices": [{"message": {"content": json.dumps(decision, ensure_ascii=False)}}],
+            **({"usage": usage} if usage is not None else {}),
+        },
         ensure_ascii=False,
     )
 
@@ -187,7 +190,10 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", _fake_model_response())
+    monkeypatch.setenv(
+        "SELF_CODING_AGENT_FAKE_MODEL_RESPONSE",
+        _fake_model_response(usage={"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50}),
+    )
 
     settings = build_settings(
         task="创建脚手架",
@@ -225,6 +231,14 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert runtime_state.reflect_triggered is True
     assert runtime_state.iteration_count == 1
     assert runtime_state.max_steps == 2
+    assert runtime_state.token_usage == {
+        "prompt_tokens": 40,
+        "completion_tokens": 10,
+        "total_tokens": 50,
+        "request_count": 1,
+        "complete": True,
+        "missing_usage_count": 0,
+    }
     assert runtime_state.completed_states == [
         "ingest",
         "analyze",
@@ -251,6 +265,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert raw_response_payload["iteration"] == 1
     assert raw_response_payload["parsed_ok"] is True
     assert raw_response_payload["content_length"] == len(raw_response_payload["content"])
+    assert raw_response_payload["token_usage"]["total_tokens"] == 50
     assert json.loads(raw_response_payload["content"])["planned_actions"] == ["执行模型工具计划"]
     assert not any(event["event_type"] == "progress_observed" for event in trace_events)
     reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback")
@@ -278,11 +293,17 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert finalize_payload["iteration_count"] == 1
     assert finalize_payload["max_steps"] == 2
     assert finalize_payload["tool_execution_count"] == 5
+    assert finalize_payload["token_usage"]["total_tokens"] == 50
+    assert finalize_payload["token_usage"]["complete"] is True
     state_results = [event["payload"] for event in trace_events if event["event_type"] == "state_result"]
     ingest_state_result = next(event for event in state_results if event["state"] == "ingest")
     finalize_state_result = next(event for event in state_results if event["state"] == "finalize")
     assert ingest_state_result["result"]["verify_rule_count"] == 1
     assert finalize_state_result["result"]["tool_execution_count"] == 5
+    plan_state_result = next(event for event in state_results if event["state"] == "plan")
+    assert plan_state_result["result"]["token_usage"]["total_tokens"] == 50
+    run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
+    assert run_finished_payload["stop_reason"]["details"]["token_usage"]["total_tokens"] == 50
     transition_targets = [
         event["payload"]["to_state"]
         for event in trace_events
@@ -1460,6 +1481,92 @@ def test_loop_records_model_response_normalized_for_planned_actions(tmp_path: Pa
     assert normalized_payload["notes"][0]["reason"] == "missing_or_unusable_fallback_to_tool_calls"
     model_decision_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_decision")
     assert model_decision_payload["planned_actions"] == ["执行工具：read_file"]
+
+
+def test_loop_aggregates_token_usage_across_iterations_and_marks_missing_usage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+    decide_call = {"count": 0}
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-token-usage-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            decide_call["count"] += 1
+            token_usage = (
+                ModelTokenUsage(prompt_tokens=30, completion_tokens=12, total_tokens=42, available=True)
+                if decide_call["count"] == 1
+                else ModelTokenUsage()
+            )
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="fake decision",
+                rationale="first round has usage, second round misses usage",
+                planned_actions=["执行工具：read_file"],
+                tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "README.md"})],
+                token_usage=token_usage,
+            )
+
+    verify_calls = {"count": 0}
+
+    def fake_verification(*, settings, tool_executions):
+        verify_calls["count"] += 1
+        passed = verify_calls["count"] >= 2
+        return VerificationResult(
+            passed=passed,
+            summary="ok" if passed else "fail",
+            checks=[VerificationCheck(name="fake_verify", passed=passed, detail="fake")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+
+    settings = build_settings(
+        task="累计 token usage",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data={**_model_config(), "runtime": {"max_steps": 2}},
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    assert runtime_state.token_usage == {
+        "prompt_tokens": 30,
+        "completion_tokens": 12,
+        "total_tokens": 42,
+        "request_count": 2,
+        "complete": False,
+        "missing_usage_count": 1,
+    }
+    trace_events = [
+        json.loads(line)
+        for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
+    assert model_decision_payloads[0]["token_usage"]["available"] is True
+    assert model_decision_payloads[1]["token_usage"]["available"] is False
+    assert model_decision_payloads[1]["run_token_usage"]["missing_usage_count"] == 1
+    run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
+    assert run_finished_payload["stop_reason"]["details"]["token_usage"]["complete"] is False
 
 
 def test_loop_model_error_includes_safe_raw_response_excerpt_for_invalid_tool_calls(

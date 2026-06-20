@@ -17,8 +17,8 @@ from model import (
 )
 
 
-def _openai_response(decision: dict) -> dict:
-    return {
+def _openai_response(decision: dict, usage: dict | None = None) -> dict:
+    response = {
         "choices": [
             {
                 "message": {
@@ -27,6 +27,9 @@ def _openai_response(decision: dict) -> dict:
             }
         ]
     }
+    if usage is not None:
+        response["usage"] = usage
+    return response
 
 
 def _valid_decision() -> dict:
@@ -154,8 +157,38 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
     assert decision.cross_round_plan == ["下一轮根据验证结果继续调整。"]
     assert decision.tool_calls[0].tool_name == "search_text"
     assert decision.tool_calls[0].tool_input == {"query": "Demo", "limit": 5}
+    assert decision.token_usage.available is False
     assert json.loads(decision.raw_response_content)["summary"] == "已生成真实模型决策。"
     assert "raw_response_content" not in decision.to_dict()
+
+
+def test_openai_compatible_adapter_extracts_token_usage_when_provider_returns_usage(monkeypatch) -> None:
+    def fake_urlopen(request, timeout):
+        return _FakeHttpResponse(
+            _openai_response(
+                _valid_decision(),
+                usage={"prompt_tokens": 101, "completion_tokens": 19, "total_tokens": 120},
+            )
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", raising=False)
+    monkeypatch.setattr(model_module, "urlopen", fake_urlopen)
+    adapter = OpenAICompatibleModelAdapter(
+        provider="openai_compatible",
+        model_name="demo-model",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+        timeout_seconds=7,
+    )
+
+    decision = adapter.decide(task="检查 Demo", task_type="general", context_snapshot=None, config_data={})
+
+    assert decision.token_usage.available is True
+    assert decision.token_usage.prompt_tokens == 101
+    assert decision.token_usage.completion_tokens == 19
+    assert decision.token_usage.total_tokens == 120
+    assert decision.to_dict()["token_usage"]["total_tokens"] == 120
 
 
 def test_openai_compatible_adapter_includes_runtime_feedback(monkeypatch) -> None:

@@ -70,6 +70,8 @@ def test_cli_strategy_comparison_summary_includes_failure_delta_fields(tmp_path:
     assert "failure_taxonomy_counts_delta" in delta
     assert "failure_taxonomy_tag_counts_delta" in delta
     assert "verification_failure_counts_delta" in delta
+    assert "average_total_tokens_delta" in delta
+    assert "total_tokens_delta" in delta
     assert "task_deltas" in summary_data
     assert len(summary_data["task_deltas"]) == 1
     assert summary_data["task_deltas"][0]["strategy"] == "memory_off"
@@ -97,6 +99,9 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                 memory_enabled=True,
                 memory_strategy="structured_memory_on",
                 outcome="passed_cleanly",
+                prompt_tokens=10,
+                completion_tokens=2,
+                total_tokens=12,
             )
         ],
     )
@@ -122,6 +127,9 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                 memory_strategy="memory_off",
                 outcome="failed_verification",
                 failing_checks=["doc_readable"],
+                prompt_tokens=20,
+                completion_tokens=5,
+                total_tokens=25,
                 failure_taxonomy="verification:doc_readable",
                 failure_taxonomy_tags=[
                     "outcome:failed_verification",
@@ -147,6 +155,9 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                 memory_strategy="memory_off",
                 outcome="failed_verification",
                 failing_checks=["task_verification_configured"],
+                prompt_tokens=6,
+                completion_tokens=2,
+                total_tokens=8,
                 failure_taxonomy="verification:missing_task_verification",
                 failure_taxonomy_tags=[
                     "outcome:failed_verification",
@@ -171,6 +182,9 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                 memory_enabled=False,
                 memory_strategy="memory_off",
                 outcome="stopped_early",
+                prompt_tokens=4,
+                completion_tokens=1,
+                total_tokens=5,
                 failure_taxonomy="model:ModelResponseError",
                 failure_taxonomy_tags=[
                     "outcome:stopped_early",
@@ -197,6 +211,9 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                 memory_strategy="memory_off",
                 outcome="stopped_early",
                 failing_checks=["verify_command_1"],
+                prompt_tokens=12,
+                completion_tokens=3,
+                total_tokens=15,
                 failure_taxonomy="runtime:max_steps_reached",
                 failure_taxonomy_tags=[
                     "outcome:stopped_early",
@@ -263,6 +280,8 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
         "task_verification_configured": 1,
         "verify_command_1": 1,
     }
+    assert delta["average_total_tokens_delta"] == 1.25
+    assert delta["total_tokens_delta"] == 41
     assert delta["reflect_trigger_reason_counts_delta"] == {
         "no_progress_after_observe": -1,
         "verification_failed": 3,
@@ -280,10 +299,13 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
     assert task_delta_by_name["task_model_error"]["candidate_failure_taxonomy"] == "model:ModelResponseError"
     assert task_delta_by_name["task_max_steps"]["candidate_failure_taxonomy"] == "runtime:max_steps_reached"
     assert task_delta_by_name["task_max_steps"]["failing_checks_delta"] == {"verify_command_1": 1}
+    assert task_delta_by_name["task_a"]["total_tokens_delta"] == 13
 
     summary_text = _build_strategy_comparison_markdown(comparison_result)
     assert "failure taxonomy delta" in summary_text
     assert "verification checks delta" in summary_text
+    assert "average total tokens delta" in summary_text
+    assert "total tokens delta" in summary_text
     assert "reflect 原因 delta" in summary_text
     assert "## Task Delta" in summary_text
     assert "task `task_a`" in summary_text

@@ -137,6 +137,20 @@ class PlannedToolCall:
 
 
 @dataclass(slots=True)
+class ModelTokenUsage:
+    """保存单次模型请求返回的 token usage。"""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    available: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """转换成普通字典，便于 trace/report/eval 复用。"""
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class ModelDecision:
     """保存一次任务级决策结果，包括计划说明和准备执行的工具步骤。"""
 
@@ -148,6 +162,7 @@ class ModelDecision:
     planned_actions: list[str] = field(default_factory=list)
     cross_round_plan: list[str] = field(default_factory=list)
     tool_calls: list[PlannedToolCall] = field(default_factory=list)
+    token_usage: ModelTokenUsage = field(default_factory=ModelTokenUsage)
     raw_response_content: str = ""
     normalization_notes: list[dict[str, Any]] = field(default_factory=list)
 
@@ -157,6 +172,7 @@ class ModelDecision:
         data.pop("raw_response_content", None)
         data.pop("normalization_notes", None)
         data["tool_calls"] = [tool_call.to_dict() for tool_call in self.tool_calls]
+        data["token_usage"] = self.token_usage.to_dict()
         return data
 
 
@@ -228,6 +244,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             raw_decision=raw_decision,
             task_type=task_type,
             raw_response_content=raw_response_content,
+            token_usage=self._extract_token_usage(response_payload),
         )
 
     def _build_request_payload(
@@ -435,6 +452,26 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             )
         return raw_decision, content
 
+    def _extract_token_usage(self, response_payload: dict[str, Any]) -> ModelTokenUsage:
+        """从 provider 响应中提取 usage；缺失时保持 unavailable。"""
+        usage = response_payload.get("usage")
+        if not isinstance(usage, dict):
+            return ModelTokenUsage()
+
+        prompt_tokens = _normalize_usage_int(usage.get("prompt_tokens"))
+        completion_tokens = _normalize_usage_int(usage.get("completion_tokens"))
+        total_tokens = _normalize_usage_int(usage.get("total_tokens"))
+        available = all(value is not None for value in [prompt_tokens, completion_tokens, total_tokens])
+        if not available:
+            return ModelTokenUsage()
+
+        return ModelTokenUsage(
+            prompt_tokens=prompt_tokens or 0,
+            completion_tokens=completion_tokens or 0,
+            total_tokens=total_tokens or 0,
+            available=True,
+        )
+
     def _diagnostic_details(self, **extra: Any) -> dict[str, Any]:
         """生成不会泄露 API key 的模型排障信息。"""
         details = {
@@ -458,6 +495,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         raw_decision: dict[str, Any],
         task_type: str,
         raw_response_content: str = "",
+        token_usage: ModelTokenUsage | None = None,
     ) -> ModelDecision:
         """校验模型决策字段，并转换成内部数据结构。"""
         summary = _required_string(raw_decision, "summary", self)
@@ -481,6 +519,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             planned_actions=planned_actions,
             cross_round_plan=cross_round_plan,
             tool_calls=tool_calls,
+            token_usage=token_usage or ModelTokenUsage(),
             raw_response_content=raw_response_content,
             normalization_notes=normalization_notes,
         )
@@ -577,6 +616,21 @@ def _truncate_text(value: str, limit: int = 300) -> str:
     if len(value) <= limit:
         return value
     return value[:limit] + "...[truncated]"
+
+
+def _normalize_usage_int(raw_value: Any) -> int | None:
+    """把 provider usage 字段收敛成非负整数。"""
+    if isinstance(raw_value, bool) or raw_value is None:
+        return None
+    if isinstance(raw_value, int):
+        return raw_value if raw_value >= 0 else None
+    if isinstance(raw_value, str) and raw_value.strip():
+        try:
+            parsed = int(raw_value.strip())
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
 
 
 def _required_string(raw_decision: dict[str, Any], field_name: str, adapter: OpenAICompatibleModelAdapter) -> str:

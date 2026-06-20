@@ -140,6 +140,10 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
     assert summary_data["failure_taxonomy_counts"] == {}
     assert summary_data["failure_taxonomy_tag_counts"] == {}
     assert summary_data["verification_failure_counts"] == {}
+    assert summary_data["total_tokens"] == 0
+    assert summary_data["average_total_tokens"] == 0.0
+    assert summary_data["token_usage_complete_count"] == 0
+    assert summary_data["token_usage_incomplete_count"] == 2
     assert len(summary_data["runs"]) == 2
     assert summary_data["runs"][0]["task_name"] == "general_scaffold"
     assert summary_data["runs"][1]["task_name"] == "bug_fix_fail"
@@ -160,6 +164,8 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
     assert "## 验证失败检查项" in summary_text
     assert "## 诊断标签" in summary_text
     assert "## 运行明细" in summary_text
+    assert "average total tokens" in summary_text
+    assert "token usage 完整任务数" in summary_text
 
     run_dirs = sorted((eval_dir / "runs").iterdir())
     assert len(run_dirs) == 2
@@ -268,6 +274,9 @@ def test_eval_batch_result_distinguishes_clean_pass_warning_pass_and_failure() -
             tool_call_count=5,
             stop_reason="completed",
             outcome="passed_cleanly",
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
             expectation=EvalExpectationSpec(passed=True, outcome="passed_cleanly"),
             expectation_result=EvalExpectationAssessment(defined=True, matched=True),
         ),
@@ -281,6 +290,11 @@ def test_eval_batch_result_distinguishes_clean_pass_warning_pass_and_failure() -
             stop_reason="completed",
             diagnostic_labels=["memory_conflict_warning"],
             outcome="passed_with_warnings",
+            prompt_tokens=20,
+            completion_tokens=6,
+            total_tokens=26,
+            token_usage_complete=False,
+            missing_usage_count=1,
             expectation=EvalExpectationSpec(
                 passed=True,
                 outcome="passed_cleanly",
@@ -311,6 +325,9 @@ def test_eval_batch_result_distinguishes_clean_pass_warning_pass_and_failure() -
             outcome="failed_verification",
             verification_summary="验证失败：至少有一项关键检查未通过。",
             failing_checks=["说明文件可读", "命令检查通过"],
+            prompt_tokens=30,
+            completion_tokens=9,
+            total_tokens=39,
             failure_taxonomy="verification:说明文件可读",
             failure_taxonomy_tags=[
                 "outcome:failed_verification",
@@ -341,6 +358,12 @@ def test_eval_batch_result_distinguishes_clean_pass_warning_pass_and_failure() -
     assert batch_result.warning_pass_count == 1
     assert batch_result.warning_rate == 1 / 3
     assert batch_result.verification_failure_rate == 1 / 3
+    assert batch_result.total_prompt_tokens == 60
+    assert batch_result.total_completion_tokens == 20
+    assert batch_result.total_tokens == 80
+    assert batch_result.average_total_tokens == 80 / 3
+    assert batch_result.token_usage_complete_count == 2
+    assert batch_result.token_usage_incomplete_count == 1
     assert batch_result.outcome_counts == {
         "failed_verification": 1,
         "passed_cleanly": 1,
@@ -383,10 +406,15 @@ def test_eval_summary_markdown_includes_outcome_layers_and_taxonomy() -> None:
                 passed=True,
                 step_count=9,
                 tool_call_count=5,
-                stop_reason="completed",
-                diagnostic_labels=["memory_conflict_warning"],
-                outcome="passed_with_warnings",
-                expectation_result=EvalExpectationAssessment(
+            stop_reason="completed",
+            diagnostic_labels=["memory_conflict_warning"],
+            outcome="passed_with_warnings",
+            prompt_tokens=8,
+            completion_tokens=4,
+            total_tokens=12,
+            token_usage_complete=False,
+            missing_usage_count=1,
+            expectation_result=EvalExpectationAssessment(
                     defined=True,
                     matched=False,
                     failed_fields=["outcome", "max_step_count"],
@@ -402,6 +430,9 @@ def test_eval_summary_markdown_includes_outcome_layers_and_taxonomy() -> None:
                 stop_reason="completed",
                 outcome="failed_verification",
                 failing_checks=["说明文件可读"],
+                prompt_tokens=11,
+                completion_tokens=5,
+                total_tokens=16,
                 failure_taxonomy="verification:说明文件可读",
                 failure_taxonomy_tags=[
                     "outcome:failed_verification",
@@ -417,6 +448,8 @@ def test_eval_summary_markdown_includes_outcome_layers_and_taxonomy() -> None:
     assert "带警告成功：`1`" in summary_text
     assert "警告率：`0.50`" in summary_text
     assert "验证失败率：`0.50`" in summary_text
+    assert "average total tokens `14.00`" in summary_text
+    assert "token usage 不完整任务数：`1`" in summary_text
     assert "expectation 失配数：`1`" in summary_text
     assert "expectation 失配率：`0.50`" in summary_text
     assert "## 结果分层" in summary_text
@@ -429,6 +462,7 @@ def test_eval_summary_markdown_includes_outcome_layers_and_taxonomy() -> None:
     assert "## 验证失败检查项" in summary_text
     assert "失败检查 `说明文件可读`" in summary_text
     assert "expectation 未命中 `outcome, max_step_count`" in summary_text
+    assert "token usage 不完整 `missing=1`" in summary_text
 
 
 def test_load_expectation_spec_normalizes_minimal_expectation_fields() -> None:

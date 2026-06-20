@@ -2,7 +2,7 @@
 
 ## 总览
 
-- 最后更新时间：2026-06-20
+- 最后更新时间：2026-06-19
 - 当前激活阶段：`Phase 9：真实任务最小闭环`
 - 当前阶段状态：`in_progress`
 
@@ -15,7 +15,6 @@
 - 下一轮模型接收 `previous_reflect`、`previous_verification` 和 `previous_cross_round_plan`，但不接收当前轮数、剩余轮数或最大轮数。
 - verify 失败只作为事实进入 `previous_reflect.verification`；当前实现不再生成 `replan_constraints`，也不再做 plan 后反思硬约束校验。
 - `planned_actions` 只描述本轮 `tool_calls`，跨轮安排继续由 `cross_round_plan` 承载。
-- 当前已新增 token diagnostics：单任务聚合 `prompt_tokens`、`completion_tokens`、`total_tokens`，并同步进入 `model_raw_response`、`model_decision`、`run_finished`、`report.md`、`summary.json`、`summary.md` 和 comparison delta；provider 未返回 `usage` 时保持真实缺口，不做本地估算。
 
 > 说明：下方按 Phase 保留历史推进记录，其中早期条目可能描述旧的 `observe` 或反思硬约束行为；当前实现以上方“最新 Phase 9 收口”为准。
 

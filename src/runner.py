@@ -439,6 +439,16 @@ def _build_phase_4_report(
     verification_details = "\n".join(verification_lines) if verification_lines else "- 暂无验证检查项。"
     memory_write_status = "已写入" if memory_write_result.written else "未写入"
     sandbox_status = "已保留" if sandbox_cleanup_result.kept else "已删除"
+    token_usage = runtime_state.token_usage
+    token_usage_status = "完整" if token_usage.get("complete") else "不完整"
+    token_usage_summary = (
+        f"- usage 完整性：`{token_usage_status}`\n"
+        f"- 模型请求数：`{token_usage.get('request_count', 0)}`\n"
+        f"- 缺失 usage 请求数：`{token_usage.get('missing_usage_count', 0)}`\n"
+        f"- prompt tokens：`{token_usage.get('prompt_tokens', 0)}`\n"
+        f"- completion tokens：`{token_usage.get('completion_tokens', 0)}`\n"
+        f"- total tokens：`{token_usage.get('total_tokens', 0)}`"
+    )
 
     context_lines = []
     if context_snapshot:
@@ -529,6 +539,8 @@ def _build_phase_4_report(
         f"{reflect_feedback_summary}\n"
         f"\n## 模型返回摘要\n\n"
         f"{model_response_summary}\n"
+        f"\n## Token 消耗\n\n"
+        f"{token_usage_summary}\n"
         f"\n## 上下文摘要\n\n"
         f"{context_summary}\n"
         f"\n## 工具调用摘要\n\n"

@@ -101,6 +101,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert raw_response_payloads[0]["model_name"] == "deepseek-v4-flash"
     assert raw_response_payloads[0]["iteration"] == 1
     assert raw_response_payloads[0]["parsed_ok"] is True
+    assert raw_response_payloads[0]["token_usage"]["available"] is False
 
     tool_results = [event["payload"] for event in trace_events if event["event_type"] == "tool_result"]
     assert len(tool_results) >= 10
@@ -178,7 +179,10 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "`finalize`" in report_text
     assert "## 反思反馈" in report_text
     assert "## 模型返回摘要" in report_text
+    assert "## Token 消耗" in report_text
     assert "原始返回：见 `trace.jsonl` 中的 `model_raw_response` 事件。" in report_text
+    assert "usage 完整性：`不完整`" in report_text
+    assert "缺失 usage 请求数：" in report_text
     assert "reflect：已触发" in report_text
     assert "## 反思事实摘要" in report_text
     assert "变更文件数：`1`" in report_text

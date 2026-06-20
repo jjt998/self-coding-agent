@@ -803,7 +803,7 @@
           <article class="card model">
             <span class="tag">plan</span>
             <h3>模型计划</h3>
-            <p>请求 OpenAI compatible 模型。写入 <code>model_raw_response</code> 和 <code>model_decision</code>。</p>
+          <p>请求 OpenAI compatible 模型。写入 <code>model_raw_response</code>、<code>model_decision</code> 和本次请求的 <code>token_usage</code>。</p>
           </article>
           <article class="card tool">
             <span class="tag">act</span>
@@ -840,7 +840,7 @@
       <div class="grid-3">
         <article class="mini">
           <h3>模型原始返回</h3>
-          <p><code>model_raw_response</code> 保存模型显式返回的 JSON content。排查模型“嘴上说要改但 tool_calls 没改”时先看这里。</p>
+          <p><code>model_raw_response</code> 保存模型显式返回的 JSON content 和本次请求的 <code>token_usage</code>。排查模型“嘴上说要改但 tool_calls 没改”或单任务 token 异常时先看这里。</p>
         </article>
         <article class="mini">
           <h3>结构化模型决策</h3>
@@ -946,14 +946,14 @@
           <h3>单次 run 产物</h3>
           <ul>
             <li><code>trace.jsonl</code>：完整事件流。</li>
-            <li><code>report.md</code>：人类可读报告。</li>
+            <li><code>report.md</code>：人类可读报告，包含单任务 token 消耗。</li>
             <li><code>config_snapshot.json</code>：本次运行配置快照。</li>
           </ul>
         </article>
         <article class="mini">
           <h3>eval / comparison 产物</h3>
           <ul>
-            <li><code>summary.json</code>：聚合指标和 failure taxonomy。</li>
+            <li><code>summary.json</code>：聚合指标、failure taxonomy 和 token usage 汇总。</li>
             <li><code>summary.md</code>：人类可读评测汇总。</li>
             <li><code>task_deltas</code>：策略对比时查看任务级变化。</li>
           </ul>
@@ -972,9 +972,9 @@
     <section>
       <h2>如何看最近一次 run</h2>
       <div class="checklist">
-        <div class="check">先打开最新 eval 的 <code>summary.json</code>，确认 <code>stop_reason</code>、失败检查和 taxonomy。</div>
-        <div class="check">再看单次 run 的 <code>report.md</code>，快速读取状态流、模型返回摘要、进展观察和验证结果。</div>
-        <div class="check">回到 <code>trace.jsonl</code>，按顺序查 <code>model_raw_response</code>、<code>model_decision</code>、<code>tool_result</code>。</div>
+        <div class="check">先打开最新 eval 的 <code>summary.json</code>，确认 <code>stop_reason</code>、失败检查、taxonomy 和 token 汇总。</div>
+        <div class="check">再看单次 run 的 <code>report.md</code>，快速读取状态流、模型返回摘要、Token 消耗、进展观察和验证结果。</div>
+        <div class="check">回到 <code>trace.jsonl</code>，按顺序查 <code>model_raw_response</code>、<code>model_decision</code>、<code>tool_result</code>；需要拆轮分析 token 时看每条 <code>token_usage</code>。</div>
         <div class="check risk-text">如果是 <code>model_error</code>，先看 <code>model_decision_failed</code> 的 <code>field_path</code>、<code>tool_name</code>、<code>expected_type</code>、<code>actual_type</code>，判断是否是工具入参 schema 错误。</div>
         <div class="check risk-text">如果工具失败，定位 <code>error</code>，例如 <code>old_text_not_found</code>、命令返回码非 0、未知工具参数。</div>
         <div class="check risk-text">如果验证失败，查看 <code>verification_result.checks</code>，确认是命令输出、diff、文件内容还是规则不满足。</div>

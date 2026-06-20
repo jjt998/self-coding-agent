@@ -84,6 +84,7 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 
 - `运行摘要`：总步数、最大轮数、实际轮数、reflect 次数、stop reason。
 - `失败诊断`：setup、model、verify、max steps 等失败摘要。
+- `Token 消耗`：单任务模型请求数、缺失 usage 请求数、`prompt_tokens`、`completion_tokens`、`total_tokens`。
 - `进展观察`：是否观察到文件变更、变更文件数、失败工具数。
 - `反思反馈`：最近一次 reflect trigger、失败检查、建议关注点。
 - `模型返回摘要`：最近一次模型显式返回的 summary、rationale、planned_actions、cross_round_plan 和 tool_calls。
@@ -93,6 +94,7 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 
 - `model_raw_response`：模型显式返回的原始 `choices[0].message.content`。
 - `model_decision`：解析后的结构化决策，包括 `rationale`、`planned_actions`、`cross_round_plan` 和 `tool_calls`。
+- `run_finished`：单任务最终聚合字段，包括 stop reason 和任务级 `token_usage`。
 
 字段定位说明：
 - `tool_calls` 是唯一会被 `act` 阶段实际执行的工具调用。
@@ -101,6 +103,7 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 - `tool_input` 会按 `tool_schema` 校验字段名和类型，类型不匹配会以 `model_error` 收口，不会继续进入工具层 traceback。
 
 这里记录的是模型显式返回内容，不包含 provider 隐藏推理链，也不会记录 API key 或请求头。
+token 指标只统计 provider 返回的模型 usage，不统计工具调用或命令开销；若某轮缺少 `usage`，当前会保留真实值并把整次任务标记为 token usage 不完整，不做本地估算。
 
 ## 5. 运行 eval batch
 
@@ -118,7 +121,7 @@ eval 产物包含：
 - `summary.md`
 - 每个 task 的独立 run 目录
 
-`summary.json` 中重点字段包括 `outcome_counts`、`failure_taxonomy_counts`、`failure_taxonomy_tag_counts`、`verification_failure_counts`、`reflect_trigger_reason_counts`。
+`summary.json` 中重点字段包括 `outcome_counts`、`failure_taxonomy_counts`、`failure_taxonomy_tag_counts`、`verification_failure_counts`、`reflect_trigger_reason_counts`，以及 `average_total_tokens`、`total_tokens`、`token_usage_complete_count`、`token_usage_incomplete_count`。
 
 ## 6. 运行 comparison
 
@@ -142,6 +145,8 @@ comparison 产物包含：
 - `failure_taxonomy_tag_counts_delta`
 - `verification_failure_counts_delta`
 - `reflect_trigger_reason_counts_delta`
+- `average_total_tokens_delta`
+- `total_tokens_delta`
 - `task_deltas`
 
 ## 7. 当前限制

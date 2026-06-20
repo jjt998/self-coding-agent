@@ -2,7 +2,7 @@
 
 ## 最后更新时间
 
-- 日期：2026-06-20
+- 日期：2026-06-19
 
 ## 当前阶段
 
@@ -17,7 +17,6 @@
 - verify 失败事实会进入下一轮 `previous_reflect.verification`，但不再生成 `replan_constraints`、`must_address` 或 `avoid_exact_tool_sequence`，也不再做 plan 后硬约束校验。
 - `planned_actions` 只描述本轮 `tool_calls` 实际会执行的动作；跨轮安排继续写入 `cross_round_plan` 并通过 `previous_cross_round_plan` 传给下一轮。
 - OpenAI compatible prompt 已加入原则：harness 负责保真地压缩事实，LLM 负责解释事实并重规划；Windows CLI 默认要求使用 ASCII stdout/stderr，除非任务明确要求 Unicode。
-- 当前单任务 run 已新增 token diagnostics：记录并聚合模型请求的 `prompt_tokens`、`completion_tokens`、`total_tokens`，并在 trace、report、eval summary、comparison delta 中展示；缺失 provider `usage` 时不做本地估算，而是把该任务标记为 token usage 不完整。
 
 > 说明：下面保留了 Phase 8/Phase 9 早期推进记录，其中部分段落描述的是历史状态；当前行为以上方最新条目为准。
 
