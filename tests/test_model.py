@@ -7,6 +7,8 @@ from urllib.error import HTTPError, URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from context import ContextBuilder
+from memory import RuntimeMemoryManager
 import model as model_module
 from model import (
     ModelConfigError,
@@ -280,6 +282,88 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert "previous_reflect_feedback" not in prompt_text
     assert "replan_constraints" not in prompt_text
     assert "avoid_exact_tool_sequence" not in prompt_text
+
+
+def test_openai_compatible_adapter_includes_refactor_runtime_rule_in_context_snapshot(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _FakeHttpResponse(_openai_response(_valid_decision()))
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "task_board.py").write_text("from task_board.query_engine import render_task_list\n", encoding="utf-8")
+    package_dir = repo_root / "task_board"
+    package_dir.mkdir()
+    (package_dir / "query_engine.py").write_text(
+        "\n".join(
+            [
+                "from typing import Any",
+                "",
+                "def collect_matching_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:",
+                "    return list(tasks)",
+                "",
+                "def collect_export_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:",
+                "    return list(tasks)",
+                "",
+                "def render_task_list(tasks: list[dict[str, Any]]) -> str:",
+                "    return str(len(tasks))",
+                "",
+                "def render_export_list(tasks: list[dict[str, Any]]) -> str:",
+                "    return str(len(tasks))",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    memory_manager = RuntimeMemoryManager(repo_root=str(repo_root))
+    memory_search = memory_manager.search(
+        task="重构 task_board/query_engine.py，共享 filter-and-sort helper",
+        task_type="refactor",
+    )
+    snapshot = ContextBuilder(repo_root=str(repo_root)).build_context_snapshot(
+        task="重构 task_board/query_engine.py，共享 filter-and-sort helper",
+        task_type="refactor",
+        current_state="analyze",
+        completed_states=[],
+        step_count=1,
+        memory_query=memory_manager.build_query(
+            task="重构 task_board/query_engine.py，共享 filter-and-sort helper",
+            task_type="refactor",
+        ),
+        matched_memory_entries=[entry.to_dict() for entry in memory_search.all_entries()],
+        runtime_rule_entries=[entry.to_dict() for entry in memory_search.runtime_rule_entries],
+        long_term_memory_entries=[entry.to_dict() for entry in memory_search.long_term_entries],
+        suppressed_long_term_entries=list(memory_search.suppressed_long_term_entries),
+        memory_conflict_evidence=list(memory_search.conflict_evidence),
+        memory_diagnostic_labels=list(memory_search.diagnostic_labels),
+    )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", raising=False)
+    monkeypatch.setattr(model_module, "urlopen", fake_urlopen)
+    adapter = OpenAICompatibleModelAdapter(
+        provider="openai_compatible",
+        model_name="demo-model",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+        timeout_seconds=7,
+    )
+
+    adapter.decide(
+        task="重构 task_board/query_engine.py，共享 filter-and-sort helper",
+        task_type="refactor",
+        context_snapshot=snapshot,
+        config_data={},
+    )
+
+    user_payload = json.loads(captured["body"]["messages"][-1]["content"])
+    runtime_rule_entries = user_payload["context_snapshot"]["memory_context"]["runtime_rule_entries"]
+    compat_rule = next(item for item in runtime_rule_entries if item["title"] == "兼容式重构优先原则")
+    assert "未验证通过前不要删除旧函数" in compat_rule["summary"]
+    assert "默认允许保留旧函数" in compat_rule["summary"]
 
 
 def test_openai_compatible_adapter_rejects_tool_input_fields_not_declared_in_schema(monkeypatch) -> None:

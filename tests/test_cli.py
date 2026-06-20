@@ -54,6 +54,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert (run_dir / "trace.jsonl").exists()
     assert (run_dir / "report.md").exists()
     assert (run_dir / "final_diff.patch").exists()
+    assert (run_dir / "trace_view.html").exists()
     snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
     assert snapshot["task"] == "创建脚手架"
 
@@ -178,8 +179,11 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     final_diff_text = (run_dir / "final_diff.patch").read_text(encoding="utf-8")
+    trace_view_text = (run_dir / "trace_view.html").read_text(encoding="utf-8")
     assert "`finalize`" in report_text
     assert "## Code Diff" in report_text
+    assert "## Trace View" in report_text
+    assert "trace_view.html" in report_text
     assert "artifact: `final_diff.patch`" in report_text
     assert "## 反思反馈" in report_text
     assert "## 模型返回摘要" in report_text
@@ -206,6 +210,9 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "写入状态：未写入" in report_text
     assert "验证状态：未通过" in report_text
     assert "`apply_patch`：成功" in report_text
+    assert "Trace View" in trace_view_text
+    assert snapshot["run_id"] in trace_view_text
+    assert "run_finished" in trace_view_text
     assert "run_evidence.md" in final_diff_text
 
 

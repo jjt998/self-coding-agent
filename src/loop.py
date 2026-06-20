@@ -1220,7 +1220,10 @@ class LoopOrchestrator:
         }
 
     def _update_file_context_cache(self, runtime_state: RuntimeState) -> None:
-        """累计同一文件最近五次读取片段，供下一轮模型做跨轮定位。"""
+        """
+        累计同一文件最近八次读取片段，供下一轮模型做跨轮定位。
+        而读取文件最大有80行，所以累计一个函数或类最大可到640行，基本覆盖绝大多数函数和类的完整上下文。
+        """
         for execution in runtime_state.recent_tool_executions:
             snippet = self._build_file_context_snippet(execution=execution)
             if not snippet:

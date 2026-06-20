@@ -34,6 +34,7 @@ class TraceWriter:
         self.run_dir = run_dir
         self.trace_path = run_dir / "trace.jsonl"
         self.report_path = run_dir / "report.md"
+        self.trace_view_path = run_dir / "trace_view.html"
         self.config_snapshot_path = run_dir / "config_snapshot.json"
 
     def initialize(self, config_snapshot: dict[str, Any]) -> None:
@@ -61,6 +62,10 @@ class TraceWriter:
     def write_report(self, content: str) -> None:
         """覆盖写入当前 run 的 Markdown 报告。"""
         self.report_path.write_text(content, encoding="utf-8")
+
+    def write_trace_view(self, content: str) -> None:
+        """Write the current run's HTML trace view."""
+        self.trace_view_path.write_text(content, encoding="utf-8")
 
     def _build_initial_report(self, config_snapshot: dict[str, Any]) -> str:
         """生成 run 刚初始化时的最小报告内容。"""

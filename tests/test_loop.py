@@ -1780,3 +1780,83 @@ def test_second_plan_receives_previous_cross_round_plan(tmp_path: Path, monkeypa
     ]
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
     assert model_decision_payloads[0]["cross_round_plan"] == ["如果验证失败，下一轮读取 README.md 后继续修复。"]
+def test_loop_injects_refactor_runtime_rule_into_context_snapshot(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "task_board.py").write_text("from task_board.query_engine import render_task_list\n", encoding="utf-8")
+    package_dir = repo_root / "task_board"
+    package_dir.mkdir()
+    (package_dir / "query_engine.py").write_text(
+        "\n".join(
+            [
+                "from typing import Any",
+                "",
+                "def collect_matching_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:",
+                "    return list(tasks)",
+                "",
+                "def collect_export_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:",
+                "    return list(tasks)",
+                "",
+                "def render_task_list(tasks: list[dict[str, Any]]) -> str:",
+                "    return str(len(tasks))",
+                "",
+                "def render_export_list(tasks: list[dict[str, Any]]) -> str:",
+                "    return str(len(tasks))",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-refactor-runtime-rule-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            captured["context_snapshot"] = context_snapshot.to_dict()
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="fake refactor decision",
+                rationale="inspect refactor runtime rules",
+                planned_actions=["inspect refactor runtime rules"],
+                tool_calls=[],
+            )
+
+    def fake_verification(*, settings, tool_executions):
+        return VerificationResult(
+            passed=True,
+            summary="验证通过。",
+            checks=[VerificationCheck(name="verification passed", passed=True, detail="ok")],
+            details={},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+
+    settings = build_settings(
+        task="重构 task_board/query_engine.py，共享 filter-and-sort helper",
+        task_type="refactor",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+
+    assert runtime_state.verification_result is not None
+    assert runtime_state.verification_result.passed is True
+    runtime_rule_entries = captured["context_snapshot"]["memory_context"]["runtime_rule_entries"]
+    compat_rule = next(item for item in runtime_rule_entries if item["title"] == "兼容式重构优先原则")
+    assert "未验证通过前不要删除旧函数" in compat_rule["summary"]
+    assert "默认允许保留旧函数" in compat_rule["summary"]

@@ -165,6 +165,23 @@ class RuntimeMemoryManager:
                 )
             )
 
+        if normalized_task_type == "refactor":
+            runtime_entries.append(
+                MemoryEntry(
+                    title="兼容式重构优先原则",
+                    summary=(
+                        "优先做最小可验证的兼容式重构：先新增兼容 helper，再只修改调用点；"
+                        "未验证通过前不要删除旧函数，不要同轮同时做“新增+替换+删除”。"
+                        "如果文件已出现语法错误、导入失败或 verify command 无法运行，"
+                        "当前轮先恢复可运行状态，不继续叠加重构。默认允许保留旧函数，"
+                        "死代码清理不属于当前 refactor 任务的必须完成条件。"
+                    ),
+                    source="runtime_rule",
+                    tags=["refactor", "safety", "compatibility"],
+                    evidence={"task": task},
+                )
+            )
+
         long_term_entries, conflict_evidence, diagnostic_labels, suppressed_long_term_entries = self._search_long_term_memory(
             task=task,
             task_type=normalized_task_type,

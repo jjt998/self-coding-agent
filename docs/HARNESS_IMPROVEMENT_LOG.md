@@ -89,3 +89,11 @@
 - Result（结果）：这次改进把问题从“模型总是重复读文件”推进为“模型能否根据结构摘要合理选择需要的上下文”。模型不再只能在摘要和全文之间二选一，而是可以先看结构，再按目标函数附近读取片段，并跨轮保留已读内容。这降低了乱编 `old_text` 的概率，也降低了 `old_text_not_found` 的发生概率。相关回归测试已通过：`tests/test_loop.py tests/test_model.py tests/test_context.py -q` 为 `38 passed`，全量 `pytest -q` 为 `108 passed`。
 - Benefit（收益）：对于上下文不足导致的 `old_text_not_found`，根本解法是结构摘要、指定行读取和累计注入；对于编码或不可见字符导致的文本匹配失败，`replace_lines` 才是兜底工具。当前收益是源码证据供给更连续、更可控，trace 中也能看到模型究竟读过哪些文件片段。
 - 是否固化：已固化为当前 harness 行为。仍需继续观察大型仓库任务中，模型是否能稳定判断“需要哪些上下文”而不是追求全部上下文；这部分是后续真实任务验证重点。
+
+### 2026-06-21：`refactor` 任务注入兼容式重构 runtime rule，降低“先删旧函数”导致的自毁编辑
+- Situation（背景）：真实 refactor run `eval-demo_refactor_task_board_export_batch-20260621-010659` 暴露了一个稳定失败模式：模型在第 2 轮 `model_decision` 里过早执行“新增 helper + 替换调用点 + 删除旧函数”的组合编辑，并使用 `replace_lines` 直接清空函数区间，最终把 `task_board/query_engine.py` 改坏为 `SyntaxError: unmatched ')'`。后续多轮虽然意识到文件已损坏，但始终在“继续读坏文件”和“尝试恢复后重构”之间来回切换，没有稳定回到最小兼容改动路径。
+- Task（目标）：让 `task_type=refactor` 的默认策略从抽象的“小步修改”收敛到更具体的“兼容式重构优先”，减少模型在共享 helper 抽取类任务里过早删除旧函数、同轮同时做新增/替换/删除、以及在文件已损坏时继续叠加编辑的概率；同时不修改 prompt 模板、tool schema 和 loop 成功语义。
+- Action（动作）：在 `RuntimeMemoryManager.search()` 中为 `refactor` 任务追加一条新的 runtime rule `兼容式重构优先原则`，明确要求模型优先做最小可验证的兼容式重构：先新增兼容 helper，再只修改调用点；未验证通过前不要删除旧函数，不要同轮同时做“新增+替换+删除”；如果文件已出现语法错误、导入失败或 verify command 无法运行，当前轮先恢复可运行状态，不继续叠加重构；默认允许保留旧函数，死代码清理不属于当前 refactor 任务的必须完成条件。并补充测试，验证这条 runtime rule 能进入 `memory_search_result/context_snapshot`，且会随 `context_snapshot` 一起传给模型请求。
+- Result（结果）：加入 runtime rule 后，最近一次同类任务真实 run `eval-demo_refactor_task_board_export_batch-20260621-015235` 成功通过，`success_rate=1.0`、`outcome=passed_cleanly`、`step_count=19`、`tool_call_count=15`、`average_total_tokens=52511`。新增回归用例也已通过：`tests/test_model.py -k refactor_runtime_rule -q` 为 `1 passed`，`tests/test_loop.py -k refactor_runtime_rule --basetemp ... -q` 为 `1 passed`。更大范围测试中暴露的 `read_file_range.max_lines` 旧断言和 Windows 临时目录清理问题与本次改动无关。
+- Benefit（收益）：这次改进没有改变模型主 prompt，却把 `refactor` 任务的默认编辑策略向“先兼容通过、后考虑清理”推进了一步。对于共享 helper 抽取、行为保持重构和大文件局部重构场景，模型更容易先完成一个可验证的最小闭环，而不是在同一轮里试图同时完成抽取、替换和删除，降低了语法自毁和长时间自我修复失败的风险。
+- 是否固化：已固化为当前 `refactor` 任务的 runtime rule 行为，但仍属于“强建议”而不是模型响应硬校验。后续继续观察：这条规则是否足以稳定压制“先删旧函数”的倾向；如果真实 run 中仍反复出现同类失败，再考虑升级为“runtime rule + prompt 模板 + reflect 风险信号”的三层约束。

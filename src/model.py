@@ -44,7 +44,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "description": "读取仓库内 UTF-8 文本文件的闭区间行号范围；当 read_file 返回 content_mode=\"structure_summary\" 且缺少关键区域时使用。",
         "required": ["path", "start_line", "end_line"],
         "optional": [],
-        "max_lines": 40,
+        "max_lines": 80,
         "accepted_aliases": {"file_path": "path"},
         "properties": {
             "path": {"type": "string", "description": "仓库内相对路径。"},

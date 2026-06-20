@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 from pathlib import Path
 import shutil
 import subprocess
+from typing import Any
 
 from config import RunSettings
 from loop import LoopOrchestrator, RuntimeState, StopReason, StopReasonCode
@@ -39,6 +41,16 @@ class FinalDiffArtifactResult:
     path: str
     snapshot_available: bool
     changed_file_count: int
+    reason: str
+
+
+@dataclass(slots=True)
+class TraceViewArtifactResult:
+    """Record whether the run wrote an HTML trace viewer artifact."""
+
+    written: bool
+    path: str
+    event_count: int
     reason: str
 
 
@@ -141,6 +153,7 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
             sandbox_cleanup_result=sandbox_cleanup_result,
         )
     )
+    _write_trace_view_artifact(run_dir=run_dir, trace_writer=trace_writer)
 
     return run_dir
 
@@ -385,6 +398,487 @@ def _write_final_diff_artifact(
     return result
 
 
+def _write_trace_view_artifact(
+    run_dir: Path,
+    trace_writer: TraceWriter,
+) -> TraceViewArtifactResult:
+    """Persist a static HTML viewer for the current run trace."""
+    trace_events = _load_trace_events_from_jsonl(trace_writer.trace_path)
+    report_text = trace_writer.report_path.read_text(encoding="utf-8") if trace_writer.report_path.exists() else ""
+    final_diff_text = (run_dir / "final_diff.patch").read_text(encoding="utf-8") if (run_dir / "final_diff.patch").exists() else ""
+    html = _build_trace_view_html(
+        run_id=run_dir.name,
+        trace_events=trace_events,
+        report_text=report_text,
+        final_diff_text=final_diff_text,
+        trace_path=trace_writer.trace_path.name,
+        report_path=trace_writer.report_path.name,
+        diff_path="final_diff.patch",
+    )
+    trace_writer.write_trace_view(html)
+    return TraceViewArtifactResult(
+        written=True,
+        path=str(trace_writer.trace_view_path),
+        event_count=len(trace_events),
+        reason="Wrote static HTML trace viewer artifact.",
+    )
+
+
+def _load_trace_events_from_jsonl(trace_path: Path) -> list[dict[str, Any]]:
+    """Load trace.jsonl into a plain event list for HTML rendering."""
+    if not trace_path.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    for line in trace_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        events.append(json.loads(line))
+    return events
+
+
+def _build_trace_view_html(
+    *,
+    run_id: str,
+    trace_events: list[dict[str, Any]],
+    report_text: str,
+    final_diff_text: str,
+    trace_path: str,
+    report_path: str,
+    diff_path: str,
+) -> str:
+    """Build a standalone HTML trace viewer for a run."""
+    event_type_counts: dict[str, int] = {}
+    for event in trace_events:
+        event_type = str(event.get("event_type", "unknown"))
+        event_type_counts[event_type] = event_type_counts.get(event_type, 0) + 1
+    event_type_options = sorted(event_type_counts)
+    initial_payload = {
+        "run_id": run_id,
+        "trace_path": trace_path,
+        "report_path": report_path,
+        "diff_path": diff_path,
+        "event_count": len(trace_events),
+        "event_type_counts": event_type_counts,
+        "events": trace_events,
+        "report_text": report_text,
+        "final_diff_text": final_diff_text,
+    }
+    viewer_json = json.dumps(initial_payload, ensure_ascii=False)
+    options_html = "".join(f'<option value="{event_type}">{event_type}</option>' for event_type in event_type_options)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trace View - {run_id}</title>
+  <style>
+    :root {{
+      --bg: #f4f1ea;
+      --panel: #fffdf8;
+      --ink: #1c1b19;
+      --muted: #6f6a62;
+      --line: #d8d0c4;
+      --accent: #0f766e;
+      --accent-soft: #dff3f1;
+      --add: #e7f6ea;
+      --del: #fde7e7;
+      --shadow: 0 10px 30px rgba(28, 27, 25, 0.08);
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, #f8efe0 0, transparent 26%),
+        linear-gradient(180deg, #f7f4ee 0%, var(--bg) 100%);
+    }}
+    .page {{
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px;
+    }}
+    .hero, .panel {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }}
+    .hero {{
+      padding: 24px;
+      margin-bottom: 18px;
+    }}
+    h1, h2, h3 {{
+      margin: 0 0 12px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }}
+    .meta {{
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }}
+    .pill {{
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+    }}
+    .layout {{
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 18px;
+      align-items: start;
+    }}
+    .sidebar, .content {{
+      display: grid;
+      gap: 18px;
+    }}
+    .panel {{
+      padding: 18px;
+    }}
+    .controls {{
+      display: grid;
+      gap: 12px;
+    }}
+    label {{
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 600;
+    }}
+    input, select {{
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+    }}
+    .stats {{
+      display: grid;
+      gap: 10px;
+    }}
+    .stat {{
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: #faf7f2;
+      border: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 14px;
+    }}
+    .toolbar {{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }}
+    button {{
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 999px;
+      padding: 8px 12px;
+      cursor: pointer;
+      color: var(--ink);
+      font-weight: 600;
+    }}
+    button:hover {{ border-color: var(--accent); color: var(--accent); }}
+    .events {{
+      display: grid;
+      gap: 12px;
+    }}
+    details.event {{
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      overflow: hidden;
+    }}
+    summary {{
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 16px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      background: #fcfaf6;
+    }}
+    summary::-webkit-details-marker {{ display: none; }}
+    .event-index {{
+      min-width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 13px;
+    }}
+    .event-type {{
+      font-weight: 700;
+    }}
+    .event-meta {{
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .event-body {{
+      padding: 0 16px 16px;
+      display: grid;
+      gap: 12px;
+    }}
+    .event-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }}
+    .event-card {{
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fffdf9;
+    }}
+    pre {{
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+      line-height: 1.5;
+      font-family: "Cascadia Code", Consolas, monospace;
+    }}
+    .diff {{
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fff;
+    }}
+    .diff-line {{
+      padding: 0 12px;
+      white-space: pre-wrap;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+    }}
+    .diff-line.add {{ background: var(--add); color: #166534; }}
+    .diff-line.del {{ background: var(--del); color: #991b1b; }}
+    .diff-line.meta {{ background: #f1eee8; color: #6b5f52; }}
+    .empty {{
+      color: var(--muted);
+      font-style: italic;
+    }}
+    @media (max-width: 980px) {{
+      .layout {{ grid-template-columns: 1fr; }}
+      .page {{ padding: 14px; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <h1>Trace View</h1>
+      <div>Run <strong>{run_id}</strong></div>
+      <div class="meta">
+        <span class="pill">trace: {trace_path}</span>
+        <span class="pill">report: {report_path}</span>
+        <span class="pill">diff: {diff_path}</span>
+      </div>
+    </section>
+    <div class="layout">
+      <aside class="sidebar">
+        <section class="panel controls">
+          <h2>Filters</h2>
+          <label>Event Type
+            <select id="eventTypeFilter">
+              <option value="">All events</option>
+              {options_html}
+            </select>
+          </label>
+          <label>Iteration
+            <select id="iterationFilter">
+              <option value="">All iterations</option>
+            </select>
+          </label>
+          <label>Search
+            <input id="searchInput" type="search" placeholder="Search event type, payload, timestamp">
+          </label>
+        </section>
+        <section class="panel">
+          <h2>Stats</h2>
+          <div class="stats" id="stats"></div>
+        </section>
+        <section class="panel">
+          <h2>Final Diff</h2>
+          <div id="diffContainer"></div>
+        </section>
+      </aside>
+      <main class="content">
+        <section class="panel">
+          <div class="toolbar">
+            <button id="expandAll">Expand all</button>
+            <button id="collapseAll">Collapse all</button>
+          </div>
+          <div class="events" id="events"></div>
+        </section>
+        <section class="panel">
+          <h2>Report Snapshot</h2>
+          <pre id="reportText"></pre>
+        </section>
+      </main>
+    </div>
+  </div>
+  <script id="trace-data" type="application/json">{viewer_json}</script>
+  <script>
+    const data = JSON.parse(document.getElementById("trace-data").textContent);
+    const eventTypeFilter = document.getElementById("eventTypeFilter");
+    const iterationFilter = document.getElementById("iterationFilter");
+    const searchInput = document.getElementById("searchInput");
+    const stats = document.getElementById("stats");
+    const eventsRoot = document.getElementById("events");
+    const reportText = document.getElementById("reportText");
+    const diffContainer = document.getElementById("diffContainer");
+
+    function escapeHtml(value) {{
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }}
+
+    function buildIterationOptions() {{
+      const iterations = Array.from(new Set(
+        data.events
+          .map((event) => event && event.payload ? event.payload.iteration : undefined)
+          .filter((value) => value !== undefined && value !== null)
+      )).sort((a, b) => a - b);
+      for (const iteration of iterations) {{
+        const option = document.createElement("option");
+        option.value = String(iteration);
+        option.textContent = `Iteration ${{iteration}}`;
+        iterationFilter.appendChild(option);
+      }}
+    }}
+
+    function renderStats(filteredEvents) {{
+      const rows = [];
+      rows.push(["visible events", filteredEvents.length]);
+      rows.push(["total events", data.event_count]);
+      const typeCounts = new Map();
+      for (const event of filteredEvents) {{
+        const key = event.event_type || "unknown";
+        typeCounts.set(key, (typeCounts.get(key) || 0) + 1);
+      }}
+      for (const [eventType, count] of Array.from(typeCounts.entries()).sort()) {{
+        rows.push([eventType, count]);
+      }}
+      stats.innerHTML = rows.map(([label, value]) =>
+        `<div class="stat"><span>${{escapeHtml(label)}}</span><strong>${{escapeHtml(value)}}</strong></div>`
+      ).join("");
+    }}
+
+    function renderDiff() {{
+      if (!data.final_diff_text) {{
+        diffContainer.innerHTML = '<div class="empty">No final diff artifact.</div>';
+        return;
+      }}
+      const lines = data.final_diff_text.split(/\\r?\\n/);
+      diffContainer.innerHTML = `<div class="diff">${{lines.map((line) => {{
+        let className = "";
+        if (line.startsWith("+") && !line.startsWith("+++")) className = "add";
+        else if (line.startsWith("-") && !line.startsWith("---")) className = "del";
+        else if (line.startsWith("@@") || line.startsWith("---") || line.startsWith("+++")) className = "meta";
+        return `<div class="diff-line ${{className}}">${{escapeHtml(line || " ")}}</div>`;
+      }}).join("")}}</div>`;
+    }}
+
+    function filterEvents() {{
+      const eventType = eventTypeFilter.value;
+      const iteration = iterationFilter.value;
+      const needle = searchInput.value.trim().toLowerCase();
+      return data.events.filter((event) => {{
+        if (eventType && event.event_type !== eventType) return false;
+        const eventIteration = event && event.payload ? event.payload.iteration : undefined;
+        if (iteration && String(eventIteration) !== iteration) return false;
+        if (!needle) return true;
+        const haystack = JSON.stringify(event).toLowerCase();
+        return haystack.includes(needle);
+      }});
+    }}
+
+    function renderEvents() {{
+      const filteredEvents = filterEvents();
+      renderStats(filteredEvents);
+      if (!filteredEvents.length) {{
+        eventsRoot.innerHTML = '<div class="empty">No matching events.</div>';
+        return;
+      }}
+      eventsRoot.innerHTML = filteredEvents.map((event, index) => {{
+        const payload = event.payload || {{}};
+        const iteration = payload.iteration ?? payload.current_iteration ?? "";
+        const payloadText = JSON.stringify(payload, null, 2);
+        const isOpen = index < 3 || event.event_type === "model_decision";
+        const keyRows = [
+          ["event_type", event.event_type || "unknown"],
+          ["timestamp", event.timestamp || ""],
+          ["iteration", iteration === "" ? "n/a" : iteration],
+        ];
+        if (payload.summary) keyRows.push(["summary", payload.summary]);
+        return `
+          <details class="event"${{isOpen ? " open" : ""}}>
+            <summary>
+              <span class="event-index">${{index + 1}}</span>
+              <span class="event-type">${{escapeHtml(event.event_type || "unknown")}}</span>
+              <span class="event-meta">${{escapeHtml(event.timestamp || "")}}</span>
+              <span class="event-meta">${{iteration === "" ? "" : `iteration=${{iteration}}`}}</span>
+            </summary>
+            <div class="event-body">
+              <div class="event-grid">
+                ${{keyRows.map(([label, value]) => `
+                  <div class="event-card">
+                    <h3>${{escapeHtml(label)}}</h3>
+                    <pre>${{escapeHtml(value)}}</pre>
+                  </div>
+                `).join("")}}
+              </div>
+              <div class="event-card">
+                <h3>Payload</h3>
+                <pre>${{escapeHtml(payloadText)}}</pre>
+              </div>
+            </div>
+          </details>
+        `;
+      }}).join("");
+    }}
+
+    document.getElementById("expandAll").addEventListener("click", () => {{
+      document.querySelectorAll("details.event").forEach((item) => item.open = true);
+    }});
+    document.getElementById("collapseAll").addEventListener("click", () => {{
+      document.querySelectorAll("details.event").forEach((item) => item.open = false);
+    }});
+    eventTypeFilter.addEventListener("change", renderEvents);
+    iterationFilter.addEventListener("change", renderEvents);
+    searchInput.addEventListener("input", renderEvents);
+
+    reportText.textContent = data.report_text || "";
+    buildIterationOptions();
+    renderDiff();
+    renderEvents();
+  </script>
+</body>
+</html>"""
+
+
 def _build_phase_4_report(
     settings: RunSettings,
     runtime_state: RuntimeState,
@@ -521,7 +1015,10 @@ def _build_phase_4_report(
         f"- artifact: `final_diff.patch`\n"
         f"- detail: {final_diff_artifact_result.reason}"
     )
-    token_usage_summary = f"{token_usage_summary}\n\n## Code Diff\n\n{code_diff_summary}"
+    trace_view_summary = "- artifact: `trace_view.html`\n- detail: Static HTML viewer for trace.jsonl, report, and final diff."
+    token_usage_summary = (
+        f"{token_usage_summary}\n\n## Code Diff\n\n{code_diff_summary}\n\n## Trace View\n\n{trace_view_summary}"
+    )
 
     context_lines = []
     if context_snapshot:
