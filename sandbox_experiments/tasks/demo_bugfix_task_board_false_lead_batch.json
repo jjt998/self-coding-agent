@@ -1,0 +1,120 @@
+{
+  "tasks": [
+    {
+      "name": "demo_buggy_task_board_false_lead_fix_status_filter",
+      "task": "修复 task_board CLI 的 status 过滤 bug。入口文件里有一些和 archived 相关的变量名与注释，看起来很像问题来源，但当前 CLI 入口已经把参数正确传入下游。真正的错误藏在较大的文件 `task_board/query_engine.py` 里。现在 `python task_board.py list --status done` 会返回 todo 任务，而 `python task_board.py list --owner alice --status done` 也拿不到 alice 的 done 任务。请修复 done 与 todo 的过滤语义，保持默认 archived 行为、现有输出格式和排序规则不变，不要把问题误修成 CLI 参数传递层。",
+      "task_type": "bug_fix",
+      "sandbox_retention": "keep_on_success",
+      "verify_commands": [
+        [
+          "python",
+          "task_board.py",
+          "list",
+          "--status",
+          "done"
+        ],
+        [
+          "python",
+          "task_board.py",
+          "list",
+          "--owner",
+          "alice",
+          "--status",
+          "done"
+        ],
+        [
+          "python",
+          "task_board.py",
+          "list",
+          "--status",
+          "todo",
+          "--include-archived"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "done filter exits successfully",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "done filter includes alice done task",
+          "command_index": 1,
+          "contains": "2. [done] Review API schema | owner=alice | priority=2"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "done filter includes charlie done task",
+          "command_index": 1,
+          "contains": "5. [done] Publish onboarding checklist | owner=charlie | priority=5"
+        },
+        {
+          "type": "command_stdout_not_contains",
+          "name": "done filter excludes alice todo task",
+          "command_index": 1,
+          "not_contains": "1. [todo] Draft status page copy | owner=alice | priority=1"
+        },
+        {
+          "type": "command_stdout_not_contains",
+          "name": "done filter excludes bob todo task",
+          "command_index": 1,
+          "not_contains": "3. [todo] Clean old screenshots | owner=bob | priority=3"
+        },
+        {
+          "type": "command_returncode",
+          "name": "owner done filter exits successfully",
+          "command_index": 2,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "alice done filter returns only alice done task",
+          "command_index": 2,
+          "regex": "^2\\. \\[done\\] Review API schema \\| owner=alice \\| priority=2$"
+        },
+        {
+          "type": "command_returncode",
+          "name": "todo include archived filter exits successfully",
+          "command_index": 3,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "todo include archived keeps active todo task",
+          "command_index": 3,
+          "contains": "1. [todo] Draft status page copy | owner=alice | priority=1"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "todo include archived keeps bob todo task",
+          "command_index": 3,
+          "contains": "3. [todo] Clean old screenshots | owner=bob | priority=3"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "todo include archived includes archived todo task",
+          "command_index": 3,
+          "contains": "4. [todo] Archive migration notes | owner=alice | priority=4 (archived)"
+        },
+        {
+          "type": "command_stdout_not_contains",
+          "name": "todo include archived excludes done task",
+          "command_index": 3,
+          "not_contains": "2. [done] Review API schema | owner=alice | priority=2"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "large query engine changed",
+          "path": "task_board/query_engine.py"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 3
+      }
+    }
+  ]
+}

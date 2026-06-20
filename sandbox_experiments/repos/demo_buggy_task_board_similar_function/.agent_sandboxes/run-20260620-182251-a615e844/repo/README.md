@@ -10,3 +10,4 @@ It is used to test multi-file bug fixing in a small but realistic Python CLI.
 - `python task_board.py list --status todo`
 - `python task_board.py list --owner alice --status todo`
 - `python task_board.py list --owner alice --status todo --include-archived`
+- `python task_board.py export --owner alice --status todo`
