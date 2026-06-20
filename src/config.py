@@ -26,7 +26,7 @@ class RunSettings:
     config_name: str = "default"
     workspace_mode: str = "in_place"
     sandbox_dir: str = ""
-    sandbox_retention: str = "delete_on_success"
+    sandbox_retention: str = "always_delete"
     setup_commands: list[list[str]] = field(default_factory=list)
     verify_setup_commands: list[list[str]] = field(default_factory=list)
     verify_cleanup_commands: list[list[str]] = field(default_factory=list)
@@ -49,7 +49,7 @@ def build_settings(
     config_name: str,
     source_repo_root: str | None = None,
     workspace_mode: str = "in_place",
-    sandbox_retention: str = "delete_on_success",
+    sandbox_retention: str = "always_delete",
     setup_commands: list[list[str]] | None = None,
     verify_setup_commands: list[list[str]] | None = None,
     verify_cleanup_commands: list[list[str]] | None = None,

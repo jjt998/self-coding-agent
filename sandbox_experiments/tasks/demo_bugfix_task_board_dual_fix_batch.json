@@ -4,7 +4,7 @@
       "name": "demo_buggy_task_board_dual_fix_combined_filters_and_archived_order",
       "task": "修复 task_board CLI 的 list 过滤与展示顺序问题。核心逻辑集中在较大的文件 `task_board/query_engine.py` 中。现在运行 `python task_board.py list --owner alice --status todo` 时，结果会错误返回 owner 或 status 任一命中的任务；另外当显式传入 `--include-archived` 时，archived 任务会被错误排到 active 任务前面。请让默认 list 排除 archived 任务；当同时提供 `--owner` 和 `--status` 时，结果必须同时满足两个条件；当显式传入 `--include-archived` 时，再把 archived 任务包含进来，但 active 结果必须仍然排在 archived 结果前面，并保留各分组内现有排序规则和输出格式。",
       "task_type": "bug_fix",
-      "sandbox_retention": "keep_on_success",
+      "sandbox_retention": "always_delete",
       "verify_commands": [
         [
           "python",

@@ -4,7 +4,7 @@
       "name": "demo_refactor_todo_app_extract_helpers",
       "task": "对 `todo_app.py` 做一次行为保持的重构。当前文件把任务展示格式化、下一个任务 id 计算和新增任务对象构造都直接写在主流程函数里，阅读和复用都比较差。请在不改变 CLI 行为、输出格式和 tasks.json 结构的前提下，抽取清晰的小 helper，至少把“格式化单条任务输出”和“计算下一个任务 id”拆成独立函数，并让 `list_tasks()` 与 `add_task()` 使用这些 helper。",
       "task_type": "refactor",
-      "sandbox_retention": "keep_on_success",
+      "sandbox_retention": "always_delete",
       "verify_setup_commands": [
         [
           "python",

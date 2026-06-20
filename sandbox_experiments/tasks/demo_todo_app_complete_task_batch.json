@@ -4,7 +4,7 @@
       "name": "demo_todo_app_add_complete_command",
       "task": "在 todo_app.py 中新增 complete <id> 子命令。complete 应读取 tasks.json，把指定 id 的任务标记为 done=true，保存文件，并输出可读确认信息。保留现有 list 和 add 行为；当任务不存在时应返回非 0 并输出清晰错误。",
       "task_type": "feature",
-      "sandbox_retention": "keep_on_success",
+      "sandbox_retention": "always_delete",
       "verify_commands": [
         [
           "python",

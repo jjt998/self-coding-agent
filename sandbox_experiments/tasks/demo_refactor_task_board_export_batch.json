@@ -4,7 +4,7 @@
       "name": "demo_refactor_task_board_share_filter_and_sort_pipeline",
       "task": "对 `task_board/query_engine.py` 做一次行为保持的重构。当前 `render_task_list()` 和 `render_export_list()` 各自维护一套“标准化输入 -> 过滤 -> 排序”的流程，导致 list 与 export 的前置处理逻辑重复。请抽取一个共享 helper 来统一这段 filter-and-sort pipeline，并让 list 与 export 都复用它；不要改变 list 的文本输出、export 的 CSV 输出、过滤语义或排序规则。",
       "task_type": "refactor",
-      "sandbox_retention": "keep_on_success",
+      "sandbox_retention": "always_delete",
       "verify_commands": [
         [
           "python",

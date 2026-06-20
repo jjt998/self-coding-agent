@@ -4,7 +4,7 @@
       "name": "demo_buggy_task_board_false_lead_fix_status_filter",
       "task": "修复 task_board CLI 的 status 过滤 bug。入口文件里有一些和 archived 相关的变量名与注释，看起来很像问题来源，但当前 CLI 入口已经把参数正确传入下游。真正的错误藏在较大的文件 `task_board/query_engine.py` 里。现在 `python task_board.py list --status done` 会返回 todo 任务，而 `python task_board.py list --owner alice --status done` 也拿不到 alice 的 done 任务。请修复 done 与 todo 的过滤语义，保持默认 archived 行为、现有输出格式和排序规则不变，不要把问题误修成 CLI 参数传递层。",
       "task_type": "bug_fix",
-      "sandbox_retention": "keep_on_success",
+      "sandbox_retention": "always_delete",
       "verify_commands": [
         [
           "python",

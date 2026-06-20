@@ -53,6 +53,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
 
     assert (run_dir / "trace.jsonl").exists()
     assert (run_dir / "report.md").exists()
+    assert (run_dir / "final_diff.patch").exists()
     snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
     assert snapshot["task"] == "创建脚手架"
 
@@ -176,7 +177,10 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert not memory_store_path.exists()
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
+    final_diff_text = (run_dir / "final_diff.patch").read_text(encoding="utf-8")
     assert "`finalize`" in report_text
+    assert "## Code Diff" in report_text
+    assert "artifact: `final_diff.patch`" in report_text
     assert "## 反思反馈" in report_text
     assert "## 模型返回摘要" in report_text
     assert "## Token 消耗" in report_text
@@ -202,6 +206,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "写入状态：未写入" in report_text
     assert "验证状态：未通过" in report_text
     assert "`apply_patch`：成功" in report_text
+    assert "run_evidence.md" in final_diff_text
 
 
 def test_cli_deletes_sandbox_after_success_by_default(tmp_path: Path) -> None:
@@ -268,14 +273,14 @@ def test_cli_deletes_sandbox_after_success_by_default(tmp_path: Path) -> None:
     cleanup_payload = next(event["payload"] for event in trace_events if event["event_type"] == "sandbox_cleanup_result")
     assert cleanup_payload["attempted"] is True
     assert cleanup_payload["kept"] is False
-    assert cleanup_payload["retention_policy"] == "delete_on_success"
+    assert cleanup_payload["retention_policy"] == "always_delete"
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
-    assert "保留策略：`delete_on_success`" in report_text
+    assert "保留策略：`always_delete`" in report_text
     assert "清理结果：已删除" in report_text
 
 
-def test_cli_keeps_sandbox_after_failed_verify_command_under_default_policy(tmp_path: Path) -> None:
+def test_cli_deletes_sandbox_after_failed_verify_command_under_default_policy(tmp_path: Path) -> None:
     output_root = tmp_path / "runs"
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -335,8 +340,7 @@ def test_cli_keeps_sandbox_after_failed_verify_command_under_default_policy(tmp_
     sandbox_dir = Path(snapshot["sandbox_dir"])
     assert sandbox_dir.parent == repo_root.resolve() / ".agent_sandboxes"
     assert Path(snapshot["repo_root"]) == sandbox_dir / "repo"
-    assert sandbox_dir.exists()
-    assert (sandbox_dir / "repo").exists()
+    assert not sandbox_dir.exists()
 
     trace_events = [
         json.loads(line)
@@ -350,12 +354,13 @@ def test_cli_keeps_sandbox_after_failed_verify_command_under_default_policy(tmp_
     assert run_finished_payload["stop_reason"]["code"] == "verification_failed"
     assert run_finished_payload["stop_reason"]["details"]["verification_failure"]["failed_commands"][0]["returncode"] == 1
     cleanup_payload = next(event["payload"] for event in trace_events if event["event_type"] == "sandbox_cleanup_result")
-    assert cleanup_payload["attempted"] is False
-    assert cleanup_payload["kept"] is True
-    assert cleanup_payload["retention_policy"] == "delete_on_success"
+    assert cleanup_payload["attempted"] is True
+    assert cleanup_payload["kept"] is False
+    assert cleanup_payload["retention_policy"] == "always_delete"
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
-    assert "清理结果：已保留" in report_text
+    assert "always_delete" in report_text
+    assert "清理结果：已删除" in report_text
 
 
 def test_cli_keeps_sandbox_after_success_with_keep_on_success_policy(tmp_path: Path) -> None:

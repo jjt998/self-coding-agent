@@ -4,7 +4,7 @@
       "name": "demo_buggy_task_board_fix_combined_filters",
       "task": "修复 task_board CLI 的 list 过滤 bug。当前核心逻辑已经集中到一个较大的文件 `task_board/query_engine.py` 中。现在 `python task_board.py list --owner alice --status todo` 会错误返回 owner 或 status 任一命中的任务，而不是同时满足两个条件；另外 `--include-archived` 的行为也有问题。请让 list 默认排除 archived 任务；当同时提供 `--owner` 和 `--status` 时，结果必须同时满足两个条件；当显式传入 `--include-archived` 时，再把 archived 任务包含进来。保留现有输出格式和排序规则。",
       "task_type": "bug_fix",
-      "sandbox_retention": "keep_on_success",
+      "sandbox_retention": "always_delete",
       "verify_commands": [
         [
           "python",

@@ -32,6 +32,17 @@ class SandboxCleanupResult:
 
 
 @dataclass(slots=True)
+class FinalDiffArtifactResult:
+    """Record whether the run wrote a final diff artifact."""
+
+    written: bool
+    path: str
+    snapshot_available: bool
+    changed_file_count: int
+    reason: str
+
+
+@dataclass(slots=True)
 class SetupCommandResult:
     """记录任务 setup 命令执行结果，供 setup_failed stop reason 复用。"""
 
@@ -94,6 +105,11 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
             runtime_state=runtime_state,
         )
     memory_write_result = _write_long_term_memory_if_needed(settings=settings, runtime_state=runtime_state)
+    final_diff_artifact_result = _write_final_diff_artifact(
+        run_dir=run_dir,
+        runtime_state=runtime_state,
+        trace_writer=trace_writer,
+    )
     if memory_entry_written_payload:
         trace_writer.write_event(
             TraceEvent(
@@ -121,6 +137,7 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
             settings=settings,
             runtime_state=runtime_state,
             memory_write_result=memory_write_result,
+            final_diff_artifact_result=final_diff_artifact_result,
             sandbox_cleanup_result=sandbox_cleanup_result,
         )
     )
@@ -322,10 +339,57 @@ def _decide_sandbox_retention(retention_policy: str, verification_passed: bool) 
     return True, "当前策略为 delete_on_success，且本次验证未通过。"
 
 
+def _write_final_diff_artifact(
+    run_dir: Path,
+    runtime_state: RuntimeState,
+    trace_writer: TraceWriter,
+) -> FinalDiffArtifactResult:
+    """Persist the verify-owned diff snapshot as a run artifact."""
+    artifact_path = run_dir / "final_diff.patch"
+    snapshot = None
+    if runtime_state.verification_result and isinstance(runtime_state.verification_result.details, dict):
+        snapshot = runtime_state.verification_result.details.get("verification_diff_snapshot")
+
+    raw_diffs: list[dict[str, object]] = []
+    changed_file_count = 0
+    snapshot_available = isinstance(snapshot, dict)
+    if isinstance(snapshot, dict):
+        diffs_value = snapshot.get("diffs", [])
+        if isinstance(diffs_value, list):
+            raw_diffs = [item for item in diffs_value if isinstance(item, dict)]
+        changed_file_count = int(snapshot.get("changed_file_count") or len(raw_diffs))
+
+    diff_texts = [item["diff"] for item in raw_diffs if isinstance(item.get("diff"), str) and item.get("diff")]
+    artifact_text = "\n\n".join(diff_texts)
+    if artifact_text:
+        artifact_text += "\n"
+    artifact_path.write_text(artifact_text, encoding="utf-8")
+
+    result = FinalDiffArtifactResult(
+        written=True,
+        path=str(artifact_path),
+        snapshot_available=snapshot_available,
+        changed_file_count=changed_file_count,
+        reason=(
+            "Wrote final diff artifact from verification diff snapshot."
+            if snapshot_available
+            else "Verification diff snapshot unavailable; wrote an empty final diff artifact."
+        ),
+    )
+    trace_writer.write_event(
+        TraceEvent(
+            event_type="final_diff_artifact_written",
+            payload=asdict(result),
+        )
+    )
+    return result
+
+
 def _build_phase_4_report(
     settings: RunSettings,
     runtime_state: RuntimeState,
     memory_write_result: MemoryWriteResult,
+    final_diff_artifact_result: FinalDiffArtifactResult,
     sandbox_cleanup_result: SandboxCleanupResult,
 ) -> str:
     """把状态流、工具摘要和验证结果整理成当前阶段可读报告。"""
@@ -449,6 +513,15 @@ def _build_phase_4_report(
         f"- completion tokens：`{token_usage.get('completion_tokens', 0)}`\n"
         f"- total tokens：`{token_usage.get('total_tokens', 0)}`"
     )
+
+    diff_snapshot_status = "available" if final_diff_artifact_result.snapshot_available else "unavailable"
+    code_diff_summary = (
+        f"- diff snapshot: `{diff_snapshot_status}`\n"
+        f"- changed files: `{final_diff_artifact_result.changed_file_count}`\n"
+        f"- artifact: `final_diff.patch`\n"
+        f"- detail: {final_diff_artifact_result.reason}"
+    )
+    token_usage_summary = f"{token_usage_summary}\n\n## Code Diff\n\n{code_diff_summary}"
 
     context_lines = []
     if context_snapshot:

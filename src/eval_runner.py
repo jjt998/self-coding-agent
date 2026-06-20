@@ -54,7 +54,7 @@ class EvalTaskSpec:
     task_type: str = "general"
     repo_subdir: str = "."
     workspace_mode: str = "per_task_sandbox"
-    sandbox_retention: str = "delete_on_success"
+    sandbox_retention: str = "always_delete"
     setup_commands: list[list[str]] = field(default_factory=list)
     verify_setup_commands: list[list[str]] = field(default_factory=list)
     verify_cleanup_commands: list[list[str]] = field(default_factory=list)
@@ -1282,7 +1282,7 @@ def _normalize_sandbox_retention(raw_value: Any) -> str:
     text = _normalize_optional_string(raw_value)
     if text in {"always_keep", "delete_on_success", "always_delete", "keep_on_success"}:
         return text
-    return "delete_on_success"
+    return "always_delete"
 
 
 def _normalize_command_list(raw_value: Any) -> list[str]:

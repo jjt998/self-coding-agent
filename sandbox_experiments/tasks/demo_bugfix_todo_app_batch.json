@@ -4,7 +4,7 @@
       "name": "demo_buggy_todo_app_fix_list_status",
       "task": "修复 todo_app.py 中 list 命令的状态显示 bug。当前 done=false 的任务被错误显示为 [done]，done=true 的任务被错误显示为 [todo]。请让 done=false 显示为 [todo]，done=true 显示为 [done]，并保留 add 命令行为。",
       "task_type": "bug_fix",
-      "sandbox_retention": "keep_on_success",
+      "sandbox_retention": "always_delete",
       "verify_commands": [
         [
           "python",
