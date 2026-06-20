@@ -56,6 +56,8 @@ class EvalTaskSpec:
     workspace_mode: str = "per_task_sandbox"
     sandbox_retention: str = "delete_on_success"
     setup_commands: list[list[str]] = field(default_factory=list)
+    verify_setup_commands: list[list[str]] = field(default_factory=list)
+    verify_cleanup_commands: list[list[str]] = field(default_factory=list)
     verify_commands: list[list[str]] = field(default_factory=list)
     verify_rules: list[dict[str, Any]] = field(default_factory=list)
     expectation: EvalExpectationSpec | None = None
@@ -242,6 +244,8 @@ def load_eval_task_specs(task_file: Path) -> list[EvalTaskSpec]:
                 workspace_mode=_normalize_workspace_mode(raw_task.get("workspace_mode")),
                 sandbox_retention=_normalize_sandbox_retention(raw_task.get("sandbox_retention")),
                 setup_commands=_normalize_command_matrix(raw_task.get("setup_commands")),
+                verify_setup_commands=_normalize_command_matrix(raw_task.get("verify_setup_commands")),
+                verify_cleanup_commands=_normalize_command_matrix(raw_task.get("verify_cleanup_commands")),
                 verify_commands=_normalize_command_matrix(raw_task.get("verify_commands")),
                 verify_rules=_normalize_verify_rules(raw_task.get("verify_rules")),
                 expectation=_load_expectation_spec(raw_task.get("expectation")),
@@ -300,6 +304,8 @@ def run_eval_batch(
             workspace_mode=task_spec.workspace_mode,
             sandbox_retention=task_spec.sandbox_retention,
             setup_commands=task_spec.setup_commands,
+            verify_setup_commands=task_spec.verify_setup_commands,
+            verify_cleanup_commands=task_spec.verify_cleanup_commands,
             verify_commands=task_spec.verify_commands,
             verify_rules=task_spec.verify_rules,
         )

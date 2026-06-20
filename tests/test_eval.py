@@ -527,6 +527,8 @@ def test_load_eval_task_specs_supports_sandbox_and_setup_fields(tmp_path: Path) 
                         "workspace_mode": "per_task_sandbox",
                         "sandbox_retention": "keep_on_success",
                         "setup_commands": [["python", "-V"], ["python", "-c", "print('setup')"]],
+                        "verify_setup_commands": [["python", "-c", "print('reset verify state')"]],
+                        "verify_cleanup_commands": [["python", "-c", "print('cleanup verify state')"]],
                         "verify_commands": [["python", "-m", "pytest", "-q"]],
                         "verify_rules": [
                             {"type": "file_exists", "path": "tests/test_api.py"},
@@ -554,6 +556,8 @@ def test_load_eval_task_specs_supports_sandbox_and_setup_fields(tmp_path: Path) 
     assert specs[0].workspace_mode == "per_task_sandbox"
     assert specs[0].sandbox_retention == "keep_on_success"
     assert specs[0].setup_commands == [["python", "-V"], ["python", "-c", "print('setup')"]]
+    assert specs[0].verify_setup_commands == [["python", "-c", "print('reset verify state')"]]
+    assert specs[0].verify_cleanup_commands == [["python", "-c", "print('cleanup verify state')"]]
     assert specs[0].verify_commands == [["python", "-m", "pytest", "-q"]]
     assert specs[0].verify_rules == [
         {"type": "file_exists", "path": "tests/test_api.py"},

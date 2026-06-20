@@ -1,0 +1,104 @@
+{
+  "tasks": [
+    {
+      "name": "demo_refactor_todo_app_extract_helpers",
+      "task": "对 `todo_app.py` 做一次行为保持的重构。当前文件把任务展示格式化、下一个任务 id 计算和新增任务对象构造都直接写在主流程函数里，阅读和复用都比较差。请在不改变 CLI 行为、输出格式和 tasks.json 结构的前提下，抽取清晰的小 helper，至少把“格式化单条任务输出”和“计算下一个任务 id”拆成独立函数，并让 `list_tasks()` 与 `add_task()` 使用这些 helper。",
+      "task_type": "refactor",
+      "sandbox_retention": "keep_on_success",
+      "verify_setup_commands": [
+        [
+          "python",
+          "-c",
+          "import json, pathlib; pathlib.Path('tasks.json').write_text(json.dumps([{'id': 1, 'title': 'Write project notes', 'description': 'Draft docs for the next experiment run', 'done': False}, {'id': 2, 'title': 'Review pull request', 'description': 'Check model error diagnostics', 'done': False}], ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')"
+        ]
+      ],
+      "verify_cleanup_commands": [
+        [
+          "python",
+          "-c",
+          "import json, pathlib; pathlib.Path('tasks.json').write_text(json.dumps([{'id': 1, 'title': 'Write project notes', 'description': 'Draft docs for the next experiment run', 'done': False}, {'id': 2, 'title': 'Review pull request', 'description': 'Check model error diagnostics', 'done': False}], ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')"
+        ]
+      ],
+      "verify_commands": [
+        [
+          "python",
+          "todo_app.py",
+          "list"
+        ],
+        [
+          "python",
+          "todo_app.py",
+          "add",
+          "Write changelog",
+          "--description",
+          "Summarize release notes"
+        ],
+        [
+          "python",
+          "todo_app.py",
+          "list"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "initial list exits successfully",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "initial list keeps first task",
+          "command_index": 1,
+          "contains": "1. [todo] Write project notes - Draft docs for the next experiment run"
+        },
+        {
+          "type": "command_returncode",
+          "name": "add command exits successfully",
+          "command_index": 2,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "add command reports new task id",
+          "command_index": 2,
+          "contains": "Added task #3: Write changelog"
+        },
+        {
+          "type": "command_returncode",
+          "name": "final list exits successfully",
+          "command_index": 3,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "final list includes newly added task",
+          "command_index": 3,
+          "contains": "3. [todo] Write changelog - Summarize release notes"
+        },
+        {
+          "type": "file_contains",
+          "name": "todo_app extracts format_task_line helper",
+          "path": "todo_app.py",
+          "contains": "def format_task_line("
+        },
+        {
+          "type": "file_contains",
+          "name": "todo_app extracts get_next_task_id helper",
+          "path": "todo_app.py",
+          "contains": "def get_next_task_id("
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "todo_app file changed",
+          "path": "todo_app.py"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 2
+      }
+    }
+  ]
+}

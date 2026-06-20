@@ -28,6 +28,8 @@ class RunSettings:
     sandbox_dir: str = ""
     sandbox_retention: str = "delete_on_success"
     setup_commands: list[list[str]] = field(default_factory=list)
+    verify_setup_commands: list[list[str]] = field(default_factory=list)
+    verify_cleanup_commands: list[list[str]] = field(default_factory=list)
     verify_commands: list[list[str]] = field(default_factory=list)
     verify_rules: list[dict[str, Any]] = field(default_factory=list)
     # run_id 里同时带时间和短随机串，既方便人眼排查，也能降低同秒运行时的重名概率。
@@ -49,6 +51,8 @@ def build_settings(
     workspace_mode: str = "in_place",
     sandbox_retention: str = "delete_on_success",
     setup_commands: list[list[str]] | None = None,
+    verify_setup_commands: list[list[str]] | None = None,
+    verify_cleanup_commands: list[list[str]] | None = None,
     verify_commands: list[list[str]] | None = None,
     verify_rules: list[dict[str, Any]] | None = None,
 ) -> RunSettings:
@@ -67,6 +71,8 @@ def build_settings(
         workspace_mode=workspace_mode,
         sandbox_retention=sandbox_retention,
         setup_commands=list(setup_commands or []),
+        verify_setup_commands=list(verify_setup_commands or []),
+        verify_cleanup_commands=list(verify_cleanup_commands or []),
         verify_commands=list(verify_commands or []),
         verify_rules=list(verify_rules or []),
     )

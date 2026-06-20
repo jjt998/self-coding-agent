@@ -76,8 +76,12 @@ def _build_missing_task_verification() -> VerificationResult:
         checks=[check],
         details={
             "verification_mode": "missing_task_verification",
+            "verify_setup_command_count": 0,
+            "verify_cleanup_command_count": 0,
             "verify_command_count": 0,
             "verify_rule_count": 0,
+            "verify_setup_command_results": [],
+            "verify_cleanup_command_results": [],
             "verify_command_results": [],
         },
     )
@@ -86,35 +90,36 @@ def _build_missing_task_verification() -> VerificationResult:
 def _build_task_verification(settings: RunSettings, tool_executions: list[ToolExecution]) -> VerificationResult:
     """执行任务显式声明的 verify_commands 与 verify_rules，并合并为统一验证结果。"""
     checks: list[VerificationCheck] = []
-    command_results: list[VerifyCommandResult] = []
+    verify_setup_checks, verify_setup_results = _run_verify_command_matrix(
+        command_matrix=settings.verify_setup_commands,
+        repo_root=settings.repo_root,
+        check_name_prefix="verify_setup_command",
+    )
+    checks.extend(verify_setup_checks)
 
-    for index, command in enumerate(settings.verify_commands, start=1):
-        completed = subprocess.run(
-            command,
-            cwd=settings.repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
+    if not all(check.passed for check in verify_setup_checks):
+        return VerificationResult(
+            passed=False,
+            summary="验证失败：verify_setup_commands 未完成，未继续执行 verify_commands 或 verify_rules。",
+            checks=checks,
+            details={
+                "verification_mode": "task_verify_commands",
+                "verify_setup_command_count": len(verify_setup_results),
+                "verify_cleanup_command_count": 0,
+                "verify_command_count": 0,
+                "verify_rule_count": 0,
+                "verify_setup_command_results": [item.to_dict() for item in verify_setup_results],
+                "verify_cleanup_command_results": [],
+                "verify_command_results": [],
+            },
         )
-        command_result = VerifyCommandResult(
-            command=list(command),
-            cwd=settings.repo_root,
-            ok=completed.returncode == 0,
-            returncode=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-        )
-        command_results.append(command_result)
-        checks.append(
-            VerificationCheck(
-                name=f"verify_command_{index}",
-                passed=command_result.ok,
-                detail=(
-                    f"命令 `{' '.join(command_result.command)}` 返回码为 {command_result.returncode}。"
-                    f" stdout 首行：{_first_line(command_result.stdout)}"
-                ),
-            )
-        )
+
+    command_checks, command_results = _run_verify_command_matrix(
+        command_matrix=settings.verify_commands,
+        repo_root=settings.repo_root,
+        check_name_prefix="verify_command",
+    )
+    checks.extend(command_checks)
 
     rule_checks = _build_verify_rule_checks(
         repo_root=settings.repo_root,
@@ -124,23 +129,76 @@ def _build_task_verification(settings: RunSettings, tool_executions: list[ToolEx
     )
     checks.extend(rule_checks)
 
-    passed = all(check.passed for check in checks)
-    summary = (
-        "验证通过：任务定义的 verify_commands 与 verify_rules 全部满足。"
-        if passed
-        else "验证失败：至少有一条任务级 verify command 或 verify rule 未满足。"
+    verify_cleanup_checks, verify_cleanup_results = _run_verify_command_matrix(
+        command_matrix=settings.verify_cleanup_commands,
+        repo_root=settings.repo_root,
+        check_name_prefix="verify_cleanup_command",
     )
+    checks.extend(verify_cleanup_checks)
+
+    passed = all(check.passed for check in checks)
+    cleanup_failed = any(not check.passed for check in verify_cleanup_checks)
+    if cleanup_failed:
+        summary = "验证失败：verify_cleanup_commands 未完成，仓库状态未能在 verify 后回滚。"
+    elif passed:
+        summary = "验证通过：任务定义的 verify_commands 与 verify_rules 全部满足。"
+    else:
+        summary = "验证失败：至少有一条任务级 verify command 或 verify rule 未满足。"
     return VerificationResult(
         passed=passed,
         summary=summary,
         checks=checks,
         details={
             "verification_mode": "task_verify_commands",
+            "verify_setup_command_count": len(verify_setup_results),
+            "verify_cleanup_command_count": len(verify_cleanup_results),
             "verify_command_count": len(command_results),
             "verify_rule_count": len(settings.verify_rules),
+            "verify_setup_command_results": [item.to_dict() for item in verify_setup_results],
+            "verify_cleanup_command_results": [item.to_dict() for item in verify_cleanup_results],
             "verify_command_results": [item.to_dict() for item in command_results],
         },
     )
+
+
+def _run_verify_command_matrix(
+    command_matrix: list[list[str]],
+    repo_root: str,
+    check_name_prefix: str,
+) -> tuple[list[VerificationCheck], list[VerifyCommandResult]]:
+    """Run a verification command sequence and return both checks and raw results."""
+    checks: list[VerificationCheck] = []
+    command_results: list[VerifyCommandResult] = []
+
+    for index, command in enumerate(command_matrix, start=1):
+        completed = subprocess.run(
+            command,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        command_result = VerifyCommandResult(
+            command=list(command),
+            cwd=repo_root,
+            ok=completed.returncode == 0,
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+        command_results.append(command_result)
+        checks.append(
+            VerificationCheck(
+                name=f"{check_name_prefix}_{index}",
+                passed=command_result.ok,
+                detail=(
+                    f"命令 `{' '.join(command_result.command)}` 返回码为 {command_result.returncode}。"
+                    f" stdout 首行：{_first_line(command_result.stdout)}"
+                ),
+            )
+        )
+
+    return checks, command_results
 
 
 def _build_verify_rule_checks(

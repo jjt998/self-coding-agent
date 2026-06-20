@@ -88,6 +88,169 @@ def test_verify_rules_without_verify_commands_can_fail(tmp_path: Path) -> None:
     assert result.checks[0].passed is False
 
 
+def test_verify_setup_commands_reset_state_before_each_verification(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "tasks.json").write_text(
+        json.dumps(
+            [
+                {"id": 1, "title": "Write project notes", "description": "Draft docs", "done": False},
+                {"id": 2, "title": "Review pull request", "description": "Check diagnostics", "done": False},
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    reset_tasks_command = [
+        sys.executable,
+        "-c",
+        (
+            "import json, pathlib; "
+            "pathlib.Path('tasks.json').write_text("
+            "json.dumps(["
+            "{'id': 1, 'title': 'Write project notes', 'description': 'Draft docs', 'done': False}, "
+            "{'id': 2, 'title': 'Review pull request', 'description': 'Check diagnostics', 'done': False}"
+            "], ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')"
+        ),
+    ]
+    add_task_command = [
+        sys.executable,
+        "-c",
+        (
+            "import json, pathlib; "
+            "path = pathlib.Path('tasks.json'); "
+            "tasks = json.loads(path.read_text(encoding='utf-8')); "
+            "next_id = max(item['id'] for item in tasks) + 1; "
+            "tasks.append({'id': next_id, 'title': 'Write changelog', 'description': 'Summarize release notes', 'done': False}); "
+            "path.write_text(json.dumps(tasks, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8'); "
+            "print(f'Added task #{next_id}: Write changelog')"
+        ),
+    ]
+
+    settings = build_settings(
+        task="verify setup commands reset mutable state",
+        task_type="refactor",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_setup_commands=[reset_tasks_command],
+        verify_commands=[add_task_command],
+        verify_rules=[
+            {
+                "type": "command_stdout_contains",
+                "name": "add command uses reset state",
+                "command_index": 1,
+                "contains": "Added task #3: Write changelog",
+            }
+        ],
+    )
+
+    first_result = build_phase_4_verification(settings=settings, tool_executions=[])
+    second_result = build_phase_4_verification(settings=settings, tool_executions=[])
+
+    assert first_result.passed is True
+    assert second_result.passed is True
+    assert first_result.details["verify_setup_command_count"] == 1
+    assert second_result.details["verify_setup_command_count"] == 1
+    assert first_result.details["verify_setup_command_results"][0]["ok"] is True
+    assert second_result.details["verify_setup_command_results"][0]["ok"] is True
+    assert first_result.checks[0].name == "verify_setup_command_1"
+    assert second_result.checks[0].name == "verify_setup_command_1"
+    assert second_result.checks[1].name == "verify_command_1"
+    assert second_result.checks[2].passed is True
+
+
+def test_verify_cleanup_commands_restore_state_after_verification(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    initial_tasks = [
+        {"id": 1, "title": "Write project notes", "description": "Draft docs", "done": False},
+        {"id": 2, "title": "Review pull request", "description": "Check diagnostics", "done": False},
+    ]
+    (repo_root / "tasks.json").write_text(
+        json.dumps(initial_tasks, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    restore_tasks_command = [
+        sys.executable,
+        "-c",
+        (
+            "import json, pathlib; "
+            "pathlib.Path('tasks.json').write_text("
+            "json.dumps(["
+            "{'id': 1, 'title': 'Write project notes', 'description': 'Draft docs', 'done': False}, "
+            "{'id': 2, 'title': 'Review pull request', 'description': 'Check diagnostics', 'done': False}"
+            "], ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')"
+        ),
+    ]
+    add_task_command = [
+        sys.executable,
+        "-c",
+        (
+            "import json, pathlib; "
+            "path = pathlib.Path('tasks.json'); "
+            "tasks = json.loads(path.read_text(encoding='utf-8')); "
+            "tasks.append({'id': 3, 'title': 'Write changelog', 'description': 'Summarize release notes', 'done': False}); "
+            "path.write_text(json.dumps(tasks, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8'); "
+            "print('Added task #3: Write changelog')"
+        ),
+    ]
+
+    settings = build_settings(
+        task="verify cleanup commands restore mutable state",
+        task_type="refactor",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_commands=[add_task_command],
+        verify_cleanup_commands=[restore_tasks_command],
+        verify_rules=[
+            {
+                "type": "command_stdout_contains",
+                "name": "add command runs before cleanup",
+                "command_index": 1,
+                "contains": "Added task #3: Write changelog",
+            }
+        ],
+    )
+
+    result = build_phase_4_verification(settings=settings, tool_executions=[])
+
+    assert result.passed is True
+    assert result.details["verify_cleanup_command_count"] == 1
+    assert result.details["verify_cleanup_command_results"][0]["ok"] is True
+    assert result.checks[-1].name == "verify_cleanup_command_1"
+    assert json.loads((repo_root / "tasks.json").read_text(encoding="utf-8")) == initial_tasks
+
+
+def test_verify_cleanup_command_failure_marks_verification_failed(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    settings = build_settings(
+        task="verify cleanup failure should fail verification",
+        task_type="refactor",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_commands=[[sys.executable, "-c", "print('verify ok')"]],
+        verify_cleanup_commands=[[sys.executable, "-c", "import sys; sys.exit(7)"]],
+    )
+
+    result = build_phase_4_verification(settings=settings, tool_executions=[])
+
+    assert result.passed is False
+    assert result.summary == "验证失败：verify_cleanup_commands 未完成，仓库状态未能在 verify 后回滚。"
+    assert result.details["verify_cleanup_command_count"] == 1
+    assert result.details["verify_cleanup_command_results"][0]["returncode"] == 7
+    assert result.checks[-1].name == "verify_cleanup_command_1"
+    assert result.checks[-1].passed is False
+
+
 def test_verify_supports_structured_verify_rules_for_command_and_file_checks(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
