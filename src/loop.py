@@ -476,12 +476,16 @@ class LoopOrchestrator:
     ) -> dict[str, Any]:
         """为 read_file 生成短源码片段，优先覆盖 old_text_not_found 的目标位置。"""
         content_mode = execution.tool_output.get("content_mode", "")
-        if content_mode == "excerpt" and "content" not in execution.tool_output:
+        if content_mode == "structure_summary" and "content" not in execution.tool_output:
             return {
-                "content_excerpt": execution.tool_output.get("content_excerpt", ""),
-                "excerpt_line_start": execution.tool_output.get("excerpt_line_start", 0),
-                "excerpt_line_end": execution.tool_output.get("excerpt_line_end", 0),
+                "content_excerpt": "",
+                "excerpt_line_start": 0,
+                "excerpt_line_end": 0,
                 "excerpt_reason": "large_file_structure_summary",
+                "content_mode": "structure_summary",
+                "content_truncated": True,
+                "line_count": execution.tool_output.get("line_count", 0),
+                "structure_summary": execution.tool_output.get("structure_summary", []),
             }
 
         content = str(execution.tool_output.get("content", ""))
@@ -1264,6 +1268,11 @@ class LoopOrchestrator:
             "line_count": output.get("line_count", 0),
             "content_excerpt": self._truncate_model_feedback_text(content, limit=4000),
         }
+        if output.get("content_mode") == "structure_summary" and "content" not in output:
+            snippet["content_excerpt"] = ""
+            snippet["read_coverage"] = ""
+            snippet["excerpt_line_start"] = 0
+            snippet["excerpt_line_end"] = 0
         if output.get("content_truncated") is not None:
             snippet["content_truncated"] = output.get("content_truncated")
         if output.get("structure_summary"):

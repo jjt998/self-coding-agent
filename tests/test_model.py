@@ -271,7 +271,7 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert "planned_actions" in prompt_text
     assert "ASCII stdout/stderr" in prompt_text
     assert "content_mode=\"full\"" in prompt_text
-    assert "content_mode=\"excerpt\"" in prompt_text
+    assert "content_mode=\"structure_summary\"" in prompt_text
     assert "read_file_range" in prompt_text
     assert "1 到 40 行" in prompt_text
     assert "不要用它读取整个文件" in prompt_text

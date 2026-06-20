@@ -71,17 +71,18 @@ def test_read_file_returns_structure_summary_for_large_python_file(tmp_path: Pat
     result = runner.read_file("large.py")
 
     assert result.tool_output["ok"] is True
-    assert result.tool_output["content_mode"] == "excerpt"
+    assert result.tool_output["content_mode"] == "structure_summary"
     assert result.tool_output["content_truncated"] is True
     assert "content" not in result.tool_output
+    assert "content_excerpt" not in result.tool_output
     assert result.tool_output["line_count"] > 200
-    assert result.tool_output["read_coverage"] == "1-20"
+    assert "read_coverage" not in result.tool_output
     assert result.tool_output["structure_summary"][0]["kind"] == "class"
     assert result.tool_output["structure_summary"][0]["name"] == "Service"
     assert any(item["kind"] == "def" for item in result.tool_output["structure_summary"])
 
 
-def test_read_file_returns_excerpt_for_medium_file_above_experiment_threshold(tmp_path: Path) -> None:
+def test_read_file_returns_full_content_for_medium_file_below_tool_threshold(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     lines = ["def main():"]
@@ -92,10 +93,10 @@ def test_read_file_returns_excerpt_for_medium_file_above_experiment_threshold(tm
     result = runner.read_file("medium.py")
 
     assert result.tool_output["ok"] is True
-    assert result.tool_output["content_mode"] == "excerpt"
-    assert result.tool_output["content_truncated"] is True
-    assert result.tool_output["read_coverage"] == "1-20"
-    assert "content" not in result.tool_output
+    assert result.tool_output["content_mode"] == "full"
+    assert result.tool_output["content_truncated"] is False
+    assert result.tool_output["read_coverage"] == "1-45"
+    assert result.tool_output["content"].startswith("def main():")
 
 
 def test_read_file_returns_structure_summary_for_large_text_file(tmp_path: Path) -> None:
@@ -108,7 +109,7 @@ def test_read_file_returns_structure_summary_for_large_text_file(tmp_path: Path)
 
     result = runner.read_file("notes.md")
 
-    assert result.tool_output["content_mode"] == "excerpt"
+    assert result.tool_output["content_mode"] == "structure_summary"
     kinds = [item["kind"] for item in result.tool_output["structure_summary"]]
     assert "heading" in kinds
     assert "section" in kinds

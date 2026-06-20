@@ -41,7 +41,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         },
     },
     "read_file_range": {
-        "description": "读取仓库内 UTF-8 文本文件的闭区间行号范围；当 read_file 返回 content_mode=\"excerpt\" 且缺少关键区域时使用。",
+        "description": "读取仓库内 UTF-8 文本文件的闭区间行号范围；当 read_file 返回 content_mode=\"structure_summary\" 且缺少关键区域时使用。",
         "required": ["path", "start_line", "end_line"],
         "optional": [],
         "max_lines": 40,
@@ -296,7 +296,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     "role": "system",
                     "content": (
                         "文件上下文规则：当 read_file 返回 content_mode=\"full\" 时，说明文件足够小且内容已完整可见，不要重复读取同一文件；"
-                        "当 read_file 返回 content_mode=\"excerpt\" 时，说明文件过大，只能看到结构摘要或片段，若缺少关键区域，请使用 read_file_range(path,start_line,end_line) 精确补齐；read_file_range 每次只能读取 1 到 40 行，不要用它读取整个文件。"
+                        "当 read_file 返回 content_mode=\"structure_summary\" 时，说明文件过大，只能看到结构摘要与行号索引，若缺少关键区域，请使用 read_file_range(path,start_line,end_line) 精确补齐；read_file_range 每次只能读取 1 到 40 行，不要用它读取整个文件。"
                         "编辑规则：如果同一文件连续多次出现 old_text_not_found，尤其接近 3 次时，优先基于最近源码行号使用 replace_lines，"
                         "不要继续猜测大段 apply_patch.old_text。"
                     ),

@@ -10,7 +10,7 @@ from typing import Any
 
 FULL_READ_FILE_MAX_LINES = 200
 FULL_READ_FILE_MAX_CHARS = 8000
-READ_FILE_RANGE_MAX_LINES = 80
+READ_FILE_RANGE_MAX_LINES = 40
 STRUCTURE_SUMMARY_MAX_ITEMS = 200
 
 
@@ -174,20 +174,14 @@ class CoreToolRunner:
                 },
             )
 
-        excerpt_lines = content.splitlines()[:20]
-        excerpt_text = _truncate_text("\n".join(excerpt_lines), limit=4000)
         return ToolExecution(
             tool_name="read_file",
             tool_input={"path": path},
             tool_output={
                 "ok": True,
                 "line_count": line_count,
-                "content_mode": "excerpt",
-                "content_excerpt": excerpt_text,
+                "content_mode": "structure_summary",
                 "content_truncated": True,
-                "read_coverage": _read_coverage(1, len(excerpt_lines)) if excerpt_lines else "0-0",
-                "excerpt_line_start": 1 if excerpt_lines else 0,
-                "excerpt_line_end": len(excerpt_lines),
                 "structure_summary": _build_structure_summary(path=path, content=content),
             },
         )

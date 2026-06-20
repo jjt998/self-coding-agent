@@ -1132,13 +1132,13 @@ def test_runtime_feedback_includes_large_read_file_structure_summary(
 
     read_summary = feedbacks[1]["previous_reflect"]["recent_tool_results"][0]
     assert read_summary["tool_name"] == "read_file"
-    assert read_summary["content_mode"] == "excerpt"
+    assert read_summary["content_mode"] == "structure_summary"
     assert read_summary["content_truncated"] is True
-    assert read_summary["read_coverage"] == "1-20"
+    assert "read_coverage" not in read_summary
     assert read_summary["excerpt_reason"] == "large_file_structure_summary"
     assert read_summary["structure_summary"][0]["kind"] == "class"
     assert read_summary["structure_summary"][0]["name"] == "LargeService"
-    assert "content" not in read_summary
+    assert read_summary["content_excerpt"] == ""
 
 
 def test_runtime_feedback_includes_range_and_replace_lines_results(
