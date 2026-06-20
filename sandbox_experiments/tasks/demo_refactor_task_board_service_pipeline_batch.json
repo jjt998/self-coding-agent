@@ -1,0 +1,115 @@
+{
+  "tasks": [
+    {
+      "name": "demo_refactor_task_board_extract_service_output_builder",
+      "task": "对 `task_board/service.py` 做一次行为保持的重构。当前 `build_list_output()`、`build_export_output()`、`build_owner_digest_output()` 和 `build_priority_digest_output()` 都各自重复执行同一类 service 层装配流程：读取 tasks、复制列表、标准化 owner/status/include_archived 入参、记录轻量 request metadata，然后再调用各自的 render 函数。请抽取一个共享 helper 来统一这段 service output builder 流程，并让这四个命令复用它；不要改变 CLI 参数、list 文本输出、export CSV 输出、owners 摘要输出、priorities 摘要输出、任务加载语义或过滤/排序行为。",
+      "task_type": "refactor",
+      "sandbox_retention": "always_delete",
+      "verify_commands": [
+        [
+          "python",
+          "task_board.py",
+          "list",
+          "--owner",
+          "alice",
+          "--status",
+          "todo"
+        ],
+        [
+          "python",
+          "task_board.py",
+          "export",
+          "--owner",
+          "alice",
+          "--status",
+          "todo"
+        ],
+        [
+          "python",
+          "task_board.py",
+          "owners",
+          "--owner",
+          "alice",
+          "--status",
+          "todo"
+        ],
+        [
+          "python",
+          "task_board.py",
+          "priorities",
+          "--owner",
+          "alice",
+          "--status",
+          "todo",
+          "--include-archived"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "list command exits successfully",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "list output stays unchanged",
+          "command_index": 1,
+          "regex": "^1\\. \\[todo\\] Draft status page copy \\| owner=alice \\| priority=1$"
+        },
+        {
+          "type": "command_returncode",
+          "name": "export command exits successfully",
+          "command_index": 2,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "export csv output stays unchanged",
+          "command_index": 2,
+          "regex": "(?s)^id,title,owner,status,archived\\r?\\n1,Draft status page copy,alice,todo,false$"
+        },
+        {
+          "type": "command_returncode",
+          "name": "owners command exits successfully",
+          "command_index": 3,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "owners digest output stays unchanged",
+          "command_index": 3,
+          "regex": "^alice: 1 task\\(s\\)$"
+        },
+        {
+          "type": "command_returncode",
+          "name": "priorities command exits successfully",
+          "command_index": 4,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "priorities digest output stays unchanged",
+          "command_index": 4,
+          "regex": "(?s)^p1: 1 task\\(s\\)\\r?\\np4: 1 task\\(s\\)$"
+        },
+        {
+          "type": "file_contains",
+          "name": "service contains build_view_output helper",
+          "path": "task_board/service.py",
+          "contains": "def build_view_output("
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "service file changed",
+          "path": "task_board/service.py"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 3
+      }
+    }
+  ]
+}
