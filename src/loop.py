@@ -609,7 +609,12 @@ class LoopOrchestrator:
         if state is AgentState.REFLECT:
             return self._run_reflect(runtime_state=runtime_state)
         if state is AgentState.VERIFY:
-            return self._run_verify(settings=settings, runtime_state=runtime_state, config_data=config_data)
+            return self._run_verify(
+                settings=settings,
+                runtime_state=runtime_state,
+                config_data=config_data,
+                tool_runner=tool_runner,
+            )
         if state is AgentState.FINALIZE:
             return self._run_finalize(runtime_state=runtime_state)
         raise ValueError(f"Unsupported agent state: {state}")
@@ -823,12 +828,24 @@ class LoopOrchestrator:
         settings: RunSettings,
         runtime_state: RuntimeState,
         config_data: dict[str, Any],
+        tool_runner: CoreToolRunner,
     ) -> dict[str, Any]:
-        """基于最近一轮工具结果执行任务验证。"""
+        """进入 verify 时先生成系统 diff 快照，再执行任务验证。"""
+        verification_diff_snapshot = tool_runner.git_diff()
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="verification_diff_snapshot",
+                payload={
+                    **verification_diff_snapshot.to_trace_payload(),
+                    "iteration": runtime_state.current_iteration,
+                },
+            )
+        )
         verification_result = build_phase_4_verification(
             settings=settings,
-            tool_executions=runtime_state.recent_tool_executions,
+            tool_executions=[verification_diff_snapshot],
         )
+        verification_result.details["verification_diff_snapshot"] = verification_diff_snapshot.tool_output
         runtime_state.verification_result = verification_result
         self.trace_writer.write_event(
             TraceEvent(

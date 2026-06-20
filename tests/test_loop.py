@@ -320,6 +320,81 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     ]
 
 
+def test_loop_verification_uses_system_diff_snapshot_instead_of_model_git_diff(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-system-diff-snapshot-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="apply patch and run an irrelevant git_diff",
+                rationale="验证层应自动生成自己的 diff 快照，而不是依赖模型这次 git_diff 的 paths。",
+                planned_actions=["修改 run_evidence.md，然后让 verify 自己做 diff 校验"],
+                tool_calls=[
+                    PlannedToolCall(
+                        tool_name="apply_patch",
+                        tool_input={"path": "run_evidence.md", "old_text": None, "new_text": "# Run Evidence\n"},
+                    ),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["unrelated.md"]}),
+                ],
+            )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+
+    settings = build_settings(
+        task="verify should use system diff snapshot",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+        verify_rules=[
+            {"type": "file_exists", "name": "run evidence exists", "path": "run_evidence.md"},
+            {"type": "diff_contains_file", "name": "system diff includes evidence file", "path": "run_evidence.md"},
+        ],
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data=_model_config(),
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    assert runtime_state.verification_result is not None
+    assert runtime_state.verification_result.passed is True
+    assert runtime_state.verification_result.details["verification_diff_snapshot"]["changed_file_count"] == 1
+
+    trace_events = [
+        json.loads(line)
+        for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    verification_diff_payload = next(
+        event["payload"] for event in trace_events if event["event_type"] == "verification_diff_snapshot"
+    )
+    assert verification_diff_payload["tool_name"] == "git_diff"
+    assert verification_diff_payload["tool_output"]["changed_file_count"] == 1
+    assert verification_diff_payload["tool_output"]["diffs"][0]["path"] == "run_evidence.md"
+
+    verification_payload = next(event["payload"] for event in trace_events if event["event_type"] == "verification_result")
+    diff_check = next(check for check in verification_payload["checks"] if check["name"] == "system diff includes evidence file")
+    assert diff_check["passed"] is True
+
+
 def test_default_reflect_records_read_only_round_without_no_diff_signal(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
