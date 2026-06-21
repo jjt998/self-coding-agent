@@ -1130,6 +1130,86 @@ def test_runtime_feedback_includes_large_read_file_structure_summary(
     assert read_summary["content_excerpt"] == ""
 
 
+def test_runtime_feedback_includes_explicit_structure_summary_tool_result(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "app.py").write_text(
+        "\n".join(
+            [
+                "class Service:",
+                "    pass",
+                "",
+                "def handle_task(task_id):",
+                "    return task_id",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    feedbacks: list[dict] = []
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-explicit-structure-summary-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            if runtime_feedback:
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="second",
+                    rationale="已经看到显式结构摘要。",
+                    planned_actions=["结束"],
+                    tool_calls=[],
+                    ready_to_finalize=True,
+                )
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="first",
+                rationale="先看结构摘要。",
+                planned_actions=["读取结构摘要"],
+                tool_calls=[PlannedToolCall(tool_name="read_file_structure_summary", tool_input={"path": "app.py"})],
+            )
+
+    def fake_verification(*, settings, tool_executions):
+        return VerificationResult(
+            passed=True,
+            summary="ok",
+            checks=[VerificationCheck(name="fake_verify", passed=True, detail="fake")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="读取显式结构摘要",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    loop_module.LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=_model_config())
+
+    read_summary = feedbacks[1]["previous_reflect"]["recent_tool_results"][0]
+    assert read_summary["tool_name"] == "read_file_structure_summary"
+    assert read_summary["content_mode"] == "structure_summary"
+    assert read_summary["excerpt_reason"] == "explicit_structure_summary"
+    assert read_summary["content_excerpt"] == ""
+    assert any(item["name"] == "handle_task" and item["line_number"] == 4 for item in read_summary["structure_summary"])
+
+
 def test_runtime_feedback_includes_range_and_replace_lines_results(
     tmp_path: Path,
     monkeypatch,
@@ -1286,6 +1366,102 @@ def test_runtime_feedback_keeps_last_five_file_context_snippets(
     assert final_cache["snippets"][-1]["content_excerpt"].startswith("line 26")
     previous_cache = feedbacks[-1]["previous_reflect"]["file_context_cache"]["app.py"]
     assert previous_cache["covered_ranges"] == ["1-5", "6-10", "11-15", "16-20", "21-25"]
+
+
+def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshes_after_reread(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "app.py").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    feedbacks: list[dict] = []
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-stale-cache-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            round_index = len(feedbacks)
+            if round_index == 1:
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="first",
+                    rationale="先读取原文件。",
+                    planned_actions=["读取 app.py"],
+                    tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "app.py"})],
+                )
+            if round_index == 2:
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="second",
+                    rationale="编辑文件，让旧缓存失效。",
+                    planned_actions=["修改 app.py"],
+                    tool_calls=[
+                        PlannedToolCall(
+                            tool_name="replace_lines",
+                            tool_input={"path": "app.py", "start_line": 2, "end_line": 2, "new_text": "TWO"},
+                        )
+                    ],
+                )
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="third",
+                rationale="重读文件，刷新缓存。",
+                planned_actions=["重新读取 app.py"],
+                tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "app.py"})],
+                ready_to_finalize=True,
+            )
+
+    def fake_verification(*, settings, tool_executions):
+        return VerificationResult(
+            passed=True,
+            summary="ok",
+            checks=[VerificationCheck(name="fake_verify", passed=True, detail="fake")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="验证文件缓存失效与刷新",
+        task_type="bug_fix",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data={"runtime": {"max_steps": 3}, **_model_config()},
+    )
+
+    stale_cache = feedbacks[2]["previous_reflect"]["file_context_cache"]["app.py"]
+    assert stale_cache["cache_status"] == "stale"
+    assert stale_cache["stale_reason"] == "edited_by_replace_lines"
+    assert stale_cache["snippets"] == []
+    assert stale_cache["stale_snippet_count"] == 1
+    assert stale_cache["stale_covered_ranges"] == ["1-3"]
+    assert feedbacks[2]["previous_reflect"]["stale_file_paths"] == ["app.py"]
+    assert feedbacks[2]["previous_reflect"]["recent_file_context_invalidations"][0]["path"] == "app.py"
+
+    fresh_cache = runtime_state.reflect_feedback["file_context_cache"]["app.py"]
+    assert fresh_cache["cache_status"] == "fresh"
+    assert fresh_cache["stale_reason"] == ""
+    assert fresh_cache["covered_ranges"] == ["1-3"]
+    assert fresh_cache["snippets"][0]["content_excerpt"] == "one\nTWO\nthree\n"
+    assert runtime_state.reflect_feedback["stale_file_paths"] == []
 
 
 def _run_factual_reflect_feedback_case(

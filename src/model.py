@@ -14,6 +14,7 @@ from env_loader import load_dotenv
 ALLOWED_TOOL_NAMES = {
     "search_text",
     "read_file",
+    "read_file_structure_summary",
     "read_file_range",
     "apply_patch",
     "replace_lines",
@@ -40,8 +41,17 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "path": {"type": "string", "description": "仓库内相对路径。"},
         },
     },
+    "read_file_structure_summary": {
+        "description": "只读取仓库内 UTF-8 文本文件的结构摘要，适合先定位函数、类、标题和起始行号。",
+        "required": ["path"],
+        "optional": [],
+        "accepted_aliases": {"file_path": "path"},
+        "properties": {
+            "path": {"type": "string", "description": "仓库内相对路径。"},
+        },
+    },
     "read_file_range": {
-        "description": "读取仓库内 UTF-8 文本文件的闭区间行号范围；当 read_file 返回 content_mode=\"structure_summary\" 且缺少关键区域时使用。",
+        "description": "读取仓库内 UTF-8 文本文件的闭区间行号范围；当 read_file 或 read_file_structure_summary 只给出结构摘要且缺少关键区域时使用。",
         "required": ["path", "start_line", "end_line"],
         "optional": [],
         "max_lines": 80,
@@ -426,7 +436,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "你是本地代码任务 harness 的决策层。"
                         "必须只返回 JSON 对象，不要 Markdown。"
                         "JSON 字段必须包含 summary、rationale、ready_to_finalize、planned_actions、cross_round_plan、tool_calls。"
-                        "tool_calls 里的 tool_name 只能是 search_text、read_file、apply_patch、run_command、git_diff，"
+                        "tool_calls 里的 tool_name 只能是 search_text、read_file、read_file_structure_summary、read_file_range、apply_patch、replace_lines、run_command、git_diff，"
                         "tool_input 必须是对象。"
                         "工具参数必须严格遵守 user message 里的 tool_schema，"
                         "不要给工具传入 tool_schema 未声明的字段。"
@@ -436,7 +446,9 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     "role": "system",
                     "content": (
                         "runtime_feedback.previous_reflect 是上一轮工具、diff、失败工具和文件读取缓存的事实压缩。"
-                        "runtime_feedback.previous_reflect.file_context_cache 会按文件保留最近八次读取片段，供你跨轮引用已读源码。"
+                        "runtime_feedback.previous_reflect.file_context_cache 会按文件保留最近五次读取结果。"
+                        "当 file_context_cache 某个文件的 cache_status=stale 时，说明这个文件在编辑后已整文件失效；"
+                        "这种旧缓存只代表你以前读过它，不能继续把其中内容当成当前可信源码。"
                         "runtime_feedback.previous_cross_round_plan 是上一轮模型留下的跨轮安排。"
                         "你需要在 rationale 中自行解释这些事实，并据此重规划之后的计划。"
                     ),
@@ -457,7 +469,10 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     "role": "system",
                     "content": (
                         "文件上下文规则：当 read_file 返回 content_mode=\"full\" 时，说明文件足够小且内容已完整可见，不要重复读取同一文件；"
-                        "当 read_file 返回 content_mode=\"structure_summary\" 时，说明文件过大，只能看到结构摘要与行号索引，若缺少关键区域，请使用 read_file_range(path,start_line,end_line) 精确补齐；read_file_range 每次只能读取 1 到 80 行，不要用它读取整个文件。"
+                        "当你只想先看大文件结构、函数名、类名、标题和起始行号时，优先使用 read_file_structure_summary(path)；"
+                        "当 read_file 或 read_file_structure_summary 返回 content_mode=\"structure_summary\" 时，说明当前只拿到了结构摘要与行号索引，若缺少关键区域，请使用 read_file_range(path,start_line,end_line) 精确补齐；read_file_range 每次只能读取 1 到 80 行，不要用它读取整个文件。"
+                        "如果某个文件在上一轮编辑后被标记为 stale，不要继续依赖编辑前读取到的旧片段；"
+                        "若只需要重新定位结构，先调用 read_file_structure_summary，再按行号调用 read_file_range。"
                         "编辑规则：如果同一文件连续多次出现 old_text_not_found，尤其接近 3 次时，优先基于最近源码行号使用 replace_lines；"
                         "不要继续猜测大段 apply_patch.old_text。"
                     ),

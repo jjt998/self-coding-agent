@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from file_structure import build_structure_summary
+
 
 STRUCTURE_SUMMARY_MAX_ITEMS = 80
 
@@ -18,67 +20,6 @@ def _is_text_file(path: Path) -> bool:
     except (OSError, UnicodeDecodeError):
         return False
     return True
-
-
-def _truncate_structure_line(value: str, limit: int = 240) -> str:
-    """截断结构摘要里的单行文本，避免初始上下文过长。"""
-    if len(value) <= limit:
-        return value
-    return value[:limit] + "...[truncated]"
-
-
-def _build_structure_summary(relative_path: str, content: str) -> list[dict[str, Any]]:
-    """为召回文件生成轻量结构摘要，帮助模型按行号继续读取。"""
-    lines = content.splitlines()
-    if Path(relative_path).suffix.lower() == ".py":
-        return _build_python_structure_summary(lines)
-    return _build_generic_structure_summary(lines)
-
-
-def _build_python_structure_summary(lines: list[str]) -> list[dict[str, Any]]:
-    """提取 Python 文件中的 class/def 名称和行号。"""
-    items: list[dict[str, Any]] = []
-    pattern = re.compile(r"^(?P<indent>\s*)(?P<kind>class|def)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
-    for line_number, line in enumerate(lines, start=1):
-        match = pattern.match(line)
-        if not match:
-            continue
-        items.append(
-            {
-                "line_number": line_number,
-                "kind": match.group("kind"),
-                "name": match.group("name"),
-                "indent": len(match.group("indent")),
-                "line": line.strip(),
-            }
-        )
-        if len(items) >= STRUCTURE_SUMMARY_MAX_ITEMS:
-            break
-    return items
-
-
-def _build_generic_structure_summary(lines: list[str]) -> list[dict[str, Any]]:
-    """为普通文本提取 heading、分节行和非空行索引。"""
-    items: list[dict[str, Any]] = []
-    for line_number, line in enumerate(lines, start=1):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        kind = "non_empty"
-        if stripped.startswith("#"):
-            kind = "heading"
-        elif stripped.endswith(":") and len(stripped) <= 120:
-            kind = "section"
-        items.append(
-            {
-                "line_number": line_number,
-                "kind": kind,
-                "line": _truncate_structure_line(stripped),
-            }
-        )
-        if len(items) >= STRUCTURE_SUMMARY_MAX_ITEMS:
-            break
-    return items
 
 
 def _extract_task_keywords(task: str) -> list[str]:
@@ -295,7 +236,11 @@ class ContextBuilder:
                 content=content,
                 injection_mode=injection_mode,
             )
-            structure_summary = _build_structure_summary(relative_path=relative_path, content=content)
+            structure_summary = build_structure_summary(
+                path=relative_path,
+                content=content,
+                max_items=STRUCTURE_SUMMARY_MAX_ITEMS,
+            )
             candidate_files.append(
                 FileContext(
                     path=relative_path,
@@ -337,7 +282,11 @@ class ContextBuilder:
                 content=content,
                 injection_mode=injection_mode,
             )
-            structure_summary = _build_structure_summary(relative_path=relative_path, content=content)
+            structure_summary = build_structure_summary(
+                path=relative_path,
+                content=content,
+                max_items=STRUCTURE_SUMMARY_MAX_ITEMS,
+            )
             selected_files.append(
                 FileContext(
                     path=relative_path,

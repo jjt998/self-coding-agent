@@ -105,6 +105,18 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 这里记录的是模型显式返回内容，不包含 provider 隐藏推理链，也不会记录 API key 或请求头。
 token 指标只统计 provider 返回的模型 usage，不统计工具调用或命令开销；若某轮缺少 `usage`，当前会保留真实值并把整次任务标记为 token usage 不完整，不做本地估算。
 
+## 4.1 读取源码时的工具分工
+
+- `read_file`：通用入口。小文件返回全文；大文件返回 `content_mode="structure_summary"`。
+- `read_file_structure_summary`：显式只读结构摘要。适合先看 `.py` 文件里的 `class` / `def` 起始行号，或先看 Markdown / 文本文件的标题分节。
+- `read_file_range`：在已经拿到行号后，再按闭区间精读关键区域。
+
+当前运行时还会把已读文件缓存进 `runtime_feedback.previous_reflect.file_context_cache`。需要注意：
+
+- `cache_status = fresh`：这份读取结果仍可直接参考。
+- `cache_status = stale`：这个文件在编辑后已整文件失效，旧片段只表示“以前读过”，不能继续当成当前可信源码。
+- 如果只想在 stale 后重新定位结构，优先再调用一次 `read_file_structure_summary`；确定位置后再用 `read_file_range`。
+
 ## 5. 运行 eval batch
 
 ```powershell
@@ -433,4 +445,5 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
 - 默认 `runtime.max_steps = 2`，暂不开放更高预算。
 - `runtime.max_steps` 只由 harness 内部使用；模型请求不会看到当前轮数、剩余轮数或最大轮数。
 - 第二轮及后续模型只通过 `runtime_feedback.previous_reflect` 接收上一轮事实压缩，并通过 `previous_cross_round_plan` 接收上一轮跨轮安排。
+- 读取缓存治理当前只做第一版“文件级全失效”：文件一旦被编辑，旧读取缓存整文件失效，不做行号偏移修补。
 - 回归测试不依赖真实外网模型，使用 fake model 环境。

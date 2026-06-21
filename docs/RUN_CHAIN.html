@@ -621,9 +621,7 @@
           "failed_old_text_excerpt": "失败的 old_text 摘要"
         }
       ],
-      "verification": "上一轮失败检查"
     },
-    "previous_verification": "兼容保留的上一轮验证结果",
     "previous_cross_round_plan": "上一轮模型给出的跨轮安排"
   },
   "decision_schema": {
@@ -904,15 +902,16 @@
           <h3>小文件完整，大文件摘要</h3>
           <p>
             小文件返回 <code>content_mode="full"</code> 和完整内容；超过阈值的大文件返回
-            <code>content_mode="excerpt"</code>、<code>read_coverage</code>、<code>content_truncated=true</code>
+            <code>content_mode="structure_summary"</code>、<code>content_truncated=true</code>
             与 <code>structure_summary</code>。
           </p>
         </article>
         <article class="card model">
-          <span class="tag">read_file_range</span>
-          <h3>按行号补齐关键区域</h3>
+          <span class="tag">read_file_structure_summary</span>
+          <h3>先拿结构，再精读</h3>
           <p>
-            如果 <code>content_mode="excerpt"</code> 且缺关键源码，模型应调用
+            如果只需要先定位函数、类、标题和起始行号，模型应优先调用
+            <code>read_file_structure_summary(path)</code>；若缺关键源码，再调用
             <code>read_file_range(path,start_line,end_line)</code> 精确读取闭区间行号范围。
           </p>
         </article>
@@ -936,6 +935,7 @@
       <p class="small risk-text" style="margin-top: 14px;">
         风险点：大文件不会被全文塞入下一轮模型上下文。缓解方式是让 <code>structure_summary</code> 暴露可定位行号，
         再由 <code>read_file_range</code> 精确补齐，最后用 <code>replace_lines</code> 做小范围编辑。
+        文件一旦编辑，旧读取缓存会整文件标记为 <code>stale</code>，避免模型继续引用编辑前片段。
       </p>
     </section>
 

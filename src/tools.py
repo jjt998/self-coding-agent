@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from difflib import unified_diff
 from pathlib import Path
-import re
 import subprocess
 from typing import Any
+
+from file_structure import build_structure_summary
 
 
 FULL_READ_FILE_MAX_LINES = 200
@@ -40,62 +41,6 @@ def _truncate_text(value: str, limit: int = 4000) -> str:
     if len(value) <= limit:
         return value
     return value[:limit] + "...[truncated]"
-
-
-def _build_structure_summary(path: str, content: str) -> list[dict[str, Any]]:
-    """为大文件生成轻量结构摘要，优先暴露可定位的行号。"""
-    lines = content.splitlines()
-    suffix = Path(path).suffix.lower()
-    if suffix == ".py":
-        return _build_python_structure_summary(lines)
-    return _build_generic_structure_summary(lines)
-
-
-def _build_python_structure_summary(lines: list[str]) -> list[dict[str, Any]]:
-    """提取 Python class/def 名称与行号，帮助模型后续按范围读取。"""
-    items: list[dict[str, Any]] = []
-    pattern = re.compile(r"^(?P<indent>\s*)(?P<kind>class|def)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
-    for line_number, line in enumerate(lines, start=1):
-        match = pattern.match(line)
-        if not match:
-            continue
-        items.append(
-            {
-                "line_number": line_number,
-                "kind": match.group("kind"),
-                "name": match.group("name"),
-                "indent": len(match.group("indent")),
-                "line": line.strip(),
-            }
-        )
-        # 截取化结构不限制数量，避免遗漏重要结构线索。
-        # if len(items) >= STRUCTURE_SUMMARY_MAX_ITEMS:
-        #     break
-    return items
-
-
-def _build_generic_structure_summary(lines: list[str]) -> list[dict[str, Any]]:
-    """为普通文本提取 heading、明显分节行和非空行索引。"""
-    items: list[dict[str, Any]] = []
-    for line_number, line in enumerate(lines, start=1):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        kind = "non_empty"
-        if stripped.startswith("#"):
-            kind = "heading"
-        elif stripped.endswith(":") and len(stripped) <= 120:
-            kind = "section"
-        items.append(
-            {
-                "line_number": line_number,
-                "kind": kind,
-                "line": _truncate_text(stripped, limit=240),
-            }
-        )
-        if len(items) >= STRUCTURE_SUMMARY_MAX_ITEMS:
-            break
-    return items
 
 
 @dataclass(slots=True)
@@ -182,7 +127,42 @@ class CoreToolRunner:
                 "line_count": line_count,
                 "content_mode": "structure_summary",
                 "content_truncated": True,
-                "structure_summary": _build_structure_summary(path=path, content=content),
+                "structure_summary": build_structure_summary(
+                    path=path,
+                    content=content,
+                    max_items=STRUCTURE_SUMMARY_MAX_ITEMS,
+                ),
+            },
+        )
+
+    def read_file_structure_summary(self, path: str) -> ToolExecution:
+        """只读取文件结构摘要，适合先定位大文件中的函数、类和分节。"""
+        target_path = self._resolve_repo_path(path=path, tool_name="read_file_structure_summary")
+        if isinstance(target_path, ToolExecution):
+            return target_path
+
+        content_result = self._read_utf8_text(
+            target_path=target_path,
+            tool_name="read_file_structure_summary",
+            path=path,
+        )
+        if isinstance(content_result, ToolExecution):
+            return content_result
+        content = content_result
+        return ToolExecution(
+            tool_name="read_file_structure_summary",
+            tool_input={"path": path},
+            tool_output={
+                "ok": True,
+                "path": path,
+                "line_count": _line_count(content),
+                "content_mode": "structure_summary",
+                "content_truncated": True,
+                "structure_summary": build_structure_summary(
+                    path=path,
+                    content=content,
+                    max_items=STRUCTURE_SUMMARY_MAX_ITEMS,
+                ),
             },
         )
 

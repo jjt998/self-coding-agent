@@ -381,7 +381,8 @@ final verify failed -> finalize(verification_failed)
 - harness 负责保真地压缩事实，LLM 负责解释事实并重规划。
 - 如果本轮有修改类工具且最新 `git_diff.changed_file_count == 0`，reflect 记录 `no_diff_after_edit_attempt`。
 - 如果本轮只有读取、搜索或其它信息收集工具，不产生 no-diff signal。
-- verify 失败结果会进入下一轮 `previous_reflect.verification`，但不再生成 `replan_constraints`、`must_address` 或 `avoid_exact_tool_sequence`。
+- 下一轮模型不会再收到 `previous_verification` 或 `previous_reflect.verification`；最终验证只作为末尾裁判结果保留在 trace、report 和 eval 聚合里。
+- `file_context_cache` 现在会区分 `fresh` 与 `stale`：文件一旦被 `apply_patch` 或 `replace_lines` 成功编辑，旧读取缓存按整文件失效；只有后续重新读取后才会恢复为 `fresh`。
 
 ### 7.5 模型可见预算
 
@@ -428,11 +429,10 @@ final verify failed -> finalize(verification_failed)
 
 当前实现里，进入第二轮及后续 `plan` 的跨轮输入由 `runtime_feedback` 承载：
 
-- `previous_reflect`：上一轮事实反馈，包含 observation、signals、failed_tools、recent_tool_results 和 verification。
-- `previous_verification`：上一轮验证结果和失败检查证据。
+- `previous_reflect`：上一轮事实反馈，包含 observation、signals、failed_tools、recent_tool_results、`file_context_cache`、`stale_file_paths` 和最近缓存失效诊断。
 - `previous_cross_round_plan`：上一轮模型给出的跨轮安排。
 
-这些字段共同组成下一轮模型的“运行上下文窗口”。其中 `previous_reflect.recent_tool_results` 和 `previous_cross_round_plan` 是为了减少模型在第二轮继续猜测源码或忘记跨轮安排；窗口中不会包含当前第几轮、还剩几轮或最大轮数。
+这些字段共同组成下一轮模型的“运行上下文窗口”。其中 `previous_reflect.recent_tool_results`、`previous_reflect.file_context_cache` 和 `previous_cross_round_plan` 是为了减少模型在第二轮继续猜测源码或忘记跨轮安排；窗口中不会包含当前第几轮、还剩几轮或最大轮数。
 
 `memory_context`
 
@@ -592,9 +592,18 @@ class BaseModelAdapter:
 
 - `search_text`
 - `read_file`
+- `read_file_structure_summary`
+- `read_file_range`
 - `apply_patch`
+- `replace_lines`
 - `run_command`
 - `git_diff`
+
+读取类工具分工如下：
+
+- `read_file`：小文件直接返回全文；大文件只返回 `content_mode="structure_summary"` 与结构摘要。
+- `read_file_structure_summary`：显式只读结构摘要，适合先定位大文件里的函数、类、标题和起始行号。
+- `read_file_range`：按闭区间行号精读关键片段。
 
 ### 12.2 工具契约
 

@@ -82,6 +82,52 @@ def test_read_file_returns_structure_summary_for_large_python_file(tmp_path: Pat
     assert any(item["kind"] == "def" for item in result.tool_output["structure_summary"])
 
 
+def test_read_file_structure_summary_returns_python_structure_only(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "app.py").write_text(
+        "\n".join(
+            [
+                "class Service:",
+                "    pass",
+                "",
+                "def handle_task(task_id):",
+                "    return task_id",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runner = CoreToolRunner(repo_root=str(repo_root))
+
+    result = runner.read_file_structure_summary("app.py")
+
+    assert result.tool_name == "read_file_structure_summary"
+    assert result.tool_output["ok"] is True
+    assert result.tool_output["content_mode"] == "structure_summary"
+    assert result.tool_output["content_truncated"] is True
+    assert "content" not in result.tool_output
+    assert "content_excerpt" not in result.tool_output
+    assert result.tool_output["structure_summary"][0]["kind"] == "class"
+    assert any(item["name"] == "handle_task" and item["line_number"] == 4 for item in result.tool_output["structure_summary"])
+
+
+def test_read_file_structure_summary_returns_text_structure_only(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n\nUsage:\nRun the tool.\n", encoding="utf-8")
+    runner = CoreToolRunner(repo_root=str(repo_root))
+
+    result = runner.read_file_structure_summary("README.md")
+
+    assert result.tool_output["ok"] is True
+    assert result.tool_output["content_mode"] == "structure_summary"
+    assert "content" not in result.tool_output
+    kinds = [item["kind"] for item in result.tool_output["structure_summary"]]
+    assert "heading" in kinds
+    assert "section" in kinds
+
+
 def test_read_file_returns_full_content_for_medium_file_below_tool_threshold(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -132,20 +178,20 @@ def test_read_file_range_reads_requested_closed_range(tmp_path: Path) -> None:
     assert result.tool_output["line_count"] == 4
 
 
-def test_read_file_range_allows_at_most_forty_lines(tmp_path: Path) -> None:
+def test_read_file_range_allows_at_most_eighty_lines(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / "app.py").write_text("\n".join(f"line {index}" for index in range(1, 45)) + "\n", encoding="utf-8")
+    (repo_root / "app.py").write_text("\n".join(f"line {index}" for index in range(1, 90)) + "\n", encoding="utf-8")
     runner = CoreToolRunner(repo_root=str(repo_root))
 
-    allowed = runner.read_file_range("app.py", 1, 40)
-    rejected = runner.read_file_range("app.py", 1, 41)
+    allowed = runner.read_file_range("app.py", 1, 80)
+    rejected = runner.read_file_range("app.py", 1, 81)
 
     assert allowed.tool_output["ok"] is True
-    assert allowed.tool_output["read_coverage"] == "1-40"
+    assert allowed.tool_output["read_coverage"] == "1-80"
     assert rejected.tool_output["ok"] is False
     assert rejected.tool_output["error"] == "range_too_large"
-    assert "最多一次读取 40 行" in rejected.tool_output["detail"]
+    assert "最多一次读取 80 行" in rejected.tool_output["detail"]
 
 
 def test_read_file_range_returns_failed_tool_result_for_invalid_range(tmp_path: Path) -> None:

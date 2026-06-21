@@ -19,9 +19,6 @@
 - `reflect` 仍保留在 loop 内，但职责已收敛为事实压缩：最近工具结果、失败工具、文件读取缓存、diff 状态、变更文件和轻量 `signals`，不再承担“响应 verify failure”职责。
 - 当前单任务 run 仍保留 token diagnostics：聚合 `prompt_tokens`、`completion_tokens`、`total_tokens`、`request_count`、`missing_usage_count` 和 `complete`；provider 缺少 `usage` 时不做本地估算，而是保留为“不完整但真实”。
 - 当前 harness 的默认主赛道已进一步收敛到 `bug_fix`；`refactor`、`test_generation`、`code_understanding` 仍兼容，但默认不再依赖 loop 内 verify 反馈。
-- 当前已新增显式结构摘要工具 `read_file_structure_summary(path)`，用于只读取指定文件的结构摘要；`.py` 文件会继续暴露 `class` / `def` 的起始行号，供后续 `read_file_range` 精读。
-- 当前已落地运行时记忆污染治理第一版：文件一旦被 `apply_patch` 或 `replace_lines` 成功编辑，旧读取缓存会按整文件标记为 `stale`；只有后续重新读取后才恢复为 `fresh`。
-- 当前 `reflect_feedback` 与后续轮次的 `runtime_feedback.previous_reflect` 已能显式区分 `fresh` / `stale` 文件缓存，并保留最近一次缓存失效原因与失效发生轮次，帮助分析“为什么又重读了该文件”。
 
 > 说明：下面保留了 Phase 8/Phase 9 早期推进记录，其中部分段落描述的是历史状态；当前行为以上方最新条目为准。
 
@@ -82,14 +79,12 @@
 - `verify` 已经更接近纯裁判，但任务级 `verify_rules` 设计仍需继续加强，尤其是面向 `bug_fix` 的“修好了没有、回归没回归”这类行为级验证。
 - 过程诊断信息已经能从 `trace.jsonl` 反推，但当前 trace 查看体验仍偏原始；后续仍需继续加强 `trace_view.html`、报告摘要和高信号定位能力。
 - `refactor`、`test_generation`、`code_understanding` 目前仍更适合作为兼容研究题；当前主要评测赛道仍应继续聚焦更难但可客观裁判的 `bug_fix` 任务。
-- 文件缓存污染治理当前只做第一版整文件失效，还没有做“编辑后行号映射修补”或“片段级局部失效”；复杂编辑场景下仍可能带来额外重读成本。
 
 ## 下一步明确动作
 
 - 继续扩充 `bug_fix` 任务和末尾最终 verify 规则，优先保证“是否修复”和“是否回归”可稳定裁判。
 - 继续加强 trace、report 和 `trace_view.html`，重点提升 `model_decision`、收口信号、最终验证和 diff 快照的可读性。
 - 继续观察 `ready_to_finalize` 与连续空 `tool_calls` 的真实收口质量，在拿到更多 run 证据前，不急着引入更细的新收口启发式。
-- 在拿到更多真实 trace 后，再决定是否把文件缓存治理从“整文件全失效”升级为“按区间失效 + 行号映射”。
 
 ## 当前阻塞
 

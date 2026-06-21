@@ -81,6 +81,7 @@ class RuntimeState:
     tool_executions: list[ToolExecution] = field(default_factory=list)
     recent_tool_executions: list[ToolExecution] = field(default_factory=list)
     file_context_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
+    file_context_invalidations: list[dict[str, Any]] = field(default_factory=list)
     changed_files: list[str] = field(default_factory=list)
     failed_tool_count: int = 0
     observation_summary: str = ""
@@ -422,6 +423,7 @@ class LoopOrchestrator:
             "signals": list(reflect_feedback.get("signals", [])),
             "changed_files": list(observation.get("changed_files", [])),
             "failed_tool_count": observation.get("failed_tool_count", 0),
+            "stale_file_paths": list(reflect_feedback.get("stale_file_paths", [])),
         }
 
     def _summarize_tool_execution(
@@ -439,7 +441,13 @@ class LoopOrchestrator:
             summary["error"] = output.get("error")
         if "returncode" in output:
             summary["returncode"] = output.get("returncode")
-        if execution.tool_name in {"read_file", "read_file_range", "apply_patch", "replace_lines"}:
+        if execution.tool_name in {
+            "read_file",
+            "read_file_structure_summary",
+            "read_file_range",
+            "apply_patch",
+            "replace_lines",
+        }:
             path = execution.tool_input.get("path")
             if path:
                 summary["path"] = path
@@ -463,6 +471,14 @@ class LoopOrchestrator:
                     recent_executions=recent_executions or [],
                 )
             )
+        if execution.tool_name == "read_file_structure_summary":
+            for field_name in ["line_count", "content_mode", "content_truncated", "structure_summary"]:
+                if field_name in output:
+                    summary[field_name] = output[field_name]
+            summary["content_excerpt"] = ""
+            summary["excerpt_line_start"] = 0
+            summary["excerpt_line_end"] = 0
+            summary["excerpt_reason"] = "explicit_structure_summary"
         if execution.tool_name == "read_file_range":
             for field_name in [
                 "line_count",
@@ -1257,13 +1273,16 @@ class LoopOrchestrator:
             "failed_tools": failed_tool_summaries,
             "recent_tool_results": recent_tool_results,
             "file_context_cache": runtime_state.file_context_cache,
+            "stale_file_paths": self._collect_stale_file_paths(runtime_state=runtime_state),
+            "recent_file_context_invalidations": list(runtime_state.file_context_invalidations),
         }
 
     def _update_file_context_cache(self, runtime_state: RuntimeState) -> None:
         """
-        累计同一文件最近八次读取片段，供下一轮模型做跨轮定位。
-        而读取文件最大有80行，所以累计一个函数或类最大可到640行，基本覆盖绝大多数函数和类的完整上下文。
+        编辑后的旧读取结果会先整文件失效，再把本轮新的读取结果写回缓存。
+        这样做虽然会增加少量重读，但能避免模型继续引用已经被编辑污染的旧片段。
         """
+        self._invalidate_file_context_cache_for_recent_edits(runtime_state=runtime_state)
         for execution in runtime_state.recent_tool_executions:
             snippet = self._build_file_context_snippet(execution=execution)
             if not snippet:
@@ -1275,6 +1294,10 @@ class LoopOrchestrator:
                     "path": path,
                     "line_count": snippet.get("line_count", 0),
                     "snippets": [],
+                    "covered_ranges": [],
+                    "cache_status": "fresh",
+                    "stale_reason": "",
+                    "last_invalidated_step": 0,
                 },
             )
             if snippet.get("line_count"):
@@ -1287,10 +1310,15 @@ class LoopOrchestrator:
                 for item in cache_entry["snippets"]
                 if item.get("read_coverage")
             ]
+            cache_entry["cache_status"] = "fresh"
+            cache_entry["stale_reason"] = ""
+            cache_entry["last_refreshed_iteration"] = runtime_state.current_iteration
+            cache_entry["stale_snippet_count"] = 0
+            cache_entry["stale_covered_ranges"] = []
 
     def _build_file_context_snippet(self, execution: ToolExecution) -> dict[str, Any]:
         """把读取类工具结果转成可累计的文件片段。"""
-        if execution.tool_name not in {"read_file", "read_file_range"}:
+        if execution.tool_name not in {"read_file", "read_file_structure_summary", "read_file_range"}:
             return {}
         if execution.tool_output.get("ok") is not True:
             return {}
@@ -1298,7 +1326,10 @@ class LoopOrchestrator:
         if not path:
             return {}
         output = execution.tool_output
-        content = output.get("content") if execution.tool_name == "read_file" else output.get("content_excerpt")
+        if execution.tool_name == "read_file":
+            content = output.get("content")
+        else:
+            content = output.get("content_excerpt")
         if content is None:
             content = output.get("content_excerpt", "")
         snippet: dict[str, Any] = {
@@ -1321,6 +1352,76 @@ class LoopOrchestrator:
         if output.get("structure_summary"):
             snippet["structure_summary"] = output.get("structure_summary")
         return snippet
+
+    def _invalidate_file_context_cache_for_recent_edits(self, runtime_state: RuntimeState) -> None:
+        """把本轮成功编辑过的文件缓存标记为 stale，避免继续复用旧源码片段。"""
+        runtime_state.file_context_invalidations = []
+        for execution in runtime_state.recent_tool_executions:
+            if execution.tool_name not in {"apply_patch", "replace_lines"}:
+                continue
+            if execution.tool_output.get("ok") is not True:
+                continue
+            path = execution.tool_input.get("path")
+            if not isinstance(path, str) or not path.strip():
+                continue
+            self._mark_file_context_stale(
+                runtime_state=runtime_state,
+                path=path,
+                tool_name=execution.tool_name,
+            )
+
+    def _mark_file_context_stale(
+        self,
+        *,
+        runtime_state: RuntimeState,
+        path: str,
+        tool_name: str,
+    ) -> None:
+        """整文件失效旧缓存，只保留“读过但已过期”的事实。"""
+        cache_entry = runtime_state.file_context_cache.setdefault(
+            path,
+            {
+                "path": path,
+                "line_count": 0,
+                "snippets": [],
+                "covered_ranges": [],
+                "cache_status": "stale",
+                "stale_reason": "",
+                "last_invalidated_step": 0,
+            },
+        )
+        stale_covered_ranges = [
+            item.get("read_coverage", "")
+            for item in cache_entry.get("snippets", [])
+            if item.get("read_coverage")
+        ]
+        stale_snippet_count = len(cache_entry.get("snippets", []))
+        cache_entry["snippets"] = []
+        cache_entry["covered_ranges"] = []
+        cache_entry["cache_status"] = "stale"
+        cache_entry["stale_reason"] = f"edited_by_{tool_name}"
+        cache_entry["last_invalidated_step"] = runtime_state.step_count
+        cache_entry["last_invalidated_iteration"] = runtime_state.current_iteration
+        cache_entry["stale_snippet_count"] = stale_snippet_count
+        cache_entry["stale_covered_ranges"] = stale_covered_ranges
+        invalidation = {
+            "path": path,
+            "cache_status": "stale",
+            "stale_reason": f"edited_by_{tool_name}",
+            "last_invalidated_step": runtime_state.step_count,
+            "last_invalidated_iteration": runtime_state.current_iteration,
+            "stale_snippet_count": stale_snippet_count,
+            "stale_covered_ranges": stale_covered_ranges,
+        }
+        runtime_state.file_context_invalidations.append(invalidation)
+
+    def _collect_stale_file_paths(self, runtime_state: RuntimeState) -> list[str]:
+        """返回当前仍处于 stale 状态的文件列表，供模型快速判断哪些文件需要重读。"""
+        return [
+            path
+            for path, cache_entry in runtime_state.file_context_cache.items()
+            if cache_entry.get("cache_status") == "stale"
+        ]
 
     def _has_old_text_not_found_failure(self, failed_tool_summaries: list[dict[str, Any]]) -> bool:
         """判断失败工具摘要里是否存在 old_text_not_found。"""

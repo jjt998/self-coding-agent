@@ -146,6 +146,7 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
     assert user_payload["runtime_feedback"] == {}
     assert user_payload["tool_schema"]["read_file"]["required"] == ["path"]
     assert user_payload["tool_schema"]["read_file"]["optional"] == []
+    assert user_payload["tool_schema"]["read_file_structure_summary"]["required"] == ["path"]
     assert user_payload["tool_schema"]["read_file_range"]["required"] == ["path", "start_line", "end_line"]
     assert user_payload["tool_schema"]["read_file_range"]["max_lines"] == 80
     assert user_payload["tool_schema"]["replace_lines"]["required"] == ["path", "start_line", "end_line", "new_text"]
@@ -263,15 +264,17 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     prompt_text = "\n".join(message["content"] for message in captured["body"]["messages"] if message["role"] == "system")
     assert "runtime_feedback.previous_reflect" in prompt_text
     assert "file_context_cache" in prompt_text
-    assert "最近五次读取片段" in prompt_text
+    assert "最近五次读取结果" in prompt_text
+    assert "cache_status=stale" in prompt_text
     assert "previous_cross_round_plan" in prompt_text
     assert "cross_round_plan" in prompt_text
     assert "planned_actions" in prompt_text
     assert "ASCII stdout/stderr" in prompt_text
     assert "content_mode=\"full\"" in prompt_text
     assert "content_mode=\"structure_summary\"" in prompt_text
+    assert "read_file_structure_summary" in prompt_text
     assert "read_file_range" in prompt_text
-    assert "1 到 40 行" in prompt_text
+    assert "1 到 80 行" in prompt_text
     assert "不要用它读取整个文件" in prompt_text
     assert "replace_lines" in prompt_text
     assert "old_text_not_found" in prompt_text

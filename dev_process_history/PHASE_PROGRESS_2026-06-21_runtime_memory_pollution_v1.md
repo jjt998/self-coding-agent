@@ -16,9 +16,6 @@
 - `previous_verification` 已从模型输入中移除，`previous_reflect.verification` 也已从事实反馈中移除。
 - token diagnostics 仍会继续流入 `model_raw_response`、`model_decision`、`run_finished`、`report.md`、`summary.json`、`summary.md` 和 comparison delta；provider 缺失 `usage` 时不做本地估算。
 - 当前产品定位继续向 `bug_fix` 主赛道收敛，其它任务类型保持兼容，但不再默认依赖过程内 verify 反馈。
-- 当前已新增显式结构摘要工具 `read_file_structure_summary(path)`，让模型能先看结构、再按行号精读，而不是总从 `read_file` 间接触发大文件摘要。
-- 当前已接入运行时记忆污染治理第一版：成功编辑过的文件会把旧读取缓存整文件标记为 `stale`，后续只有重新读取后才恢复为 `fresh`。
-- `reflect_feedback` 现已补充 `stale_file_paths` 和最近缓存失效诊断，便于在 trace 中直接看出“为什么又读了一次这个文件”。
 
 > 说明：下方按 Phase 保留历史推进记录，其中部分旧条目描述的是更早期的 loop 或 verify 形态；当前实现以上方“最新 Phase 9.x 收口”为准。
 
@@ -144,27 +141,6 @@
 - 先围绕真实任务实验优先补“真实 loop + 更强真实 verify + 结构化失败收口”三件套。
 - 在保留现有 comparison / experiment 外壳的前提下，把真实任务执行链路继续接深。
 - 等最小闭环跑通后，再重新设计第二批更能区分 context 策略的研究任务集。
-
-### Phase 9.x 本轮新增：运行时记忆污染治理 v1 + 显式结构摘要工具
-
-- `src/file_structure.py` 已落地共享结构摘要 helper，统一服务于 `ContextBuilder` 与工具层，避免两套相近实现继续漂移。
-- `src/tools.py` 已新增 `read_file_structure_summary(path)`；返回固定 `content_mode="structure_summary"`、`line_count`、`content_truncated=true` 和 `structure_summary`，不再附带大文件前 20 行摘录。
-- `.py` 文件的结构摘要继续保留 `line_number`、`kind`、`name`、`indent`、`line`，便于模型直接配合 `read_file_range` 精读。
-- `src/model.py` 已把 `read_file_structure_summary` 接入 `ALLOWED_TOOL_NAMES`、`TOOL_SCHEMAS` 和主提示词，并明确三者分工：
-  - `read_file`：通用读取
-  - `read_file_structure_summary`：先看结构
-  - `read_file_range`：按行精读
-- `src/loop.py` 已把文件缓存治理升级为“编辑后整文件失效”：
-  - `apply_patch` / `replace_lines` 成功后，旧读取缓存整文件标记为 `stale`
-  - 旧片段内容不再继续暴露为可直接复用源码
-  - 只保留 `stale_reason`、`last_invalidated_step`、`stale_snippet_count`、`stale_covered_ranges` 等诊断字段
-  - 后续重新读取同文件后，缓存恢复为 `fresh`
-- `reflect_feedback` 与后续轮次 `runtime_feedback.previous_reflect` 已补充：
-  - `file_context_cache[*].cache_status`
-  - `file_context_cache[*].stale_reason`
-  - `stale_file_paths`
-  - `recent_file_context_invalidations`
-- 本轮仍保持 v1 边界：不做片段级失效，不做编辑后行号偏移映射，不做局部缓存修补。
 
 ### Phase 9 本轮新增：第三批 verify_rules
 
