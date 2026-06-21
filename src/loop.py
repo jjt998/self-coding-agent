@@ -71,6 +71,8 @@ class RuntimeState:
     current_iteration: int = 0
     iteration_count: int = 0
     max_steps: int = 4
+    consecutive_empty_tool_call_count: int = 0
+    solve_loop_exit_reason: str = ""
     context_snapshot: ContextSnapshot | None = None
     model_decision: ModelDecision | None = None
     model_decisions: list[ModelDecision] = field(default_factory=list)
@@ -111,7 +113,7 @@ class LoopOrchestrator:
         self._active_iteration = 0
 
     def run(self, settings: RunSettings, config_data: dict[str, Any]) -> RuntimeState:
-        """执行最小多轮求解 loop，并返回最终运行态。"""
+        """先完成求解轮次，再执行一次末尾最终验证。"""
         runtime_state = RuntimeState(task=settings.task, task_type=settings.task_type)
         runtime_state.max_steps = self._get_max_steps(config_data=config_data)
         context_builder = ContextBuilder(
@@ -135,8 +137,6 @@ class LoopOrchestrator:
                 tool_runner=tool_runner,
             )
 
-        stop_code = StopReasonCode.MAX_STEPS_REACHED
-        stop_message = "已达到最大求解轮数，run 已停止。"
         for iteration in range(1, runtime_state.max_steps + 1):
             runtime_state.current_iteration = iteration
             runtime_state.iteration_count = iteration
@@ -153,8 +153,7 @@ class LoopOrchestrator:
                         tool_runner=tool_runner,
                     )
                 except ModelError as error:
-                    if state not in {AgentState.PLAN, AgentState.ACT}:
-                        raise
+                    runtime_state.solve_loop_exit_reason = "model_error"
                     self._finish_with_model_error(runtime_state=runtime_state, error=error)
                     return runtime_state
 
@@ -169,23 +168,18 @@ class LoopOrchestrator:
                 tool_runner=tool_runner,
             )
 
-            self._execute_state(
-                state=AgentState.VERIFY,
-                settings=settings,
-                runtime_state=runtime_state,
-                config_data=config_data,
-                context_builder=context_builder,
-                memory_manager=memory_manager,
-                tool_runner=tool_runner,
-            )
-            if runtime_state.verification_result and runtime_state.verification_result.passed:
-                stop_code = StopReasonCode.COMPLETED
-                stop_message = "最小多轮求解链路已验证通过。"
+            if self._should_exit_solve_loop(runtime_state=runtime_state):
                 break
-            if runtime_state.verification_result and not runtime_state.verification_result.passed:
-                stop_code = StopReasonCode.VERIFICATION_FAILED
-                stop_message = "验证失败，run 已停止。"
 
+        self._execute_state(
+            state=AgentState.VERIFY,
+            settings=settings,
+            runtime_state=runtime_state,
+            config_data=config_data,
+            context_builder=context_builder,
+            memory_manager=memory_manager,
+            tool_runner=tool_runner,
+        )
         self._execute_state(
             state=AgentState.FINALIZE,
             settings=settings,
@@ -195,8 +189,52 @@ class LoopOrchestrator:
             memory_manager=memory_manager,
             tool_runner=tool_runner,
         )
-        self._finish_run(runtime_state=runtime_state, code=stop_code, message=stop_message)
+        verification_passed = bool(runtime_state.verification_result and runtime_state.verification_result.passed)
+        self._finish_run(
+            runtime_state=runtime_state,
+            code=StopReasonCode.COMPLETED if verification_passed else StopReasonCode.VERIFICATION_FAILED,
+            message=(
+                "求解阶段已结束，最终验证通过。"
+                if verification_passed
+                else "求解阶段已结束，但最终验证失败。"
+            ),
+        )
         return runtime_state
+
+    def _should_exit_solve_loop(self, runtime_state: RuntimeState) -> bool:
+        """根据收口信号判断是否结束求解阶段。"""
+        decision = runtime_state.model_decision
+        tool_call_count = len(decision.tool_calls) if decision else 0
+        if tool_call_count == 0:
+            runtime_state.consecutive_empty_tool_call_count += 1
+        else:
+            runtime_state.consecutive_empty_tool_call_count = 0
+
+        reason = ""
+        if decision and decision.ready_to_finalize:
+            reason = "model_declared_ready"
+        elif runtime_state.consecutive_empty_tool_call_count >= 2:
+            reason = "consecutive_empty_tool_calls"
+        elif runtime_state.iteration_count >= runtime_state.max_steps:
+            reason = "max_steps_reached"
+
+        if not reason:
+            return False
+
+        runtime_state.solve_loop_exit_reason = reason
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="solve_loop_exit_detected",
+                payload={
+                    "iteration": runtime_state.current_iteration,
+                    "solve_loop_exit_reason": reason,
+                    "ready_to_finalize": bool(decision.ready_to_finalize) if decision else False,
+                    "tool_call_count": tool_call_count,
+                    "consecutive_empty_tool_call_count": runtime_state.consecutive_empty_tool_call_count,
+                },
+            )
+        )
+        return True
 
     def _execute_state(
         self,
@@ -252,7 +290,7 @@ class LoopOrchestrator:
         )
 
     def _build_stop_reason_details(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """整理 run 结束时需要保留的兼容字段和多轮信息。"""
+        """整理 run 结束时需要保留的最终诊断字段。"""
         verification_passed = bool(runtime_state.verification_result and runtime_state.verification_result.passed)
         return {
             "completed_states": runtime_state.completed_states,
@@ -263,6 +301,9 @@ class LoopOrchestrator:
             "reflect_count": runtime_state.reflect_count,
             "reflect_trigger_reasons": list(runtime_state.reflect_trigger_reasons),
             "verification_passed": verification_passed,
+            "final_verification_passed": verification_passed,
+            "solve_loop_exit_reason": runtime_state.solve_loop_exit_reason,
+            "consecutive_empty_tool_call_count": runtime_state.consecutive_empty_tool_call_count,
             "verification_failure": self._build_verification_failure_details(runtime_state=runtime_state),
             "changed_files": runtime_state.changed_files,
             "failed_tool_count": runtime_state.failed_tool_count,
@@ -294,12 +335,15 @@ class LoopOrchestrator:
         runtime_state.reflect_count += 1
 
     def _finish_with_model_error(self, runtime_state: RuntimeState, error: ModelError) -> None:
-        """把模型决策失败收口成稳定 stop reason，并立即结束 run。"""
+        """模型决策失败时立即收口，不再进入末尾最终验证。"""
+        if not runtime_state.solve_loop_exit_reason:
+            runtime_state.solve_loop_exit_reason = "model_error"
         payload = {
             "provider": error.provider,
             "model_name": error.model_name,
             "error_type": type(error).__name__,
             "error_message": str(error),
+            "solve_loop_exit_reason": runtime_state.solve_loop_exit_reason,
             "token_usage": dict(runtime_state.token_usage),
             **error.details,
         }
@@ -343,57 +387,41 @@ class LoopOrchestrator:
         runtime_state.current_state = to_state.value
 
     def _build_runtime_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """给下一轮 plan 提供事实型反馈，不暴露轮数预算。"""
-        if runtime_state.current_iteration <= 1 and not runtime_state.verification_result:
+        """下一轮只传事实型 reflect 反馈和跨轮计划。"""
+        if runtime_state.current_iteration <= 1 and not runtime_state.reflect_feedback:
             return {}
-        verification_payload = (
-            runtime_state.verification_result.to_dict()
-            if runtime_state.verification_result
-            else {}
-        )
         return {
             "previous_reflect": self._build_previous_reflect(runtime_state=runtime_state),
-            "previous_verification": verification_payload,
             "previous_cross_round_plan": list(runtime_state.cross_round_plan),
         }
 
     def _build_previous_reflect(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """返回上一轮 reflect 事实，并把最新验证事实合并进去。"""
+        """返回上一轮 reflect 事实，并移除旧的 verification 字段。"""
         if not runtime_state.reflect_feedback:
             return {}
         feedback = deepcopy(runtime_state.reflect_feedback)
         feedback.pop("iteration", None)
+        feedback.pop("verification", None)
         observation = feedback.get("observation")
         if isinstance(observation, dict):
             sanitized_observation = dict(observation)
             sanitized_observation.pop("iteration", None)
             feedback["observation"] = sanitized_observation
-        feedback["verification"] = (
-            runtime_state.verification_result.to_dict()
-            if runtime_state.verification_result
-            else {}
-        )
         return feedback
 
     def _summarize_reflect_feedback_for_trace(self, runtime_feedback: dict[str, Any]) -> dict[str, Any]:
-        """让 model_decision trace 保持精简，同时暴露上一轮事实反馈。"""
+        """给 trace 保留高信号 reflect 摘要，不再包含 verification 子段。"""
         reflect_feedback = runtime_feedback.get("previous_reflect", {})
         if not isinstance(reflect_feedback, dict) or not reflect_feedback:
             return {}
-        verification = reflect_feedback.get("verification", {})
-        failing_checks: list[str] = []
-        if isinstance(verification, dict):
-            failing_checks = [
-                str(check.get("name", "")).strip()
-                for check in verification.get("checks", [])
-                if isinstance(check, dict) and not bool(check.get("passed")) and str(check.get("name", "")).strip()
-            ]
+        observation = reflect_feedback.get("observation", {})
+        if not isinstance(observation, dict):
+            observation = {}
         return {
             "trigger": reflect_feedback.get("trigger", ""),
             "signals": list(reflect_feedback.get("signals", [])),
-            "changed_files": list((reflect_feedback.get("observation") or {}).get("changed_files", [])),
-            "failed_tool_count": (reflect_feedback.get("observation") or {}).get("failed_tool_count", 0),
-            "failed_check_names": failing_checks,
+            "changed_files": list(observation.get("changed_files", [])),
+            "failed_tool_count": observation.get("failed_tool_count", 0),
         }
 
     def _summarize_tool_execution(
@@ -741,7 +769,7 @@ class LoopOrchestrator:
         }
 
     def _run_plan(self, runtime_state: RuntimeState, config_data: dict[str, Any]) -> dict[str, Any]:
-        """请求模型生成下一步工具计划，并记录上一轮事实反馈摘要。"""
+        """Generate one model decision and record solve-loop diagnostics for this round."""
         model_adapter = build_model_adapter(config_data=config_data)
         runtime_feedback = self._build_runtime_feedback(runtime_state=runtime_state)
         reflect_feedback_summary = self._summarize_reflect_feedback_for_trace(runtime_feedback=runtime_feedback)
@@ -782,6 +810,11 @@ class LoopOrchestrator:
         runtime_state.cross_round_plan = list(runtime_state.model_decision.cross_round_plan)
         runtime_state.cross_round_plan_history.append(list(runtime_state.model_decision.cross_round_plan))
         runtime_state.model_decisions.append(runtime_state.model_decision)
+        next_empty_count = (
+            runtime_state.consecutive_empty_tool_call_count + 1
+            if not runtime_state.model_decision.tool_calls
+            else 0
+        )
         self.trace_writer.write_event(
             TraceEvent(
                 event_type="model_decision",
@@ -791,6 +824,7 @@ class LoopOrchestrator:
                     "has_reflect_feedback": bool(reflect_feedback_summary),
                     "reflect_feedback_summary": reflect_feedback_summary,
                     "run_token_usage": dict(runtime_state.token_usage),
+                    "consecutive_empty_tool_call_count": next_empty_count,
                 },
             )
         )
@@ -801,8 +835,10 @@ class LoopOrchestrator:
             "rationale": runtime_state.model_decision.rationale,
             "provider": runtime_state.model_decision.provider,
             "model_name": runtime_state.model_decision.model_name,
+            "ready_to_finalize": runtime_state.model_decision.ready_to_finalize,
             "token_usage": runtime_state.model_decision.token_usage.to_dict(),
             "run_token_usage": dict(runtime_state.token_usage),
+            "consecutive_empty_tool_call_count": next_empty_count,
         }
 
     def _run_act(self, runtime_state: RuntimeState, tool_runner: CoreToolRunner) -> dict[str, Any]:
@@ -834,7 +870,7 @@ class LoopOrchestrator:
         config_data: dict[str, Any],
         tool_runner: CoreToolRunner,
     ) -> dict[str, Any]:
-        """进入 verify 时先生成系统 diff 快照，再执行任务验证。"""
+        """在求解阶段结束后执行一次末尾最终验证。"""
         verification_diff_snapshot = tool_runner.git_diff()
         self.trace_writer.write_event(
             TraceEvent(
@@ -842,6 +878,7 @@ class LoopOrchestrator:
                 payload={
                     **verification_diff_snapshot.to_trace_payload(),
                     "iteration": runtime_state.current_iteration,
+                    "solve_loop_exit_reason": runtime_state.solve_loop_exit_reason,
                 },
             )
         )
@@ -850,6 +887,7 @@ class LoopOrchestrator:
             tool_executions=[verification_diff_snapshot],
         )
         verification_result.details["verification_diff_snapshot"] = verification_diff_snapshot.tool_output
+        verification_result.details["solve_loop_exit_reason"] = runtime_state.solve_loop_exit_reason
         runtime_state.verification_result = verification_result
         self.trace_writer.write_event(
             TraceEvent(
@@ -862,15 +900,18 @@ class LoopOrchestrator:
             "verification_passed": verification_result.passed,
             "checks": [check.to_dict() for check in verification_result.checks],
             "config_keys": sorted(config_data.keys()),
+            "solve_loop_exit_reason": runtime_state.solve_loop_exit_reason,
         }
 
     def _run_finalize(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """在写入 run_finished 前记录最终运行证据。"""
+        """在 run_finished 之前写出最终收尾摘要。"""
         verification_passed = bool(runtime_state.verification_result and runtime_state.verification_result.passed)
         payload = {
-            "summary": "Final runtime evidence captured before run finish.",
+            "summary": "已在 run_finished 之前写出最终运行摘要。",
             "final_status": "success" if verification_passed else "incomplete",
             "verification_passed": verification_passed,
+            "solve_loop_exit_reason": runtime_state.solve_loop_exit_reason,
+            "consecutive_empty_tool_call_count": runtime_state.consecutive_empty_tool_call_count,
             "changed_files": list(runtime_state.changed_files),
             "failed_tool_count": runtime_state.failed_tool_count,
             "reflect_count": runtime_state.reflect_count,
@@ -1187,7 +1228,7 @@ class LoopOrchestrator:
         return rule_types
 
     def _build_reflect_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """为下一轮 plan 生成事实型 reflect 反馈。"""
+        """构造纯事实型 reflect 反馈，不再附带 verification 子段。"""
         self._update_file_context_cache(runtime_state=runtime_state)
         observation = self._build_tool_fact_observation(runtime_state=runtime_state)
         failed_tool_summaries = [
@@ -1216,7 +1257,6 @@ class LoopOrchestrator:
             "failed_tools": failed_tool_summaries,
             "recent_tool_results": recent_tool_results,
             "file_context_cache": runtime_state.file_context_cache,
-            "verification": {},
         }
 
     def _update_file_context_cache(self, runtime_state: RuntimeState) -> None:

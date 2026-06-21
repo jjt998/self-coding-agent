@@ -159,6 +159,7 @@ class ModelDecision:
     task_type: str
     summary: str
     rationale: str
+    ready_to_finalize: bool = False
     planned_actions: list[str] = field(default_factory=list)
     cross_round_plan: list[str] = field(default_factory=list)
     tool_calls: list[PlannedToolCall] = field(default_factory=list)
@@ -246,89 +247,6 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             raw_response_content=raw_response_content,
             token_usage=self._extract_token_usage(response_payload),
         )
-
-    def _build_request_payload(
-        self,
-        task: str,
-        task_type: str,
-        context_snapshot: ContextSnapshot | None,
-        runtime_feedback: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """构造模型请求，只要求返回一份 JSON 决策对象。"""
-        context_payload = context_snapshot.to_dict() if context_snapshot else {}
-        return {
-            "model": self.model_name,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "你是本地代码任务 harness 的决策层。"
-                        "必须只返回 JSON 对象，不要 Markdown。"
-                        "JSON 字段必须包含 summary、rationale、planned_actions、cross_round_plan、tool_calls。"
-                        "tool_calls 里的 tool_name 只能是 search_text、read_file、apply_patch、run_command、git_diff，"
-                        "tool_input 必须是对象。"
-                        "工具参数必须严格遵守 user message 里的 tool_schema；"
-                        "不要给工具传入 tool_schema 未声明的字段。"
-                    ),
-                },
-                {
-                    "role": "system",
-                    "content": (
-                        "runtime_feedback.previous_reflect 是上一轮工具、diff、失败工具和验证结果的事实压缩。"
-                        "runtime_feedback.previous_reflect.file_context_cache 会按文件保留最近五次读取片段，供你跨轮引用已读源码。"
-                        "runtime_feedback.previous_cross_round_plan 是上一轮模型留下的跨轮安排。"
-                        "harness 只负责保真压缩事实，不替你判断上一轮是否有效；"
-                        "你需要在 rationale 中自行解释这些事实，并据此重规划当前轮 tool_calls。"
-                    ),
-                },
-                {
-                    "role": "system",
-                    "content": (
-                        "请严格遵守 user message 中的 decision_schema："
-                        "planned_actions 只写本轮 tool_calls 实际会执行的动作；"
-                        "跨轮安排和下一轮意图写入 cross_round_plan；"
-                        "tool_calls 是唯一执行源。"
-                        "在 Windows CLI 任务中，默认让 ASCII stdout/stderr 使用纯 ASCII 文本，"
-                        "除非任务明确要求 Unicode；避免 emoji、全角符号和非必要中文输出。"
-                    ),
-                },
-                {
-                    "role": "system",
-                    "content": (
-                        "文件上下文规则：当 read_file 返回 content_mode=\"full\" 时，说明文件足够小且内容已完整可见，不要重复读取同一文件；"
-                        "当 read_file 返回 content_mode=\"structure_summary\" 时，说明文件过大，只能看到结构摘要与行号索引，若缺少关键区域，请使用 read_file_range(path,start_line,end_line) 精确补齐；read_file_range 每次只能读取 1 到 40 行，不要用它读取整个文件。"
-                        "编辑规则：如果同一文件连续多次出现 old_text_not_found，尤其接近 3 次时，优先基于最近源码行号使用 replace_lines，"
-                        "不要继续猜测大段 apply_patch.old_text。"
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {
-                            "task": task,
-                            "task_type": task_type,
-                            "context_snapshot": context_payload,
-                            "runtime_feedback": runtime_feedback or {},
-                            "decision_schema": {
-                                "summary": "字符串：本轮决策摘要。",
-                                "rationale": "字符串：解释为什么本轮这样安排。",
-                                "planned_actions": [
-                                    "字符串列表：只能描述本轮 tool_calls 实际会执行的动作。"
-                                ],
-                                "cross_round_plan": [
-                                    "字符串列表：跨轮安排、后续轮次意图、暂不执行的计划。"
-                                ],
-                                "tool_calls": "数组：唯一会被 act 阶段实际执行的工具调用。",
-                            },
-                            "tool_schema": TOOL_SCHEMAS,
-                        },
-                        ensure_ascii=False,
-                    ),
-                },
-            ],
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-        }
 
     def _request_chat_completion(self, request_payload: dict[str, Any]) -> dict[str, Any]:
         """执行 HTTP 请求；测试可通过环境变量提供假响应但仍必须配置 API key。"""
@@ -490,6 +408,90 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             details["response_excerpt"] = _truncate_text(self._last_response_content)
         return _safe_model_error_details(details)
 
+    def _build_request_payload(
+        self,
+        task: str,
+        task_type: str,
+        context_snapshot: ContextSnapshot | None,
+        runtime_feedback: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """构造模型请求，只要求返回一份结构化 JSON 决策。"""
+        context_payload = context_snapshot.to_dict() if context_snapshot else {}
+        return {
+            "model": self.model_name,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是本地代码任务 harness 的决策层。"
+                        "必须只返回 JSON 对象，不要 Markdown。"
+                        "JSON 字段必须包含 summary、rationale、ready_to_finalize、planned_actions、cross_round_plan、tool_calls。"
+                        "tool_calls 里的 tool_name 只能是 search_text、read_file、apply_patch、run_command、git_diff，"
+                        "tool_input 必须是对象。"
+                        "工具参数必须严格遵守 user message 里的 tool_schema，"
+                        "不要给工具传入 tool_schema 未声明的字段。"
+                    ),
+                },
+                {
+                    "role": "system",
+                    "content": (
+                        "runtime_feedback.previous_reflect 是上一轮工具、diff、失败工具和文件读取缓存的事实压缩。"
+                        "runtime_feedback.previous_reflect.file_context_cache 会按文件保留最近八次读取片段，供你跨轮引用已读源码。"
+                        "runtime_feedback.previous_cross_round_plan 是上一轮模型留下的跨轮安排。"
+                        "你需要在 rationale 中自行解释这些事实，并据此重规划之后的计划。"
+                    ),
+                },
+                {
+                    "role": "system",
+                    "content": (
+                        "请严格遵守 user message 中的 decision_schema："
+                        "ready_to_finalize 用来表达当前是否已经完成求解、可以进入最终验证；"
+                        "planned_actions 只写本轮 tool_calls 实际会执行的动作；"
+                        "跨轮安排即总安排写入 cross_round_plan；"
+                        "tool_calls 是唯一执行源。"
+                        "在 Windows CLI 任务中，默认要求 ASCII stdout/stderr；"
+                        "除非任务明确要求 Unicode，否则避免 emoji、全角符号和非必要中文输出。"
+                    ),
+                },
+                {
+                    "role": "system",
+                    "content": (
+                        "文件上下文规则：当 read_file 返回 content_mode=\"full\" 时，说明文件足够小且内容已完整可见，不要重复读取同一文件；"
+                        "当 read_file 返回 content_mode=\"structure_summary\" 时，说明文件过大，只能看到结构摘要与行号索引，若缺少关键区域，请使用 read_file_range(path,start_line,end_line) 精确补齐；read_file_range 每次只能读取 1 到 80 行，不要用它读取整个文件。"
+                        "编辑规则：如果同一文件连续多次出现 old_text_not_found，尤其接近 3 次时，优先基于最近源码行号使用 replace_lines；"
+                        "不要继续猜测大段 apply_patch.old_text。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "task": task,
+                            "task_type": task_type,
+                            "context_snapshot": context_payload,
+                            "runtime_feedback": runtime_feedback or {},
+                            "decision_schema": {
+                                "summary": "字符串：本轮决策摘要。",
+                                "rationale": "字符串：解释为什么本轮这样安排。",
+                                "ready_to_finalize": "布尔值：true 表示当前已完成求解；false 表示还需要下一轮继续处理。",
+                                "planned_actions": [
+                                    "字符串列表：只能描述本轮 tool_calls 实际会执行的动作。"
+                                ],
+                                "cross_round_plan": [
+                                    "字符串列表：跨轮安排、后续轮次意图、暂不执行的计划。"
+                                ],
+                                "tool_calls": "数组：唯一会被 act 阶段实际执行的工具调用。",
+                            },
+                            "tool_schema": TOOL_SCHEMAS,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+
     def _parse_model_decision(
         self,
         raw_decision: dict[str, Any],
@@ -500,6 +502,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         """校验模型决策字段，并转换成内部数据结构。"""
         summary = _required_string(raw_decision, "summary", self)
         rationale = _required_string(raw_decision, "rationale", self)
+        ready_to_finalize = _required_bool(raw_decision, "ready_to_finalize", self)
         tool_calls = _required_tool_calls(raw_decision, self)
         planned_actions, normalization_notes = _normalize_planned_actions(
             raw_decision=raw_decision,
@@ -516,6 +519,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             task_type=task_type,
             summary=summary,
             rationale=rationale,
+            ready_to_finalize=ready_to_finalize,
             planned_actions=planned_actions,
             cross_round_plan=cross_round_plan,
             tool_calls=tool_calls,
@@ -822,67 +826,6 @@ def _planned_actions_from_tool_calls(tool_calls: list[PlannedToolCall]) -> list[
     return [f"执行工具：{tool_call.tool_name}" for tool_call in tool_calls]
 
 
-def _required_tool_calls(raw_decision: dict[str, Any], adapter: OpenAICompatibleModelAdapter) -> list[PlannedToolCall]:
-    """读取并校验模型计划的工具调用。"""
-    value = raw_decision.get("tool_calls")
-    if not isinstance(value, list):
-        raise ModelResponseError(
-            "模型决策字段 tool_calls 必须是列表。",
-            provider=adapter.provider,
-            model_name=adapter.model_name,
-            details=adapter._diagnostic_details(field_path="tool_calls"),
-        )
-    tool_calls: list[PlannedToolCall] = []
-    for index, item in enumerate(value, start=1):
-        if not isinstance(item, dict):
-            raise ModelResponseError(
-                f"tool_calls[{index}] 必须是对象。",
-                provider=adapter.provider,
-                model_name=adapter.model_name,
-                details=adapter._diagnostic_details(field_path=f"tool_calls[{index}]", tool_call_index=index),
-            )
-        tool_name = str(item.get("tool_name", "")).strip()
-        if tool_name not in ALLOWED_TOOL_NAMES:
-            raise ModelResponseError(
-                f"tool_calls[{index}] 使用了不支持的工具：{tool_name or '空'}",
-                provider=adapter.provider,
-                model_name=adapter.model_name,
-                details=adapter._diagnostic_details(
-                    field_path=f"tool_calls[{index}].tool_name",
-                    tool_call_index=index,
-                    tool_name=tool_name or "空",
-                ),
-            )
-        tool_input = item.get("tool_input")
-        if not isinstance(tool_input, dict):
-            raise ModelResponseError(
-                f"tool_calls[{index}].tool_input 必须是对象。",
-                provider=adapter.provider,
-                model_name=adapter.model_name,
-                details=adapter._diagnostic_details(
-                    field_path=f"tool_calls[{index}].tool_input",
-                    tool_call_index=index,
-                    tool_name=tool_name,
-                ),
-            )
-        tool_input = _normalize_and_validate_tool_input(
-            tool_name=tool_name,
-            tool_input=tool_input,
-            adapter=adapter,
-            tool_call_index=index,
-        )
-        tool_calls.append(PlannedToolCall(tool_name=tool_name, tool_input=tool_input))
-
-    if not tool_calls:
-        raise ModelResponseError(
-            "模型决策至少需要包含一条 tool_call。",
-            provider=adapter.provider,
-            model_name=adapter.model_name,
-            details=adapter._diagnostic_details(field_path="tool_calls"),
-        )
-    return tool_calls
-
-
 def _normalize_and_validate_tool_input(
     tool_name: str,
     tool_input: dict[str, Any],
@@ -939,3 +882,83 @@ def _normalize_and_validate_tool_input(
         tool_call_index=tool_call_index,
     )
     return normalized
+
+
+def _required_tool_calls(raw_decision: dict[str, Any], adapter: OpenAICompatibleModelAdapter) -> list[PlannedToolCall]:
+    """读取并校验模型计划的工具调用，允许空列表作为收口信号。"""
+    value = raw_decision.get("tool_calls")
+    if not isinstance(value, list):
+        raise ModelResponseError(
+            "模型决策字段 tool_calls 必须是列表。",
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+            details=adapter._diagnostic_details(field_path="tool_calls"),
+        )
+
+    tool_calls: list[PlannedToolCall] = []
+    for index, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            raise ModelResponseError(
+                f"tool_calls[{index}] 必须是对象。",
+                provider=adapter.provider,
+                model_name=adapter.model_name,
+                details=adapter._diagnostic_details(field_path=f"tool_calls[{index}]", tool_call_index=index),
+            )
+        tool_name = str(item.get("tool_name", "")).strip()
+        if tool_name not in ALLOWED_TOOL_NAMES:
+            raise ModelResponseError(
+                f"tool_calls[{index}] 使用了不支持的工具：{tool_name or '空'}",
+                provider=adapter.provider,
+                model_name=adapter.model_name,
+                details=adapter._diagnostic_details(
+                    field_path=f"tool_calls[{index}].tool_name",
+                    tool_call_index=index,
+                    tool_name=tool_name or "空",
+                ),
+            )
+        tool_input = item.get("tool_input")
+        if not isinstance(tool_input, dict):
+            raise ModelResponseError(
+                f"tool_calls[{index}].tool_input 必须是对象。",
+                provider=adapter.provider,
+                model_name=adapter.model_name,
+                details=adapter._diagnostic_details(
+                    field_path=f"tool_calls[{index}].tool_input",
+                    tool_call_index=index,
+                    tool_name=tool_name,
+                ),
+            )
+        tool_calls.append(
+            PlannedToolCall(
+                tool_name=tool_name,
+                tool_input=_normalize_and_validate_tool_input(
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    adapter=adapter,
+                    tool_call_index=index,
+                ),
+            )
+        )
+    return tool_calls
+
+
+def _required_bool(
+    raw_decision: dict[str, Any],
+    field_name: str,
+    adapter: OpenAICompatibleModelAdapter,
+) -> bool:
+    """读取并校验布尔字段；缺失时兼容回落为 false。"""
+    value = raw_decision.get(field_name)
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    raise ModelResponseError(
+        f"模型决策字段 {field_name} 必须是布尔值。",
+        provider=adapter.provider,
+        model_name=adapter.model_name,
+        details=adapter._diagnostic_details(
+            field_path=field_name,
+            raw_type=type(value).__name__,
+        ),
+    )

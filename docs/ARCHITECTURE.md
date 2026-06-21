@@ -284,6 +284,7 @@ model_decision:
   task_type:
   summary:
   rationale:
+  ready_to_finalize:
   planned_actions:
     - "本轮 tool_calls 实际会执行的动作说明"
   cross_round_plan:
@@ -360,11 +361,11 @@ memory_entry:
 ### 7.2 状态转移规则
 
 ```text
-ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize
+ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize
 
-verify passed -> finalize
-verify failed and budget remains -> plan
-verify failed and budget exhausted -> finalize
+solve loop exit -> verify
+final verify passed -> finalize(completed)
+final verify failed -> finalize(verification_failed)
 ```
 
 ### 7.3 Loop 不变量

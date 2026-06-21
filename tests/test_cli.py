@@ -9,7 +9,7 @@ from subprocess import run
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from config import build_settings
-from runner import execute_initial_run
+from runner import _build_sandbox_ignore, execute_initial_run
 
 
 def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
@@ -68,10 +68,10 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
         for event in trace_events
         if event["event_type"] == "state_transitioned"
     ]
-    assert transition_targets[:6] == ["ingest", "analyze", "plan", "act", "reflect", "verify"]
+    assert transition_targets[:5] == ["ingest", "analyze", "plan", "act", "reflect"]
     assert transition_targets[-1] == "finalize"
     assert transition_targets.count("plan") >= 2
-    assert transition_targets.count("verify") >= 2
+    assert transition_targets.count("verify") == 1
 
     tool_called_names = [
         event["payload"]["tool_name"]
@@ -120,7 +120,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert reflect_events[0]["observation"]["failed_tool_count"] == 0
 
     verification_events = [event["payload"] for event in trace_events if event["event_type"] == "verification_result"]
-    assert len(verification_events) >= 2
+    assert len(verification_events) == 1
     assert verification_events[0]["passed"] is False
     assert verification_events[0]["details"]["verification_mode"] == "missing_task_verification"
     assert verification_events[0]["checks"][0]["name"] == "task_verification_configured"
@@ -214,6 +214,43 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert snapshot["run_id"] in trace_view_text
     assert "run_finished" in trace_view_text
     assert "run_evidence.md" in final_diff_text
+
+
+def test_build_sandbox_ignore_skips_local_temp_directories(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    output_root = repo_root / "sandbox_experiments" / "runs"
+    output_root.mkdir(parents=True)
+
+    ignore = _build_sandbox_ignore(
+        source_repo_root=repo_root.resolve(),
+        output_root=output_root.resolve(),
+    )
+    ignored = ignore(
+        str(repo_root),
+        [
+            ".git",
+            ".agent_sandboxes",
+            ".pytest_cache",
+            ".pytest_tmp",
+            ".pytest_tmp_refactor_rule",
+            ".tmp_smoke_eval",
+            "pytest_tmp",
+            "codex-repro-6ztx6xxx",
+            "sandbox_experiments",
+            "src",
+        ],
+    )
+
+    assert ".git" in ignored
+    assert ".agent_sandboxes" in ignored
+    assert ".pytest_tmp" in ignored
+    assert ".pytest_tmp_refactor_rule" in ignored
+    assert ".tmp_smoke_eval" in ignored
+    assert "pytest_tmp" in ignored
+    assert "codex-repro-6ztx6xxx" in ignored
+    assert "sandbox_experiments" in ignored
+    assert "src" not in ignored
 
 
 def test_cli_deletes_sandbox_after_success_by_default(tmp_path: Path) -> None:
@@ -750,19 +787,10 @@ def test_cli_verify_failure_only_reflects_when_verification_is_missing(tmp_path:
         for event in trace_events
         if event["event_type"] == "state_transitioned"
     ]
-    assert transition_targets == [
-        "ingest",
-        "analyze",
-        "plan",
-        "act",
-        "reflect",
-        "verify",
-        "plan",
-        "act",
-        "reflect",
-        "verify",
-        "finalize",
-    ]
+    assert transition_targets[:5] == ["ingest", "analyze", "plan", "act", "reflect"]
+    assert transition_targets[-2:] == ["verify", "finalize"]
+    assert transition_targets.count("verify") == 1
+    assert transition_targets.count("reflect") >= 1
 
     verification_payload = next(event["payload"] for event in trace_events if event["event_type"] == "verification_result")
     assert verification_payload["details"]["verification_mode"] == "missing_task_verification"

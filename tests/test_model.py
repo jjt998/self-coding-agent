@@ -147,7 +147,7 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
     assert user_payload["tool_schema"]["read_file"]["required"] == ["path"]
     assert user_payload["tool_schema"]["read_file"]["optional"] == []
     assert user_payload["tool_schema"]["read_file_range"]["required"] == ["path", "start_line", "end_line"]
-    assert user_payload["tool_schema"]["read_file_range"]["max_lines"] == 40
+    assert user_payload["tool_schema"]["read_file_range"]["max_lines"] == 80
     assert user_payload["tool_schema"]["replace_lines"]["required"] == ["path", "start_line", "end_line", "new_text"]
     assert user_payload["tool_schema"]["replace_lines"]["properties"]["new_text"]["type"] == "string"
     assert user_payload["tool_schema"]["search_text"]["optional"] == ["limit"]
@@ -216,14 +216,11 @@ def test_openai_compatible_adapter_includes_runtime_feedback(monkeypatch) -> Non
         task_type="general",
         context_snapshot=None,
         config_data={},
-        runtime_feedback={"iteration": 2, "previous_verification": {"passed": False}},
+        runtime_feedback={"previous_cross_round_plan": ["继续读取 README.md"]},
     )
 
     user_payload = json.loads(captured["body"]["messages"][-1]["content"])
-    assert user_payload["runtime_feedback"] == {
-        "iteration": 2,
-        "previous_verification": {"passed": False},
-    }
+    assert user_payload["runtime_feedback"] == {"previous_cross_round_plan": ["继续读取 README.md"]}
     assert "tool_schema" in user_payload
 
 
@@ -250,7 +247,6 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
             "trigger": "after_act",
             "signals": ["failed_tool_observed"],
             "failed_tools": [{"tool_name": "apply_patch", "error": "old_text_not_found"}],
-            "verification": {"passed": False},
         },
         "previous_cross_round_plan": ["先修复失败 patch，再运行验证"],
     }

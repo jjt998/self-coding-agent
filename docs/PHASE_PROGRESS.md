@@ -2,22 +2,23 @@
 
 ## 总览
 
-- 最后更新时间：2026-06-20
-- 当前激活阶段：`Phase 9：真实任务最小闭环`
+- 最后更新时间：2026-06-21
+- 当前激活阶段：`Phase 9.x：Verify 收敛为末尾单次裁判`
 - 当前阶段状态：`in_progress`
 
-## 最新 Phase 9 收口：合并 observe/reflect
+## 最新 Phase 9.x 收口：Verify 改为末尾单次裁判
 
-- 当前 loop 已收敛为 `ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize`。
-- 独立 `observe` 状态、`progress_observed` trace 和 `progress_made` 进展判断已从当前实现移除。
-- 每轮 `act` 后固定执行 `reflect`；reflect 只压缩事实、工具结果、失败工具、diff 结果、变更文件和轻量 `signals`。
-- `no_diff_after_edit_attempt` 只在本轮有修改类工具且最新 `git_diff.changed_file_count == 0` 时产生；纯读取/搜索轮不会产生 no-diff signal。
-- 下一轮模型接收 `previous_reflect`、`previous_verification` 和 `previous_cross_round_plan`，但不接收当前轮数、剩余轮数或最大轮数。
-- verify 失败只作为事实进入 `previous_reflect.verification`；当前实现不再生成 `replan_constraints`，也不再做 plan 后反思硬约束校验。
-- `planned_actions` 只描述本轮 `tool_calls`，跨轮安排继续由 `cross_round_plan` 承载。
-- 当前已新增 token diagnostics：单任务聚合 `prompt_tokens`、`completion_tokens`、`total_tokens`，并同步进入 `model_raw_response`、`model_decision`、`run_finished`、`report.md`、`summary.json`、`summary.md` 和 comparison delta；provider 未返回 `usage` 时保持真实缺口，不做本地估算。
+- 当前 loop 已从 `ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize` 调整为 `ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize`。
+- `verify` 现在只会在求解阶段退出后执行一次，验证结果不再回灌给后续模型轮次。
+- `ModelDecision` 已新增 `ready_to_finalize`，用于让模型显式表达“当前是否认为求解已完成”。
+- Runtime 已新增“连续两次空 `tool_calls`”收口信号；命中后会直接退出求解阶段并进入最终验证。
+- trace 已新增 `solve_loop_exit_detected`，`run_finished.stop_reason.details` 已补充 `solve_loop_exit_reason`、`final_verification_passed` 和 `consecutive_empty_tool_call_count`。
+- `previous_verification` 已从模型输入中移除，`previous_reflect.verification` 也已从事实反馈中移除。
+- token diagnostics 仍会继续流入 `model_raw_response`、`model_decision`、`run_finished`、`report.md`、`summary.json`、`summary.md` 和 comparison delta；provider 缺失 `usage` 时不做本地估算。
+- 当前产品定位继续向 `bug_fix` 主赛道收敛，其它任务类型保持兼容，但不再默认依赖过程内 verify 反馈。
 
-> 说明：下方按 Phase 保留历史推进记录，其中早期条目可能描述旧的 `observe` 或反思硬约束行为；当前实现以上方“最新 Phase 9 收口”为准。
+> 说明：下方按 Phase 保留历史推进记录，其中部分旧条目描述的是更早期的 loop 或 verify 形态；当前实现以上方“最新 Phase 9.x 收口”为准。
+
 
 ## Phase 1：脚手架与控制面
 

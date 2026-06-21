@@ -2,23 +2,22 @@
 
 ## 最后更新时间
 
-- 日期：2026-06-21
+- 日期：2026-06-20
 
 ## 当前阶段
 
-- `Phase 9.x：Verify 收敛为末尾单次裁判`
+- `Phase 9：真实任务最小闭环`
 
 ## 当前情况
 
-- 最新 loop 形态已收敛为 `ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize`；`verify` 不再在每轮 `act` 后执行，而是在求解阶段退出后只执行一次末尾最终验证。
-- 当前 `verify` 已明确退回纯裁判角色：同一次 run 最多执行一次，只负责最终通过/失败判定、报告展示和 eval 聚合，不再把验证结果反馈给后续模型轮次。
-- 当前求解阶段有四类显式退出信号：`ready_to_finalize = true`、连续两次 `tool_calls` 为空、达到 `runtime.max_steps`、或遇到 `model_error / setup_failed / internal_error`。
-- `ModelDecision` 已新增 `ready_to_finalize`，用于让模型显式表达“是否已准备进入最终验证”。
-- `trace.jsonl` 已新增或明确记录 `model_decision.ready_to_finalize`、`solve_loop_exit_detected`、单次 `verification_result`，以及 `run_finished.stop_reason.details.solve_loop_exit_reason`。
-- 后续模型轮次现在只接收事实型 `runtime_feedback.previous_reflect` 和 `previous_cross_round_plan`；`previous_verification` 与 `previous_reflect.verification` 已从链路中移除。
-- `reflect` 仍保留在 loop 内，但职责已收敛为事实压缩：最近工具结果、失败工具、文件读取缓存、diff 状态、变更文件和轻量 `signals`，不再承担“响应 verify failure”职责。
-- 当前单任务 run 仍保留 token diagnostics：聚合 `prompt_tokens`、`completion_tokens`、`total_tokens`、`request_count`、`missing_usage_count` 和 `complete`；provider 缺少 `usage` 时不做本地估算，而是保留为“不完整但真实”。
-- 当前 harness 的默认主赛道已进一步收敛到 `bug_fix`；`refactor`、`test_generation`、`code_understanding` 仍兼容，但默认不再依赖 loop 内 verify 反馈。
+- 最新 loop 形态已收敛为 `ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize`；独立 `observe` 状态、`progress_observed` 事件和 `progress_made` 进展判断已从当前链路中移除。
+- 每轮 `act` 后固定执行 `reflect`。reflect 只负责保真压缩事实：最近工具结果、失败工具、修改类工具尝试、最新 `git_diff` 结果、变更文件、失败工具数和轻量 `signals`。
+- 当本轮存在修改类工具且最新 `git_diff.changed_file_count == 0` 时，reflect 会记录 `no_diff_after_edit_attempt`；纯读取/搜索轮不会产生 no-diff signal。
+- 下一轮模型只接收事实型 `runtime_feedback.previous_reflect`、兼容保留的 `previous_verification` 和 `previous_cross_round_plan`；请求中不暴露当前轮数、剩余轮数或最大轮数。
+- verify 失败事实会进入下一轮 `previous_reflect.verification`，但不再生成 `replan_constraints`、`must_address` 或 `avoid_exact_tool_sequence`，也不再做 plan 后硬约束校验。
+- `planned_actions` 只描述本轮 `tool_calls` 实际会执行的动作；跨轮安排继续写入 `cross_round_plan` 并通过 `previous_cross_round_plan` 传给下一轮。
+- OpenAI compatible prompt 已加入原则：harness 负责保真地压缩事实，LLM 负责解释事实并重规划；Windows CLI 默认要求使用 ASCII stdout/stderr，除非任务明确要求 Unicode。
+- 当前单任务 run 已新增 token diagnostics：记录并聚合模型请求的 `prompt_tokens`、`completion_tokens`、`total_tokens`，并在 trace、report、eval summary、comparison delta 中展示；缺失 provider `usage` 时不做本地估算，而是把该任务标记为 token usage 不完整。
 
 > 说明：下面保留了 Phase 8/Phase 9 早期推进记录，其中部分段落描述的是历史状态；当前行为以上方最新条目为准。
 
@@ -75,16 +74,18 @@
 
 ## 当前最小闭环缺口
 
-- `ready_to_finalize` 与“连续两次空 `tool_calls`”虽然已经接入求解收口，但还需要更多真实 run 才能判断这两个信号是否稳定、是否会过早结束。
-- `verify` 已经更接近纯裁判，但任务级 `verify_rules` 设计仍需继续加强，尤其是面向 `bug_fix` 的“修好了没有、回归没回归”这类行为级验证。
-- 过程诊断信息已经能从 `trace.jsonl` 反推，但当前 trace 查看体验仍偏原始；后续仍需继续加强 `trace_view.html`、报告摘要和高信号定位能力。
-- `refactor`、`test_generation`、`code_understanding` 目前仍更适合作为兼容研究题；当前主要评测赛道仍应继续聚焦更难但可客观裁判的 `bug_fix` 任务。
+- 决策层已切到强制真实模型接口，`loop` 已具备最小多轮求解能力；但当前仍缺更完整的真实任务求解内核，`src/loop.py` 仍有大段 `_run_stub_state`，`reflect` 仍主要是占位记录而不是会生成修正策略的真实反思。
+- 缺少真实任务验证机制：当前 `src/verify.py` 主要验证 `agent_notes.md`、固定工具顺序和演示型 diff，不足以判断 bug fix、重构、测试补全等真实任务是否完成。
+- 真实任务 task schema 已补上第一版最小字段，`verify_commands` 也已接入执行，但还缺“通过条件”的更细粒度结构化解释与 richer verification schema。
+- 真实任务 task schema 已补上 `verify_rules` 第二版，但当前仍缺更高层的结构化断言，例如面向 JSON / diff / 多文件聚合结果的验证语义。
+- 任务级隔离/重置能力已补上第一版：当前固定采用“每题绑定一个独立 sandbox 目录”的方案，并补上了基础清理/保留策略；后续可继续补配额控制与更精细的保留规则。
+- 当前已接入第一版 OpenAI 兼容模型决策层，但模型 prompt、工具选择策略和多步推进回路仍是最小版本。
 
 ## 下一步明确动作
 
-- 继续扩充 `bug_fix` 任务和末尾最终 verify 规则，优先保证“是否修复”和“是否回归”可稳定裁判。
-- 继续加强 trace、report 和 `trace_view.html`，重点提升 `model_decision`、收口信号、最终验证和 diff 快照的可读性。
-- 继续观察 `ready_to_finalize` 与连续空 `tool_calls` 的真实收口质量，在拿到更多 run 证据前，不急着引入更细的新收口启发式。
+- 继续把 `loop` 从 stub 链路替换成真实任务求解链路，下一步重点是让 `reflect` 和后续 plan 更稳定地利用验证失败证据。
+- 继续扩展任务级 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义，把“通过条件更可解释的结构化验证”做成更完整 schema。
+- 在 sandbox 中补任务级准备步骤之后的真实执行/失败收口，让 setup 失败、verify 失败都能沉淀为结构化 stop reason，并进一步稳定 failure taxonomy。
 
 ## 当前阻塞
 

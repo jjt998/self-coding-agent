@@ -206,7 +206,14 @@ def _build_sandbox_ignore(source_repo_root: Path, output_root: Path):
         "__pycache__",
         ".pytest_cache",
         ".mypy_cache",
+        ".pytest_tmp",
+        ".pytest_tmp_refactor_rule",
+        ".tmp_smoke_eval",
+        "pytest_tmp",
     }
+    ignored_prefixes = (
+        "codex-repro-",
+    )
     try:
         relative_output_root = output_root.relative_to(source_repo_root)
     except ValueError:
@@ -216,7 +223,13 @@ def _build_sandbox_ignore(source_repo_root: Path, output_root: Path):
         ignored_names.add(relative_output_root.parts[0])
 
     def _ignore(_current_dir: str, names: list[str]) -> set[str]:
-        return {name for name in names if name in ignored_names}
+        ignored_entries: set[str] = set()
+        for name in names:
+            # 这里把 pytest、smoke run 和 codex 复现场景生成的临时目录统一排除，
+            # 避免复制 sandbox 时把外部占用目录也卷进去，导致 WinError 5。
+            if name in ignored_names or any(name.startswith(prefix) for prefix in ignored_prefixes):
+                ignored_entries.add(name)
+        return ignored_entries
 
     return _ignore
 
@@ -1203,3 +1216,35 @@ def _build_memory_entry_written_payload(settings: RunSettings, runtime_state: Ru
             "verification_checks": [check.to_dict() for check in verification_result.checks],
         },
     ).to_dict()
+
+
+_ORIGINAL_BUILD_PHASE_4_REPORT = _build_phase_4_report
+
+
+def _build_phase_4_report(
+    settings: RunSettings,
+    runtime_state: RuntimeState,
+    memory_write_result: MemoryWriteResult,
+    final_diff_artifact_result: FinalDiffArtifactResult,
+    sandbox_cleanup_result: SandboxCleanupResult,
+) -> str:
+    """在原报告基础上补充最终验证与求解收口诊断说明。"""
+    base_report = _ORIGINAL_BUILD_PHASE_4_REPORT(
+        settings=settings,
+        runtime_state=runtime_state,
+        memory_write_result=memory_write_result,
+        final_diff_artifact_result=final_diff_artifact_result,
+        sandbox_cleanup_result=sandbox_cleanup_result,
+    )
+    stop_reason_details = runtime_state.stop_reason.details if runtime_state.stop_reason else {}
+    solve_loop_exit_reason = str(stop_reason_details.get("solve_loop_exit_reason", "")).strip() or "unknown"
+    final_verification_passed = bool(stop_reason_details.get("final_verification_passed"))
+    empty_stop = solve_loop_exit_reason == "consecutive_empty_tool_calls"
+    appendix = (
+        "\n\n## 最终验证语义\n\n"
+        f"- 本次 verify 为末尾单次最终验证：`true`\n"
+        f"- 求解阶段退出原因：`{solve_loop_exit_reason}`\n"
+        f"- 是否命中连续两次空 tool_calls：`{'true' if empty_stop else 'false'}`\n"
+        f"- 最终验证是否通过：`{'true' if final_verification_passed else 'false'}`\n"
+    )
+    return base_report + appendix

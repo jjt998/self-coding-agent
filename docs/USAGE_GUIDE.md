@@ -149,7 +149,284 @@ comparison 产物包含：
 - `total_tokens_delta`
 - `task_deltas`
 
-## 7. 当前限制
+## 7. 当前仓库任务与启动命令
+
+当前仓库里已有两类可直接运行的任务文件：
+
+- `eval_tasks/`：内置评测任务集，适合做常规 eval 和 strategy comparison。
+- `sandbox_experiments/tasks/`：面向 demo 仓库的任务批次，适合单独压测某一类 bugfix / refactor / feature 任务。
+
+终端说明：
+
+- 如果你当前在 `PowerShell` 里运行，请使用下面的 `powershell` 代码块；PowerShell 的续行符是反引号 `` ` ``，不是 `^`。
+- 如果你当前在 `cmd.exe` 里运行，请使用下面的 `cmd` 代码块；`cmd.exe` 的续行符才是 `^`。
+- 如果不想区分终端，最稳妥的方式是直接改用单行命令运行。
+
+统一运行模板如下：
+
+```powershell
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file <任务文件路径> `
+  --repo-root <对应的 demo 仓库路径> `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+```
+
+对应的 `cmd.exe` 版本如下：
+
+```cmd
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file <任务文件路径> ^
+  --repo-root <对应的 demo 仓库路径> ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+```
+
+如果要对同一批任务做策略对比，可在上面命令后追加：
+
+```powershell
+  --compare-strategies default,memory_off
+```
+
+对应的 `cmd.exe` 追加写法如下：
+
+```cmd
+  --compare-strategies default,memory_off
+```
+
+当前任务清单与可直接复制的命令如下。
+
+说明：`sandbox_experiments/tasks/` 下的任务文件需要搭配各自的 demo 仓库运行，不能统一写成 `--repo-root .`。
+
+内置评测集：
+
+- `eval_tasks/sample_batch.json`
+  混合任务集，包含 `general`、`bug_fix`、`code_understanding`、`test_generation`、`refactor` 五类任务，共 5 题。
+
+```powershell
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file eval_tasks\sample_batch.json `
+  --repo-root . `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+```
+
+```cmd
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file eval_tasks\sample_batch.json ^
+  --repo-root . ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+```
+
+Bug Fix 任务：
+
+- `sandbox_experiments/tasks/demo_bugfix_task_board_batch.json`
+  Task Board 基础 bugfix 题，1 题。
+- `sandbox_experiments/tasks/demo_bugfix_task_board_dual_fix_batch.json`
+  Task Board 双问题修复题，1 题。
+- `sandbox_experiments/tasks/demo_bugfix_task_board_false_lead_batch.json`
+  Task Board 带误导线索的 bugfix 题，1 题。
+- `sandbox_experiments/tasks/demo_bugfix_task_board_similar_function_batch.json`
+  Task Board 相似函数干扰 bugfix 题，1 题。
+- `sandbox_experiments/tasks/demo_bugfix_todo_app_batch.json`
+  Todo App bugfix 题，1 题。
+
+```powershell
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_batch.json `
+  --repo-root sandbox_experiments\repos\demo_buggy_task_board `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_dual_fix_batch.json `
+  --repo-root sandbox_experiments\repos\demo_buggy_task_board_dual_fix `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_false_lead_batch.json `
+  --repo-root sandbox_experiments\repos\demo_buggy_task_board_false_lead `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_similar_function_batch.json `
+  --repo-root sandbox_experiments\repos\demo_buggy_task_board_similar_function `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_todo_app_batch.json `
+  --repo-root sandbox_experiments\repos\demo_buggy_todo_app `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+```
+
+```cmd
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_buggy_task_board ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_dual_fix_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_buggy_task_board_dual_fix ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_false_lead_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_buggy_task_board_false_lead ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_similar_function_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_buggy_task_board_similar_function ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_todo_app_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_buggy_todo_app ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+```
+
+Refactor 任务：
+
+- `sandbox_experiments/tasks/demo_refactor_task_board_export_batch.json`
+  Task Board 共享筛选和排序流水线抽取题，1 题。
+- `sandbox_experiments/tasks/demo_refactor_task_board_filters_batch.json`
+  Task Board 过滤标记 helper 抽取题，1 题。
+- `sandbox_experiments/tasks/demo_refactor_task_board_service_pipeline_batch.json`
+  Task Board service 输出构造抽取题，1 题。
+- `sandbox_experiments/tasks/demo_refactor_task_board_views_batch.json`
+  Task Board 视图准备逻辑抽取题，1 题。
+- `sandbox_experiments/tasks/demo_refactor_todo_app_helpers_batch.json`
+  Todo App helper 抽取题，1 题。
+
+```powershell
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_refactor_task_board_export_batch.json `
+  --repo-root sandbox_experiments\repos\demo_refactor_task_board_export `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_refactor_task_board_filters_batch.json `
+  --repo-root sandbox_experiments\repos\demo_refactor_task_board_filters `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_refactor_task_board_service_pipeline_batch.json `
+  --repo-root sandbox_experiments\repos\demo_refactor_task_board_service_pipeline `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_refactor_task_board_views_batch.json `
+  --repo-root sandbox_experiments\repos\demo_refactor_task_board_views `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_refactor_todo_app_helpers_batch.json `
+  --repo-root sandbox_experiments\repos\demo_refactor_todo_app_helpers `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+```
+
+```cmd
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_refactor_task_board_export_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_refactor_task_board_export ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_refactor_task_board_filters_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_refactor_task_board_filters ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_refactor_task_board_service_pipeline_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_refactor_task_board_service_pipeline ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_refactor_task_board_views_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_refactor_task_board_views ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_refactor_todo_app_helpers_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_refactor_todo_app_helpers ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+```
+
+Feature 任务：
+
+- `sandbox_experiments/tasks/demo_todo_app_batch.json`
+  Todo App 新增搜索命令题，1 题。
+- `sandbox_experiments/tasks/demo_todo_app_complete_task_batch.json`
+  Todo App 新增完成任务命令题，1 题。
+
+```powershell
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_todo_app_batch.json `
+  --repo-root sandbox_experiments\repos\demo_todo_app `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_todo_app_complete_task_batch.json `
+  --repo-root sandbox_experiments\repos\demo_todo_app `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+```
+
+```cmd
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_todo_app_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_todo_app ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_todo_app_complete_task_batch.json ^
+  --repo-root sandbox_experiments\repos\demo_todo_app ^
+  --output-root sandbox_experiments\runs ^
+  --config-name default
+```
+
+若要单独跑某个任务批次的策略对比，推荐直接在对应命令上追加 `--compare-strategies`。例如：
+
+```powershell
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_batch.json `
+  --compare-strategies default,memory_off,verify_failure_only_reflect `
+  --repo-root sandbox_experiments\repos\demo_buggy_task_board `
+  --output-root sandbox_experiments\runs
+```
+
+```cmd
+D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
+  --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_batch.json ^
+  --compare-strategies default,memory_off,verify_failure_only_reflect ^
+  --repo-root sandbox_experiments\repos\demo_buggy_task_board ^
+  --output-root sandbox_experiments\runs
+```
+
+## 8. 当前限制
 
 - 不支持 `rule_based` provider。
 - CLI 单次运行暂不支持直接传入 `verify_commands` / `verify_rules`。

@@ -421,12 +421,7 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
 
     # 这些过程指标都不额外存一份，而是直接从 trace 事件里现算，保证口径一致。
     tool_call_count = sum(1 for event in trace_events if event.get("event_type") == "tool_called")
-    verify_count = sum(
-        1
-        for event in trace_events
-        if event.get("event_type") == "state_transitioned"
-        and str(event.get("payload", {}).get("to_state", "")).strip() == "verify"
-    )
+    verify_count = 1 if verification_payload else 0
     reflect_count = sum(
         1
         for event in trace_events

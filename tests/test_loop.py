@@ -33,6 +33,7 @@ def _fake_model_response(tool_calls: list[dict] | None = None, usage: dict | Non
     decision = {
         "summary": "已生成真实模型决策。",
         "rationale": "按模型返回的工具计划执行。",
+        "ready_to_finalize": True,
         "planned_actions": ["执行模型工具计划"],
         "tool_calls": tool_calls
         or [
@@ -75,11 +76,7 @@ def _constraint_aware_rationale(runtime_feedback: dict | None, *, repeat_reason:
         return "首轮执行常规计划。"
     parts = [
         " ".join(str(item) for item in reflect_feedback.get("signals", [])),
-        " ".join(
-            str(check.get("name", ""))
-            for check in (reflect_feedback.get("verification", {}) or {}).get("checks", [])
-            if isinstance(check, dict) and not check.get("passed")
-        ),
+        " ".join(str(item) for item in (runtime_feedback or {}).get("previous_cross_round_plan", [])),
     ]
     suffix = "，再次重复相同工具序列是因为测试需要保持同一工具计划。" if repeat_reason else ""
     return "读取 previous_reflect 事实：" + " ".join(item for item in parts if item).strip() + suffix
@@ -152,7 +149,6 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
         "plan",
         "act",
         "reflect",
-        "verify",
         "plan",
         "act",
         "reflect",
@@ -176,7 +172,6 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
         "plan",
         "act",
         "reflect",
-        "verify",
         "plan",
         "act",
         "reflect",
@@ -452,7 +447,6 @@ def test_default_reflect_records_read_only_round_without_no_diff_signal(tmp_path
         "plan",
         "act",
         "reflect",
-        "verify",
         "plan",
         "act",
         "reflect",
@@ -481,7 +475,6 @@ def test_default_reflect_records_read_only_round_without_no_diff_signal(tmp_path
         "plan",
         "act",
         "reflect",
-        "verify",
         "plan",
         "act",
         "reflect",
@@ -684,7 +677,7 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
 
     def fake_verification(*, settings, tool_executions):
         verification_calls["count"] += 1
-        passed = verification_calls["count"] == 2
+        passed = True
         return VerificationResult(
             passed=passed,
             summary="验证通过" if passed else "验证失败",
@@ -716,7 +709,7 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
     assert runtime_state.iteration_count == 2
     assert runtime_state.reflect_count == 2
     assert runtime_state.reflect_trigger_reasons == ["after_act", "after_act"]
-    assert verification_calls["count"] == 2
+    assert verification_calls["count"] == 1
 
     trace_events = [
         json.loads(line)
@@ -734,7 +727,6 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
         "plan",
         "act",
         "reflect",
-        "verify",
         "plan",
         "act",
         "reflect",
@@ -790,7 +782,7 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
 
     def fake_verification(*, settings, tool_executions):
         verification_calls["count"] += 1
-        passed = verification_calls["count"] == 2
+        passed = True
         return VerificationResult(
             passed=passed,
             summary="验证通过" if passed else "验证失败",
@@ -824,12 +816,10 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
     assert "iteration" not in feedbacks[1]
     assert "remaining_iterations" not in feedbacks[1]
     assert "max_steps" not in feedbacks[1]
-    assert feedbacks[1]["previous_verification"]["passed"] is False
     assert "iteration" not in feedbacks[1]["previous_reflect"]
     assert "iteration" not in feedbacks[1]["previous_reflect"]["observation"]
     assert feedbacks[1]["previous_reflect"]["trigger"] == "after_act"
-    assert feedbacks[1]["previous_reflect"]["verification"]["passed"] is False
-    assert feedbacks[1]["previous_reflect"]["verification"]["checks"][0]["name"] == "fake_verify"
+    assert "verification" not in feedbacks[1]["previous_reflect"]
     assert feedbacks[1]["previous_reflect"]["recent_tool_results"][0]["tool_name"] == "apply_patch"
 
     trace_events = [
@@ -839,11 +829,10 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
     ]
     reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback")
     assert reflect_payload["trigger"] == "after_act"
-    assert reflect_payload["verification"] == {}
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
     assert model_decision_payloads[0]["has_reflect_feedback"] is False
     assert model_decision_payloads[1]["has_reflect_feedback"] is True
-    assert model_decision_payloads[1]["reflect_feedback_summary"]["failed_check_names"] == ["fake_verify"]
+    assert model_decision_payloads[1]["reflect_feedback_summary"]["failed_tool_count"] == 0
     raw_response_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_raw_response"]
     assert [payload["iteration"] for payload in raw_response_payloads] == [1, 2]
     assert all(payload["parsed_ok"] is True for payload in raw_response_payloads)
@@ -931,7 +920,7 @@ def test_runtime_feedback_includes_read_file_excerpt_after_old_text_not_found(
 
     def fake_verification(*, settings, tool_executions):
         verification_calls["count"] += 1
-        passed = verification_calls["count"] == 2
+        passed = True
         return VerificationResult(
             passed=passed,
             summary="验证通过" if passed else "验证失败",
@@ -1027,7 +1016,7 @@ def test_runtime_feedback_includes_full_small_read_file_content(
 
     def fake_verification(*, settings, tool_executions):
         verification_calls["count"] += 1
-        passed = verification_calls["count"] == 2
+        passed = True
         return VerificationResult(
             passed=passed,
             summary="ok" if passed else "retry",
@@ -1106,7 +1095,7 @@ def test_runtime_feedback_includes_large_read_file_structure_summary(
 
     def fake_verification(*, settings, tool_executions):
         verification_calls["count"] += 1
-        passed = verification_calls["count"] == 2
+        passed = True
         return VerificationResult(
             passed=passed,
             summary="ok" if passed else "retry",
@@ -1190,7 +1179,7 @@ def test_runtime_feedback_includes_range_and_replace_lines_results(
 
     def fake_verification(*, settings, tool_executions):
         verification_calls["count"] += 1
-        passed = verification_calls["count"] == 2
+        passed = True
         return VerificationResult(
             passed=passed,
             summary="ok" if passed else "retry",
@@ -1359,7 +1348,7 @@ def _run_factual_reflect_feedback_case(
 
     def fake_verification(*, settings, tool_executions):
         verification_calls["count"] += 1
-        passed = verification_calls["count"] == 2
+        passed = True
         return VerificationResult(
             passed=passed,
             summary="验证通过" if passed else "验证失败",
@@ -1593,7 +1582,7 @@ def test_loop_aggregates_token_usage_across_iterations_and_marks_missing_usage(
 
     def fake_verification(*, settings, tool_executions):
         verify_calls["count"] += 1
-        passed = verify_calls["count"] >= 2
+        passed = True
         return VerificationResult(
             passed=passed,
             summary="ok" if passed else "fail",
@@ -1741,7 +1730,7 @@ def test_second_plan_receives_previous_cross_round_plan(tmp_path: Path, monkeypa
 
     def fake_verification(*, settings, tool_executions):
         verify_calls["count"] += 1
-        passed = verify_calls["count"] >= 2
+        passed = True
         return VerificationResult(
             passed=passed,
             summary="ok" if passed else "fail",
