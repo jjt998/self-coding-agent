@@ -143,6 +143,8 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
     assert captured["timeout"] == 7
     assert captured["authorization"] == "Bearer test-key"
     assert captured["body"]["model"] == "demo-model"
+    assert adapter.get_last_request_payload()["model"] == "demo-model"
+    assert adapter.get_last_request_payload()["messages"] == captured["body"]["messages"]
     user_payload = json.loads(captured["body"]["messages"][-1]["content"])
     assert user_payload["runtime_feedback"] == {}
     assert user_payload["tool_schema"]["read_file"]["required"] == ["path"]
@@ -279,9 +281,11 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert "cache_status=stale" in prompt_text
     assert "previous_donelist" in prompt_text
     assert "donelist" in prompt_text
+    assert "任务描述描述的是待修复现象，不保证与当前轮已修改后的文件内容一致" in prompt_text
+    assert "优先相信当前轮可验证的运行时证据" in prompt_text
     assert "loop_end" in prompt_text
     assert "后续不再需要做任何读取、修改、命令检查、diff 检查或补充验证" in prompt_text
-    assert "loop_end 是 true，tool_calls 就必须是空数组" in prompt_text
+    assert "tool_calls" in prompt_text
     assert "已经完成的事项列表" in prompt_text
     assert "不是下一轮计划" in prompt_text
     assert "planned_actions" in prompt_text

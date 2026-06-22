@@ -278,8 +278,3 @@
 - `apply_patch` 工具本身也增加防御式非法输入返回，统一为 `ToolExecution(ok=false, error=invalid_tool_input)`。
 - 本轮保持边界：不新增 verify rule，不修改 loop 轮数，不做 `planned_actions` 与 `tool_calls` 的一致性强诊断。
 
-# 2026-06-22 实时过程可视化补充
-
-- 已接入 `model_request_prepared` trace 事件，记录每轮真实 `request_payload`。
-- 已新增 `live_trace_view.html`、`live_trace_snapshot.json` 和 `live_trace_snapshot.js`，实时 viewer 按轮次展示右侧 Harness request、左侧结构化 `model_decision`。
-- 现有 `trace_view.html` 保留为原始事件调试视图，新 live viewer 负责 run 过程观察。

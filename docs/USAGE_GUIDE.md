@@ -449,3 +449,9 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
 - 读取缓存治理当前只做第一版“文件级全失效”：文件一旦被编辑，旧读取缓存整文件失效，不做行号偏移修补。
 - 回归测试不依赖真实外网模型，使用 fake model 环境。
 
+# 2026-06-22 使用补充
+
+- 单次 run 现在会额外生成 `live_trace_view.html`、`live_trace_snapshot.json` 和 `live_trace_snapshot.js`。
+- `live_trace_view.html` 面向过程观察：右侧看 Harness 发给模型的完整输入，左侧看解析后的 `model_decision`。
+- `trace_view.html` 继续保留为原始事件调试视图；需要逐条排查时仍优先看它和 `trace.jsonl`。
+- `trace.jsonl` 现已新增 `model_request_prepared`，用于记录每轮真实 `request_payload`。

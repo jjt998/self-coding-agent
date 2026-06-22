@@ -342,6 +342,7 @@ class LoopOrchestrator:
         payload = {
             "provider": error.provider,
             "model_name": error.model_name,
+            "iteration": runtime_state.current_iteration,
             "error_type": type(error).__name__,
             "error_message": str(error),
             "solve_loop_exit_reason": runtime_state.solve_loop_exit_reason,
@@ -458,6 +459,16 @@ class LoopOrchestrator:
             summary["changed_file_count"] = output.get("changed_file_count", 0)
             summary["changed_files"] = [
                 item.get("path")
+                for item in output.get("diffs", [])
+                if isinstance(item, dict) and item.get("path")
+            ]
+            # 这里直接把完整 diff 注回下一轮，避免模型只知道“哪个文件变了”，
+            # 却看不到“到底改了什么”，从而反复回读同一段代码做保守确认。
+            summary["diffs"] = [
+                {
+                    "path": item.get("path"),
+                    "diff": item.get("diff", ""),
+                }
                 for item in output.get("diffs", [])
                 if isinstance(item, dict) and item.get("path")
             ]
@@ -863,6 +874,25 @@ class LoopOrchestrator:
         model_adapter = build_model_adapter(config_data=config_data)
         runtime_feedback = self._build_runtime_feedback(runtime_state=runtime_state)
         reflect_feedback_summary = self._summarize_reflect_feedback_for_trace(runtime_feedback=runtime_feedback)
+        prepare_request_payload = getattr(model_adapter, "prepare_request_payload", None)
+        if callable(prepare_request_payload):
+            request_payload = prepare_request_payload(
+                task=runtime_state.task,
+                task_type=runtime_state.task_type,
+                context_snapshot=runtime_state.context_snapshot,
+                runtime_feedback=runtime_feedback,
+            )
+            self.trace_writer.write_event(
+                TraceEvent(
+                    event_type="model_request_prepared",
+                    payload={
+                        "provider": getattr(model_adapter, "provider", ""),
+                        "model_name": getattr(model_adapter, "model_name", ""),
+                        "iteration": runtime_state.current_iteration,
+                        "request_payload": request_payload,
+                    },
+                )
+            )
         runtime_state.model_decision = model_adapter.decide(
             task=runtime_state.task,
             task_type=runtime_state.task_type,

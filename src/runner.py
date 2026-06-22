@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 from typing import Any
+import webbrowser
 
 from config import RunSettings
+from live_trace_view import build_live_trace_snapshot, build_live_trace_view_html, load_trace_events_from_jsonl
 from loop import LoopOrchestrator, RuntimeState, StopReason, StopReasonCode
 from memory import LongTermMemoryEntry, LongTermMemoryStore, _extract_keywords, _normalize_file_paths
 from runtime_trace import TraceEvent, TraceWriter
@@ -55,6 +58,17 @@ class TraceViewArtifactResult:
 
 
 @dataclass(slots=True)
+class LiveTraceViewArtifactResult:
+    """记录实时对话 viewer 与其快照是否已经写出。"""
+
+    written: bool
+    view_path: str
+    snapshot_path: str
+    event_count: int
+    reason: str
+
+
+@dataclass(slots=True)
 class SetupCommandResult:
     """记录任务 setup 命令执行结果，供 setup_failed stop reason 复用。"""
 
@@ -77,6 +91,11 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
     snapshot = settings.to_dict()
     snapshot["config"] = config_data
     trace_writer.initialize(snapshot)
+    trace_writer.enable_live_trace_refresh(
+        lambda: _refresh_live_trace_artifacts(run_dir=run_dir, trace_writer=trace_writer)
+    )
+    trace_writer.refresh_live_trace_artifacts()
+    _open_live_trace_view_if_possible(trace_writer=trace_writer)
 
     trace_writer.write_event(
         TraceEvent(
@@ -409,6 +428,63 @@ def _write_final_diff_artifact(
         )
     )
     return result
+
+
+def _refresh_live_trace_artifacts(
+    run_dir: Path,
+    trace_writer: TraceWriter,
+) -> LiveTraceViewArtifactResult:
+    """根据当前 trace/report/diff 实时刷新对话 viewer 和快照。"""
+    trace_events = load_trace_events_from_jsonl(trace_writer.trace_path)
+    report_text = trace_writer.report_path.read_text(encoding="utf-8") if trace_writer.report_path.exists() else ""
+    final_diff_text = (run_dir / "final_diff.patch").read_text(encoding="utf-8") if (run_dir / "final_diff.patch").exists() else ""
+    config_snapshot = (
+        json.loads(trace_writer.config_snapshot_path.read_text(encoding="utf-8"))
+        if trace_writer.config_snapshot_path.exists()
+        else {}
+    )
+    snapshot_payload = build_live_trace_snapshot(
+        run_id=run_dir.name,
+        config_snapshot=config_snapshot,
+        trace_events=trace_events,
+        report_text=report_text,
+        final_diff_text=final_diff_text,
+        trace_path=trace_writer.trace_path.name,
+        report_path=trace_writer.report_path.name,
+        diff_path="final_diff.patch",
+        snapshot_json_path=trace_writer.live_trace_snapshot_path.name,
+        snapshot_js_path=trace_writer.live_trace_snapshot_js_path.name,
+    )
+    trace_writer.write_live_trace_snapshot(snapshot_payload)
+    trace_writer.write_live_trace_view(
+        build_live_trace_view_html(
+            run_id=run_dir.name,
+            snapshot_js_path=trace_writer.live_trace_snapshot_js_path.name,
+        )
+    )
+    return LiveTraceViewArtifactResult(
+        written=True,
+        view_path=str(trace_writer.live_trace_view_path),
+        snapshot_path=str(trace_writer.live_trace_snapshot_path),
+        event_count=len(trace_events),
+        reason="Wrote live trace viewer and snapshot artifacts.",
+    )
+
+
+def _open_live_trace_view_if_possible(trace_writer: TraceWriter) -> None:
+    """尽力打开实时 viewer；测试环境和无图形环境下静默跳过。"""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    if ".pytest_tmp" in str(trace_writer.run_dir):
+        return
+    live_trace_view_path = trace_writer.live_trace_view_path.resolve()
+    try:
+        if hasattr(os, "startfile"):
+            os.startfile(str(live_trace_view_path))
+            return
+        webbrowser.open(live_trace_view_path.as_uri())
+    except OSError:
+        return
 
 
 def _write_trace_view_artifact(
@@ -1028,7 +1104,14 @@ def _build_phase_4_report(
         f"- artifact: `final_diff.patch`\n"
         f"- detail: {final_diff_artifact_result.reason}"
     )
-    trace_view_summary = "- artifact: `trace_view.html`\n- detail: Static HTML viewer for trace.jsonl, report, and final diff."
+    trace_view_summary = (
+        "- artifact: `trace_view.html`\n"
+        "- detail: 原始事件调试视图，适合逐条排查 trace.jsonl。\n"
+        "- artifact: `live_trace_view.html`\n"
+        "- detail: 实时对话视图，右侧显示 harness 请求，左侧显示结构化 model_decision。\n"
+        "- artifact: `live_trace_snapshot.json`\n"
+        "- detail: live_trace_view.html 轮询的实时快照数据。"
+    )
     token_usage_summary = (
         f"{token_usage_summary}\n\n## Code Diff\n\n{code_diff_summary}\n\n## Trace View\n\n{trace_view_summary}"
     )

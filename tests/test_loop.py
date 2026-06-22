@@ -255,6 +255,13 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert model_decision_payload["model_name"] == "demo-model"
     assert model_decision_payload["planned_actions"] == ["执行模型工具计划"]
     assert model_decision_payload["iteration"] == 1
+    model_request_payload = next(
+        event["payload"] for event in trace_events if event["event_type"] == "model_request_prepared"
+    )
+    assert model_request_payload["provider"] == "openai_compatible"
+    assert model_request_payload["model_name"] == "demo-model"
+    assert model_request_payload["iteration"] == 1
+    assert model_request_payload["request_payload"]["model"] == "demo-model"
     raw_response_payload = next(event["payload"] for event in trace_events if event["event_type"] == "model_raw_response")
     assert raw_response_payload["provider"] == "openai_compatible"
     assert raw_response_payload["model_name"] == "demo-model"
@@ -1048,6 +1055,84 @@ def test_runtime_feedback_includes_full_small_read_file_content(
     assert read_summary["read_coverage"] == "1-2"
     assert read_summary["content_excerpt"] == "def main():\n    return 'ok'\n"
     assert read_summary["excerpt_reason"] == "full_file"
+
+
+def test_runtime_feedback_includes_full_git_diff_content(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "small.py").write_text("value = 1\n", encoding="utf-8")
+    feedbacks: list[dict] = []
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-full-git-diff-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            if runtime_feedback:
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="second",
+                    rationale="上一轮的完整 diff 已经可见。",
+                    planned_actions=["结束"],
+                    tool_calls=[],
+                    loop_end=True,
+                )
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="first",
+                rationale="先修改 small.py，再查看完整 diff。",
+                planned_actions=["修改 small.py", "查看 git diff"],
+                tool_calls=[
+                    PlannedToolCall(
+                        tool_name="apply_patch",
+                        tool_input={"path": "small.py", "old_text": "value = 1\n", "new_text": "value = 2\n"},
+                    ),
+                    PlannedToolCall(tool_name="git_diff", tool_input={"paths": ["small.py"]}),
+                ],
+            )
+
+    def fake_verification(*, settings, tool_executions):
+        return VerificationResult(
+            passed=True,
+            summary="ok",
+            checks=[VerificationCheck(name="fake_verify", passed=True, detail="fake")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="保留完整 diff",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    loop_module.LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=_model_config())
+
+    recent_tool_results = feedbacks[1]["previous_reflect"]["recent_tool_results"]
+    git_diff_summary = next(item for item in recent_tool_results if item["tool_name"] == "git_diff")
+    assert git_diff_summary["changed_file_count"] == 1
+    assert git_diff_summary["changed_files"] == ["small.py"]
+    assert git_diff_summary["diffs"] == [
+        {
+            "path": "small.py",
+            "diff": "--- a/small.py\n+++ b/small.py\n@@ -1 +1 @@\n-value = 1\n+value = 2",
+        }
+    ]
 
 
 def test_runtime_feedback_includes_run_command_stderr_and_python_traceback_summary(

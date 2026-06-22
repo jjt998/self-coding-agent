@@ -55,6 +55,9 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert (run_dir / "report.md").exists()
     assert (run_dir / "final_diff.patch").exists()
     assert (run_dir / "trace_view.html").exists()
+    assert (run_dir / "live_trace_view.html").exists()
+    assert (run_dir / "live_trace_snapshot.json").exists()
+    assert (run_dir / "live_trace_snapshot.js").exists()
     snapshot = json.loads((run_dir / "config_snapshot.json").read_text(encoding="utf-8"))
     assert snapshot["task"] == "创建脚手架"
 
@@ -99,6 +102,9 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "fix_failing_verification_checks" in model_decision_payload["planned_actions"][0]
     raw_response_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_raw_response"]
     assert len(raw_response_payloads) >= 2
+    model_request_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_request_prepared"]
+    assert len(model_request_payloads) >= 2
+    assert model_request_payloads[0]["request_payload"]["model"] == "deepseek-v4-flash"
     assert raw_response_payloads[0]["provider"] == "openai_compatible"
     assert raw_response_payloads[0]["model_name"] == "deepseek-v4-flash"
     assert raw_response_payloads[0]["iteration"] == 1
@@ -180,10 +186,13 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     final_diff_text = (run_dir / "final_diff.patch").read_text(encoding="utf-8")
     trace_view_text = (run_dir / "trace_view.html").read_text(encoding="utf-8")
+    live_trace_view_text = (run_dir / "live_trace_view.html").read_text(encoding="utf-8")
+    live_trace_snapshot = json.loads((run_dir / "live_trace_snapshot.json").read_text(encoding="utf-8"))
     assert "`finalize`" in report_text
     assert "## Code Diff" in report_text
     assert "## Trace View" in report_text
     assert "trace_view.html" in report_text
+    assert "live_trace_view.html" in report_text
     assert "artifact: `final_diff.patch`" in report_text
     assert "## 反思反馈" in report_text
     assert "## 模型返回摘要" in report_text
@@ -213,6 +222,9 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "Trace View" in trace_view_text
     assert snapshot["run_id"] in trace_view_text
     assert "run_finished" in trace_view_text
+    assert "实时任务过程界面" in live_trace_view_text
+    assert live_trace_snapshot["run_id"] == snapshot["run_id"]
+    assert live_trace_snapshot["iterations"][0]["model_request_prepared"]["request_payload"]["model"] == "deepseek-v4-flash"
     assert "run_evidence.md" in final_diff_text
 
 

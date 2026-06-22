@@ -204,6 +204,10 @@ class ModelAdapter:
         """根据任务、上下文和配置，产出一次结构化决策结果。"""
         raise NotImplementedError
 
+    def get_last_request_payload(self) -> dict[str, Any]:
+        """返回最近一次真实发给模型的请求快照；默认没有可用数据。"""
+        return {}
+
 
 class OpenAICompatibleModelAdapter(ModelAdapter):
     """通过 OpenAI 兼容 chat completions 接口获取任务级决策。"""
@@ -224,6 +228,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         self.api_key_env = api_key_env
         self.timeout_seconds = timeout_seconds
         self._last_response_content = ""
+        self._last_request_payload: dict[str, Any] = {}
         self.api_key = os.environ.get(api_key_env, "").strip()
         if not self.api_key:
             raise ModelConfigError(
@@ -242,7 +247,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         runtime_feedback: dict[str, Any] | None = None,
     ) -> ModelDecision:
         """调用模型并把返回内容解析成稳定的 ModelDecision。"""
-        request_payload = self._build_request_payload(
+        request_payload = self._last_request_payload or self.prepare_request_payload(
             task=task,
             task_type=task_type,
             context_snapshot=context_snapshot,
@@ -257,6 +262,26 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             raw_response_content=raw_response_content,
             token_usage=self._extract_token_usage(response_payload),
         )
+
+    def prepare_request_payload(
+        self,
+        task: str,
+        task_type: str,
+        context_snapshot: ContextSnapshot | None,
+        runtime_feedback: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """构造并缓存真实请求 payload，供 trace 和后续 decide 复用。"""
+        self._last_request_payload = self._build_request_payload(
+            task=task,
+            task_type=task_type,
+            context_snapshot=context_snapshot,
+            runtime_feedback=runtime_feedback,
+        )
+        return dict(self._last_request_payload)
+
+    def get_last_request_payload(self) -> dict[str, Any]:
+        """返回最近一次准备好的请求快照。"""
+        return dict(self._last_request_payload)
 
     def _request_chat_completion(self, request_payload: dict[str, Any]) -> dict[str, Any]:
         """执行 HTTP 请求；测试可通过环境变量提供假响应但仍必须配置 API key。"""
@@ -451,6 +476,8 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "这种旧缓存只代表你以前读过它，不能继续把其中内容当成当前可信源码。"
                         "runtime_feedback.previous_rationale 是上一轮模型自己给出的判断理由，可用来延续或修正上一轮思路。"
                         "runtime_feedback.previous_donelist 是到上一轮为止已经完成的事项列表。"
+                        "任务描述描述的是待修复现象，不保证与当前轮已修改后的文件内容一致。"
+                        "当任务描述、当前代码、recent_tool_results 和 git_diff 看起来冲突时，优先相信当前轮可验证的运行时证据，而不是反复把初始任务描述当成当前代码事实。"
                         "你需要在 rationale 中自行解释这些事实，并据此避免重复兜圈。"
                     ),
                 },
@@ -464,6 +491,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "只要你后续还打算继续做任何工作，loop_end 就必须是 false；"
                         "planned_actions 只写本轮 tool_calls 实际会执行的动作；"
                         "donelist 必须写成到当前这一轮为止已经完成的事项列表，而不是下一轮计划；"
+                        "donelist 只写你做过什么事情，禁止在里面做解释和分析类的描述；"
                         "如果上一轮 done list 里已有某项且本轮没有推翻它，就继续保留，避免遗漏已经做过的事；"
                         "tool_calls 是唯一执行源。"
                         "在 Windows CLI 任务中，默认要求 ASCII stdout/stderr；"

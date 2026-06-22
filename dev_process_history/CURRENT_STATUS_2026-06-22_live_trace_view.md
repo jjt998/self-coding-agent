@@ -243,7 +243,3 @@
 - `CoreToolRunner.apply_patch()` 增加防御式输入检查，即使绕过模型校验传入非法值，也会返回结构化 `invalid_tool_input`，不再抛出 `TypeError` traceback。
 - 本轮不新增 `verify_rules`，不改变 `runtime.max_steps=2`，不做 `planned_actions` 与 `tool_calls` 的一致性硬诊断，继续交给 prompt 和模型自觉对齐。
 
-# 2026-06-22 补充记录
-
-- 已新增 `live_trace_view.html`、`live_trace_snapshot.json` 和 `live_trace_snapshot.js`，run 启动后即可查看实时对话式执行过程。
-- 已新增 `model_request_prepared` trace 事件，用于落地每轮真实的模型请求快照，右侧 viewer 直接显示该 payload。
