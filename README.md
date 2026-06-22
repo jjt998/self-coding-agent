@@ -1,6 +1,6 @@
 # self-coding-agent
 
-`self-coding-agent` 是一个用于学习和研究 coding agent harness 的本地实验项目。它的重点不是做一个完整 IDE Agent，而是把“模型决策、工具执行、观察、验证、反思、评测、策略对比”这些环节拆成可追踪、可复现、可实验的最小闭环。
+`self-coding-agent` 是一个用于学习和研究 coding agent harness 的本地实验项目。它的重点不是做一个完整 IDE Agent，而是把“模型决策、工具执行、事实反思、最终验证、评测、策略对比”这些环节拆成可追踪、可复现、可实验的最小闭环。
 
 当前项目处于 `Phase 9：真实任务最小闭环`。核心目标是逐步把早期 stub loop 替换成可用于真实代码任务的最小求解链路。
 
@@ -8,15 +8,15 @@
 
 - 单次任务运行：生成 `trace.jsonl`、`report.md`、`config_snapshot.json` 等运行产物。
 - OpenAI 兼容模型决策层：配置只支持 `openai_compatible`，默认使用 DeepSeek 的 OpenAI-compatible endpoint 和 `DEEPSEEK_API_KEY`。
-- 最小多轮 loop：默认 `runtime.max_steps = 2`，流程为 `ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize`。
-- 核心工具：`search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`。
-- 反思事实压缩：每轮 `act` 后固定进入 `reflect`，记录工具结果、失败工具、diff 事实、轻量 signals 和验证事实；harness 不再判断“是否有进展”。
+- 最小多轮 loop：默认配置 `runtime.max_steps = 15`，流程为 `ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize`；`verify` 只在求解阶段退出后执行一次。
+- 核心工具：`search_text`、`read_file`、`read_file_structure_summary`、`read_file_range`、`apply_patch`、`replace_lines`、`run_command`、`git_diff`。
+- 反思事实压缩：每轮 `act` 后固定进入 `reflect`，记录工具结果、失败工具、diff 信号、文件上下文缓存、stale/fresh 状态和轻量 signals；不再携带验证结果。
 - 任务级验证：支持 `verify_commands` 和结构化 `verify_rules`；未配置任务级验证时会以 `missing_task_verification` 失败，不再回退到演示型检查。
-- 结构化失败收口：支持 `setup_failed`、`verification_failed`、`model_error`、`max_steps_reached` 等 stop reason，并提供稳定 failure taxonomy。
-- Reflect feedback 事实输入：下一轮模型接收 `runtime_feedback.previous_reflect` 和 `previous_cross_round_plan`，由 LLM 自行解释事实并重规划；模型请求中不暴露当前轮数、剩余轮数或最大轮数。
+- 结构化失败收口：支持 `setup_failed`、`verification_failed`、`model_error` 等 stop reason；达到求解预算时会记录 `solve_loop_exit_reason=max_steps_reached`，最终 stop reason 仍由末尾验证结果决定。
+- Reflect feedback 事实输入：下一轮模型接收 `runtime_feedback.previous_reflect`、`runtime_feedback.working_memory`、`runtime_feedback.current_iteration` 和可选 `previous_rationale`，由 LLM 自行解释事实并重规划；链路中不再传递 `previous_verification`。
 - 真实 loop 内核扫尾：当前代码不再保留 Phase 3 固定工具序列辅助函数，测试样例默认产物改为 `run_evidence.md`。
 - 模型返回日志：每次 plan 会在 `trace.jsonl` 写入 `model_raw_response`，记录模型显式返回的 JSON content，便于排查工具计划和 rationale。
-- 跨轮计划：模型响应支持 `cross_round_plan`，用于记录后续轮次安排；`planned_actions` 只描述本轮 `tool_calls` 实际会执行的动作。
+- 结构化工作记忆：模型响应必须携带 `working_memory`，固定包含 `confirmed_facts`、`invalidated_beliefs`、`completed_actions`、`next_risks` 四个字段；`planned_actions` 只描述本轮 `tool_calls` 实际会执行的动作。
 - 工具入参校验：模型返回的 `tool_input` 会按 `tool_schema` 校验字段名和类型，例如 `apply_patch.new_text = null` 会收口为 `model_error`，不再进入工具层 traceback。
 - eval batch：批量运行任务并生成聚合 `summary.json` / `summary.md`。
 - strategy comparison：对同一批任务执行多套配置并输出 delta。
@@ -48,7 +48,7 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
 
 ## 快速开始
 
-最小使用路径建议按这个顺序走：配置模型 -> 单次 run -> 编写 eval task -> 查看 report -> 运行 eval -> 运行 comparison -> 排障。完整手册见 `docs/USAGE_GUIDE.md`，MVP 验收命令见 `docs/MVP_ACCEPTANCE.md`。
+最小使用路径建议按这个顺序走：配置模型 -> 单次 run -> 编写 eval task -> 查看 report -> 运行 eval -> 运行 comparison -> 排障。完整手册见 `docs/USAGE_GUIDE.md`，MVP 验收命令见 `docs/MVP_ACCEPTANCE.md`，运行链路图见 `docs/RUN_CHAIN.html`。
 
 安装为本地可编辑包：
 
@@ -106,10 +106,10 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
     "name": "deepseek-v4-flash",
     "base_url": "https://api.deepseek.com",
     "api_key_env": "DEEPSEEK_API_KEY",
-    "timeout_seconds": 30
+    "timeout_seconds": 100
   },
   "runtime": {
-    "max_steps": 2,
+    "max_steps": 15,
     "trace_level": "standard"
   },
   "context": {
@@ -119,7 +119,9 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
     "strategy": "low_progress_plus_verify_reflect"
   },
   "memory": {
-    "enabled": true
+    "enabled": true,
+    "weak_conflict_penalty": 3,
+    "summary_max_length": 80
   }
 }
 ```
@@ -139,11 +141,12 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
 
 - `api_key_env` 默认是 `DEEPSEEK_API_KEY`；程序会从 `.env` 或系统环境变量读取该变量，缺少时会失败为 `model_error`，错误 details 会显示变量名但不会记录密钥值。
 - `base_url` 必须以 `http://` 或 `https://` 开头，默认是 `https://api.deepseek.com`。
-- `timeout_seconds` 默认是 `30`；网络超时、DNS 错误、HTTP 非 2xx 都会在 trace/report 中显示安全摘要。
+- `timeout_seconds` 默认配置是 `100`；网络超时、DNS 错误、HTTP 非 2xx 都会在 trace/report 中显示安全摘要。
 - 常见 `model_error` 类型包括 `ModelConfigError`、`ModelRequestError`、`ModelResponseError`。
 - 测试环境可使用 `SELF_CODING_AGENT_FAKE_MODEL_RESPONSE` 注入假响应，仍需设置测试用 API key 环境变量。
 - 排查模型为什么只读文件、不修改文件或没有响应 reflect feedback 时，优先查看 `trace.jsonl` 中的 `model_raw_response` 和 `model_decision`。前者是模型显式返回的原始 JSON content，后者是解析后的结构化决策。
-- `model_decision.planned_actions` 是本轮可读计划说明，不是跨轮任务队列；跨轮安排应查看 `cross_round_plan` 和下一轮 `runtime_feedback.previous_cross_round_plan`。
+- `model_decision` 必须包含 `summary`、`rationale`、`planned_actions`、`working_memory`、`tool_calls`；其中只有 `tool_calls` 会被 `act` 阶段实际执行。
+- `model_decision.planned_actions` 是本轮可读计划说明，不是跨轮任务队列；跨轮记忆应写入四字段 `working_memory`，下一轮会通过 `runtime_feedback.working_memory` 原样回填给模型。
 - 工具 schema 会同时约束字段名和字段类型；非法字段、缺少必填字段或类型不匹配会进入 `ModelResponseError`，并在 details 中暴露 `field_path`、`tool_name`、`expected_type`、`actual_type` 等安全摘要。
 - 更完整的模型配置、eval task、report 和 comparison 使用说明见 `docs/USAGE_GUIDE.md`。
 
@@ -257,7 +260,7 @@ MVP 冻结验收命令见 `docs/MVP_ACCEPTANCE.md`。
 
 - loop 已拆分为独立状态处理方法，并已清理旧 Phase 3 固定工具序列语义；后续仍需继续增强真实任务求解策略。
 - reflect feedback 现在是下一轮 plan 的事实输入，不再作为 harness 硬约束；后续仍可继续增强事实压缩质量。
-- 默认最大求解轮数仍固定为 `2`，暂不开放更高预算。
+- 默认配置最大求解轮数为 `15`；部分对比策略仍保留较小预算用于实验。CLI 暂不提供单次运行覆盖 `runtime.max_steps` 的专门参数，需通过配置文件调整。
 - CLI 暂不支持单次运行直接传入 `verify_commands` / `verify_rules`，该能力目前只在 eval task schema 中使用。
 
 ## 开发入口
