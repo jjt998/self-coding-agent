@@ -20,14 +20,12 @@ def _model_config() -> dict:
 def _working_memory(
     *,
     confirmed_facts: str | list[str] = "",
-    open_questions: str | list[str] = "",
     invalidated_beliefs: str | list[str] = "",
     completed_actions: str | list[str] = "",
     next_risks: str | list[str] = "",
 ) -> dict:
     return {
         "confirmed_facts": confirmed_facts,
-        "open_questions": open_questions,
         "invalidated_beliefs": invalidated_beliefs,
         "completed_actions": completed_actions,
         "next_risks": next_risks,
@@ -2173,6 +2171,7 @@ def test_second_plan_receives_working_memory_from_previous_round(tmp_path: Path,
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert feedbacks[0] == {}
+    assert feedbacks[1]["current_iteration"] == 2
     assert feedbacks[1]["working_memory"] == _working_memory(
         completed_actions=["已写入 run_evidence.md", "已查看当前 diff"]
     )

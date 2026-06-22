@@ -87,7 +87,7 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 - `Token 消耗`：单任务模型请求数、缺失 usage 请求数、`prompt_tokens`、`completion_tokens`、`total_tokens`。
 - `进展观察`：是否观察到文件变更、变更文件数、失败工具数。
 - `反思反馈`：最近一次 reflect trigger、失败检查、建议关注点。
-- `模型返回摘要`：最近一次模型显式返回的 summary、rationale、planned_actions、working_memory 和 tool_calls；其中 `working_memory` 会按五类结构化工作记忆展示。
+- `模型返回摘要`：最近一次模型显式返回的 summary、rationale、planned_actions、working_memory 和 tool_calls；其中 `working_memory` 会按四类结构化工作记忆展示。
 - `验证结果`：每条验证检查是否通过。
 
 `trace.jsonl` 是结构化事件流，适合脚本分析和定位细节。排查模型为什么只读文件、不修改文件或没有响应 reflect feedback 时，优先查看：

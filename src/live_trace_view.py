@@ -509,7 +509,6 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
       const normalized = normalizeWorkingMemory(workingMemory);
       const fieldPairs = [
         ["confirmed_facts", "confirmed_facts"],
-        ["open_questions", "open_questions"],
         ["invalidated_beliefs", "invalidated_beliefs"],
         ["completed_actions", "completed_actions"],
         ["next_risks", "next_risks"],

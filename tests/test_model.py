@@ -37,14 +37,12 @@ def _openai_response(decision: dict, usage: dict | None = None) -> dict:
 def _working_memory(
     *,
     confirmed_facts: str | list[str] = "",
-    open_questions: str | list[str] = "",
     invalidated_beliefs: str | list[str] = "",
     completed_actions: str | list[str] = "",
     next_risks: str | list[str] = "",
 ) -> dict:
     return {
         "confirmed_facts": confirmed_facts,
-        "open_questions": open_questions,
         "invalidated_beliefs": invalidated_beliefs,
         "completed_actions": completed_actions,
         "next_risks": next_risks,
@@ -241,6 +239,7 @@ def test_openai_compatible_adapter_includes_runtime_feedback(monkeypatch) -> Non
         context_snapshot=None,
         config_data={},
         runtime_feedback={
+            "current_iteration": 2,
             "previous_rationale": "上一轮先读 README，再确认修改点。",
             "working_memory": _working_memory(completed_actions=["已读取 README.md"]),
         },
@@ -248,6 +247,7 @@ def test_openai_compatible_adapter_includes_runtime_feedback(monkeypatch) -> Non
 
     user_payload = json.loads(captured["body"]["messages"][-1]["content"])
     assert user_payload["runtime_feedback"] == {
+        "current_iteration": 2,
         "previous_rationale": "上一轮先读 README，再确认修改点。",
         "working_memory": _working_memory(completed_actions=["已读取 README.md"]),
     }
@@ -302,6 +302,9 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert "stale_file_paths 只列出当前仍然 stale 的文件" in prompt_text
     assert "reread_fresh_ranges" in prompt_text
     assert "safe_to_rely_ranges" in prompt_text
+    assert "runtime_feedback.current_iteration" in prompt_text
+    assert "当前正处于第几轮求解" in prompt_text
+    assert "不会提供最大轮数、剩余轮数或任何预算信息" in prompt_text
     assert "runtime_feedback.working_memory" in prompt_text
     assert "working_memory" in prompt_text
     assert "任务描述描述的是待修复现象，不保证与当前轮已修改后的文件内容一致" in prompt_text
@@ -310,7 +313,8 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert "不要仅因为任务描述与当前代码冲突，就立刻扩展读取外围 helper" in prompt_text
     assert "并优先运行核心命令校验当前代码行为" in prompt_text
     assert "凡是被当前轮代码读取结果、命令输出或 diff 直接否定的旧怀疑" in prompt_text
-    assert "必须从 open_questions 移出，并写入 invalidated_beliefs" in prompt_text
+    assert "必须写入 invalidated_beliefs" in prompt_text
+    assert "working_memory 不再保留专门的 open_questions 字段" in prompt_text
     assert "由 harness 根据本轮 tool_calls 是否为空来决定" in prompt_text
     assert "bug_fix 收口规则" in prompt_text
     assert "当前 diff 已经命中任务目标修改点" in prompt_text
@@ -750,21 +754,18 @@ def test_openai_compatible_adapter_accepts_working_memory_as_strings_lists_or_mi
     cases = [
         _working_memory(
             confirmed_facts="已确认事实",
-            open_questions="待确认问题",
             invalidated_beliefs="旧判断无效",
             completed_actions="已完成动作",
             next_risks="还要再验证",
         ),
         _working_memory(
             confirmed_facts=["已确认事实"],
-            open_questions=["待确认问题"],
             invalidated_beliefs=["旧判断无效"],
             completed_actions=["已完成动作"],
             next_risks=["还要再验证"],
         ),
         _working_memory(
             confirmed_facts="已确认事实",
-            open_questions=["待确认问题"],
             invalidated_beliefs="旧判断无效",
             completed_actions=["已完成动作"],
             next_risks="还要再验证",

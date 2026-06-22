@@ -23,7 +23,6 @@ ALLOWED_TOOL_NAMES = {
 }
 WORKING_MEMORY_FIELDS = (
     "confirmed_facts",
-    "open_questions",
     "invalidated_beliefs",
     "completed_actions",
     "next_risks",
@@ -170,7 +169,7 @@ class ModelTokenUsage:
 
 
 def build_empty_working_memory() -> WorkingMemoryDocument:
-    """构造一份空的 working_memory，统一五个固定字段。"""
+    """构造一份空的 working_memory，统一四个固定字段。"""
     return {field_name: [] for field_name in WORKING_MEMORY_FIELDS}
 
 
@@ -492,6 +491,8 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "如果某个文件不在 stale_file_paths 里，就不要再把它描述成当前 stale。"
                         "runtime_feedback.previous_reflect.reread_fresh_ranges 会列出上一轮已经重读恢复为 fresh 的文件范围；"
                         "这些范围虽然历史上 stale 过，但现在已经可以直接信任，不要再把'曾经 stale'误写成'当前 stale'。"
+                        "runtime_feedback.current_iteration 表示当前正处于第几轮求解，可用来区分早期探索和后期仍在反复确认；"
+                        "但不会提供最大轮数、剩余轮数或任何预算信息。"
                         "runtime_feedback.previous_rationale 是上一轮模型自己给出的判断理由，可用来延续或修正上一轮思路。"
                         "runtime_feedback.working_memory 是上一轮模型原样返回的工作记忆对象。"
                         "你需要在 rationale 中自行解释这些事实，并据此避免重复兜圈。"
@@ -502,12 +503,12 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     "content": (
                         "请严格遵守 user message 中的 decision_schema："
                         "planned_actions 只写本轮 tool_calls 实际会执行的动作；"
-                        "working_memory 必须是完整对象，并且固定包含 confirmed_facts、open_questions、invalidated_beliefs、completed_actions、next_risks 五个字段；"
+                        "working_memory 必须是完整对象，并且固定包含 confirmed_facts、invalidated_beliefs、completed_actions、next_risks 四个字段；"
                         "每个字段可以写成一个字符串，也可以写成字符串列表；"
                         "下一轮会直接看到你这一轮原样返回的 runtime_feedback.working_memory；"
                         "如果上一轮判断被推翻，必须在本轮主动改写对应字段，不要依赖 harness 帮你 merge、修正或补写；"
-                        "凡是被当前轮代码读取结果、命令输出或 diff 直接否定的旧怀疑，必须从 open_questions 移出，并写入 invalidated_beliefs；"
-                        "不要让已经被否定的问题继续留在 open_questions 里反复驱动下一轮。"
+                        "凡是被当前轮代码读取结果、命令输出或 diff 直接否定的旧怀疑，必须写入 invalidated_beliefs。"
+                        "working_memory 不再保留专门的 open_questions 字段，避免把未确认问题越积越多，驱动模型继续发散。"
                         "tool_calls 是唯一执行源。"
                         "由 harness 根据本轮 tool_calls 是否为空来决定是否继续求解。"
                         "在 Windows CLI 任务中，默认要求 ASCII stdout/stderr；"
@@ -539,7 +540,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "当任务描述、当前代码、recent_tool_results 和 git_diff 看起来冲突时，优先相信当前轮可验证的运行时证据，而不是反复把初始任务描述当成当前代码事实。"
                         "如果关键目标函数已经处于 fresh 状态，并且你已经直接读到其当前实现，"
                         "不要仅因为任务描述与当前代码冲突，就立刻扩展读取外围 helper；"
-                        "先把这个冲突写入 working_memory 的 open_questions 或 invalidated_beliefs，"
+                        "先把这个冲突写入 working_memory 的 invalidated_beliefs 或直接在 rationale 中说明，"
                         "并优先运行核心命令校验当前代码行为。"
                     ),
                 },
@@ -559,7 +560,6 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                                 ],
                                 "working_memory": {
                                     "confirmed_facts": "字符串或字符串列表：当前已确认的事实。",
-                                    "open_questions": "字符串或字符串列表：当前仍未确认的问题。",
                                     "invalidated_beliefs": "字符串或字符串列表：本轮已推翻的旧怀疑、旧判断。",
                                     "completed_actions": "字符串或字符串列表：到当前轮为止已经完成的动作。",
                                     "next_risks": "字符串或字符串列表：若现在结束或继续，最需要注意的风险。",

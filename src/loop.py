@@ -385,10 +385,11 @@ class LoopOrchestrator:
         runtime_state.current_state = to_state.value
 
     def _build_runtime_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """下一轮只传事实型 reflect 反馈和上一轮原样 working_memory。"""
+        """下一轮传入轻量轮次、事实型 reflect 反馈和上一轮原样 working_memory。"""
         if runtime_state.current_iteration <= 1 and not runtime_state.reflect_feedback:
             return {}
         runtime_feedback = {
+            "current_iteration": runtime_state.current_iteration,
             "previous_reflect": self._build_previous_reflect(runtime_state=runtime_state),
             "working_memory": deepcopy(runtime_state.working_memory),
         }

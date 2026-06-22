@@ -22,7 +22,7 @@
 - `reflect_feedback` 与 `previous_reflect` 现已新增 `reread_fresh_ranges`，专门标记“上一轮曾 stale，但本轮已经重读恢复 fresh”的可信范围，避免模型把历史 stale 状态误判成当前 stale。
 - `src/model.py` 现已补充 stale/fresh 解释规则：`stale_file_paths` 只代表当前仍失效的文件；如果某个文件已出现在 `reread_fresh_ranges` 中，默认应直接复用这些 `safe_to_rely_ranges`，而不是仅因它曾 stale 过就继续重复读取。
 - `src/model.py` 现已补充 `bug_fix` 收口规则：若当前 diff 已命中任务目标修改点，且核心验证命令已经符合预期，模型应优先准备让 `tool_calls` 收空，而不是继续扩展外围读取。
-- `src/model.py` 现已补充 `working_memory` 迁移规则：被当前轮代码读取、命令输出或 diff 直接否定的旧怀疑，必须从 `open_questions` 移入 `invalidated_beliefs`。
+- `src/model.py` 现已把 `working_memory` 收紧为四字段结构：被当前轮代码读取、命令输出或 diff 直接否定的旧怀疑，只保留在 `invalidated_beliefs` 中，不再额外保留 `open_questions` 以免继续驱动模型发散。
 
 > 说明：下方按 Phase 保留历史推进记录，其中部分旧条目描述的是更早期的 loop 或 verify 形态；当前实现以上方“最新 Phase 9.x 收口”为准。
 

@@ -92,10 +92,9 @@ def _format_working_memory_value_for_report(value: Any) -> str:
 
 
 def _format_working_memory_for_report(working_memory: dict[str, Any]) -> str:
-    """按五个固定字段输出 working_memory，避免再假设它一定是字符串数组。"""
+    """按四个固定字段输出 working_memory，避免再假设它一定是字符串数组。"""
     ordered_fields = [
         ("confirmed_facts", "已确认事实"),
-        ("open_questions", "待确认问题"),
         ("invalidated_beliefs", "已推翻判断"),
         ("completed_actions", "已完成动作"),
         ("next_risks", "后续风险"),

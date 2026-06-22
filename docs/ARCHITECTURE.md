@@ -288,7 +288,6 @@ model_decision:
     - "本轮 tool_calls 实际会执行的动作说明"
   working_memory:
     confirmed_facts: "字符串或字符串列表"
-    open_questions: "字符串或字符串列表"
     invalidated_beliefs: "字符串或字符串列表"
     completed_actions: "字符串或字符串列表"
     next_risks: "字符串或字符串列表"
@@ -303,7 +302,7 @@ model_decision:
 
 - `tool_calls` 是唯一执行源，`act` 阶段只按这个数组调用工具。
 - `planned_actions` 是本轮可读计划说明，不是跨轮任务队列，也不驱动执行。
-- `working_memory` 当前承载模型维护的结构化运行时记忆；下一轮会通过 `runtime_feedback.working_memory` 原样回填给模型，帮助模型延续事实、问题、已完成动作和风险判断。
+- `working_memory` 当前承载模型维护的结构化运行时记忆；下一轮会通过 `runtime_feedback.working_memory` 原样回填给模型，帮助模型延续事实、已推翻判断、已完成动作和风险判断。
 - harness 不会再自动 merge 或补写 working_memory；如果上一轮判断失效，必须由模型在本轮主动改写对应字段。
 - `raw_response_content` 只写入本地 trace，用于排查模型显式返回内容，不包含 provider 隐藏推理链。
 - `normalization_notes` 记录展示字段的宽容归一化，例如缺失 `planned_actions` 时从 `tool_calls` 派生说明。

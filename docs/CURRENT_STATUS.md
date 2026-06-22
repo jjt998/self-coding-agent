@@ -26,7 +26,7 @@
 - 当前 `runtime_feedback.previous_reflect.stale_file_paths` 的语义已收紧为“当前仍处于 stale 的文件列表”；如果某个文件已经在上一轮完成重读恢复为 `fresh`，它不应继续出现在这里。
 - 当前 `runtime_feedback.previous_reflect.reread_fresh_ranges` 已新增“编辑后已重读恢复 fresh 的可信范围”摘要，显式告诉模型哪些范围虽然历史上 stale 过，但现在已经可以直接作为当前源码上下文使用，减少把“曾经 stale”误写成“当前 stale”的摇摆。
 - 当前 `bug_fix` 提示词已补充收口规则：一旦当前 diff 已命中任务目标修改点，且针对任务描述的核心验证命令已经符合预期，模型应优先准备结束求解，而不是继续扩展读取外围函数。
-- 当前 `working_memory` 提示词已补充失效迁移规则：凡是被当前轮代码读取、命令输出或 diff 直接否定的旧怀疑，必须移出 `open_questions` 并写入 `invalidated_beliefs`。
+- 当前 `working_memory` 已收紧为更偏收口的四字段结构：`confirmed_facts`、`invalidated_beliefs`、`completed_actions`、`next_risks`；不再保留 `open_questions`，避免模型围绕“待确认问题”继续发散读取。
 
 > 说明：下面保留了 Phase 8/Phase 9 早期推进记录，其中部分段落描述的是历史状态；当前行为以上方最新条目为准。
 
@@ -238,7 +238,7 @@
 
 ## Phase 9 本轮新增进展：跨轮计划与工具入参类型校验
 
-- 模型决策 JSON 中的 `working_memory` 已升级为结构化运行时记忆对象，固定包含 `confirmed_facts`、`open_questions`、`invalidated_beliefs`、`completed_actions`、`next_risks` 五个字段；每个字段允许 `str | list[str]`。
+- 模型决策 JSON 中的 `working_memory` 已升级为结构化运行时记忆对象，固定包含 `confirmed_facts`、`invalidated_beliefs`、`completed_actions`、`next_risks` 四个字段；每个字段允许 `str | list[str]`。
 - 当前 `working_memory` 只作为模型自维护的记忆文档；是否继续 loop 仍只看 `tool_calls` 是否为空。
 - 下一轮 `runtime_feedback.working_memory` 会把上一轮模型原样返回的工作记忆对象直接回填给模型；如果上一轮判断被推翻，需要由模型自己改写对应字段，而不是依赖 harness 自动补写。
 - harness 会在运行时合并上一轮 done list 与本轮返回结果；即使模型本轮漏写历史事项，也不会把已完成记录直接丢掉。
