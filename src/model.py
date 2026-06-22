@@ -460,7 +460,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "请严格遵守 user message 中的 decision_schema："
                         "loop_end 用来表达当前是否已经结束求解循环；"
                         "只有当你确认自己后续不再需要做任何读取、修改、命令检查、diff 检查或补充验证时，才能把 loop_end 设为 true；"
-                        "只要 loop_end 是 true，tool_calls 就必须是空数组；"
+                        "也就是说，你下一轮计划的tool_calls为空时，才能把 loop_end 设为 true；"
                         "只要你后续还打算继续做任何工作，loop_end 就必须是 false；"
                         "planned_actions 只写本轮 tool_calls 实际会执行的动作；"
                         "donelist 必须写成到当前这一轮为止已经完成的事项列表，而不是下一轮计划；"
