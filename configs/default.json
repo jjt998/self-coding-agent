@@ -7,7 +7,7 @@
     "timeout_seconds": 100
   },
   "runtime": {
-    "max_steps": 10,
+    "max_steps": 15,
     "trace_level": "standard"
   },
   "context": {

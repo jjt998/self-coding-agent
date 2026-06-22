@@ -10,7 +10,7 @@
 
 - 当前 loop 已从 `ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize` 调整为 `ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize`。
 - `verify` 现在只会在求解阶段退出后执行一次，验证结果不再回灌给后续模型轮次。
-- `ModelDecision` 已新增 `loop_end`，用于让模型显式表达“当前是否真的已经不再需要任何后续工作”；只有后续不再读、改、跑命令、看 diff 或补充验证时才允许设为 `true`，并且同轮 `tool_calls` 必须为空。
+- `ModelDecision` 已新增 `ready_to_finalize`，用于让模型显式表达“当前是否认为求解已完成”。
 - Runtime 已新增“连续两次空 `tool_calls`”收口信号；命中后会直接退出求解阶段并进入最终验证。
 - trace 已新增 `solve_loop_exit_detected`，`run_finished.stop_reason.details` 已补充 `solve_loop_exit_reason`、`final_verification_passed` 和 `consecutive_empty_tool_call_count`。
 - `previous_verification` 已从模型输入中移除，`previous_reflect.verification` 也已从事实反馈中移除。
@@ -115,7 +115,7 @@
   - 当前 `verify_rules` 第二版已补齐一批更贴近真实任务的断言：命令 stdout/stderr 不包含检查、文件不存在检查、文件最小/最大行数检查
   - 回归测试新增覆盖：负向命令输出检查、文件不存在检查、文件行数上下界检查，以及对应 task spec 字段解析
   - 已重构 `src/model.py`，移除 `rule_based` adapter，当前只支持 `openai_compatible` 决策层
-  - 当前 OpenAI 兼容决策层会调用 `/chat/completions`，并要求模型返回 `summary`、`rationale`、`planned_actions`、`donelist`、`tool_calls` JSON
+  - 当前 OpenAI 兼容决策层会调用 `/chat/completions`，并要求模型返回 `summary`、`rationale`、`planned_actions`、`cross_round_plan`、`tool_calls` JSON
   - 当前模型工具计划只允许 `search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`，且 `tool_input` 必须是对象，并会校验字段名、必填字段和字段类型
   - `src/loop.py` 的 `plan` 阶段现已捕获模型配置、请求和响应异常，并以 `stop_reason.code = model_error` 结束 run
   - `model_decision_failed` 已进入 trace，错误 details 包含 provider、model name、error type 和 error message，不记录 API key
@@ -269,12 +269,10 @@
 
 ### Phase 9 本轮新增：跨轮计划与工具入参类型校验
 
-- `ModelDecision.donelist` 当前已重定义为累计 done list，用于表达“到当前轮为止已经完成了什么”；`planned_actions` 明确收敛为本轮 `tool_calls` 的可读说明，不再承担跨轮任务队列职责。
-- `runtime_feedback.previous_donelist` 当前回填的是上一轮累计 done list，而不是下一轮计划，第二轮及后续 plan 会据此减少重复兜圈。
-- harness 会自动合并历史 done list 与本轮模型返回，避免模型漏写后把既有完成事项覆盖掉。
-- OpenAI compatible 请求中的 `decision_schema` 已更新为：`tool_calls` 是唯一执行源、`planned_actions` 是本轮说明、`donelist` 是累计已完成事项。
+- `ModelDecision` 新增 `cross_round_plan`，用于表达跨轮安排；`planned_actions` 明确收敛为本轮 `tool_calls` 的可读说明，不再承担跨轮任务队列职责。
+- `runtime_feedback` 新增 `previous_cross_round_plan`，第二轮及后续 plan 能看到上一轮模型给出的跨轮安排。
+- OpenAI compatible 请求新增 `decision_schema`，结构化说明 `tool_calls` 是唯一执行源、`planned_actions` 是本轮说明、`cross_round_plan` 是跨轮计划。
 - `model_decision` trace、plan state result、finalize 摘要、stop reason details 和 report 均会展示或保留跨轮计划。
 - 工具 schema 校验已从字段名扩展到字段类型，非法类型会进入 `ModelResponseError` / `model_error`，例如 `apply_patch.new_text = null` 不会再导致工具层 traceback。
 - `apply_patch` 工具本身也增加防御式非法输入返回，统一为 `ToolExecution(ok=false, error=invalid_tool_input)`。
 - 本轮保持边界：不新增 verify rule，不修改 loop 轮数，不做 `planned_actions` 与 `tool_calls` 的一致性强诊断。
-

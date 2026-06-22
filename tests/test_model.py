@@ -38,8 +38,9 @@ def _valid_decision() -> dict:
     return {
         "summary": "已生成真实模型决策。",
         "rationale": "先搜索任务相关文本。",
+        "loop_end": False,
         "planned_actions": ["搜索相关文件"],
-        "cross_round_plan": ["下一轮根据验证结果继续调整。"],
+        "donelist": ["已搜索任务相关文本"],
         "tool_calls": [
             {
                 "tool_name": "search_text",
@@ -152,12 +153,15 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
     assert user_payload["tool_schema"]["replace_lines"]["required"] == ["path", "start_line", "end_line", "new_text"]
     assert user_payload["tool_schema"]["replace_lines"]["properties"]["new_text"]["type"] == "string"
     assert user_payload["tool_schema"]["search_text"]["optional"] == ["limit"]
-    assert "cross_round_plan" in user_payload["decision_schema"]
+    assert "loop_end" in user_payload["decision_schema"]
+    assert "donelist" in user_payload["decision_schema"]
     assert "本轮 tool_calls" in user_payload["decision_schema"]["planned_actions"][0]
+    assert "后续不再需要做任何读取、修改、命令检查、diff 检查或补充验证" in user_payload["decision_schema"]["loop_end"]
+    assert "tool_calls 必须为空数组" in user_payload["decision_schema"]["loop_end"]
     assert decision.provider == "openai_compatible"
     assert decision.model_name == "demo-model"
     assert decision.planned_actions == ["搜索相关文件"]
-    assert decision.cross_round_plan == ["下一轮根据验证结果继续调整。"]
+    assert decision.donelist == ["已搜索任务相关文本"]
     assert decision.tool_calls[0].tool_name == "search_text"
     assert decision.tool_calls[0].tool_input == {"query": "Demo", "limit": 5}
     assert decision.token_usage.available is False
@@ -217,11 +221,17 @@ def test_openai_compatible_adapter_includes_runtime_feedback(monkeypatch) -> Non
         task_type="general",
         context_snapshot=None,
         config_data={},
-        runtime_feedback={"previous_cross_round_plan": ["继续读取 README.md"]},
+        runtime_feedback={
+            "previous_rationale": "上一轮先读 README，再确认修改点。",
+            "previous_donelist": ["已读取 README.md"],
+        },
     )
 
     user_payload = json.loads(captured["body"]["messages"][-1]["content"])
-    assert user_payload["runtime_feedback"] == {"previous_cross_round_plan": ["继续读取 README.md"]}
+    assert user_payload["runtime_feedback"] == {
+        "previous_rationale": "上一轮先读 README，再确认修改点。",
+        "previous_donelist": ["已读取 README.md"],
+    }
     assert "tool_schema" in user_payload
 
 
@@ -249,7 +259,7 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
             "signals": ["failed_tool_observed"],
             "failed_tools": [{"tool_name": "apply_patch", "error": "old_text_not_found"}],
         },
-        "previous_cross_round_plan": ["先修复失败 patch，再运行验证"],
+        "previous_donelist": ["已修复失败 patch", "已运行验证命令"],
     }
     adapter.decide(
         task="Demo",
@@ -263,11 +273,17 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert user_payload["runtime_feedback"] == runtime_feedback
     prompt_text = "\n".join(message["content"] for message in captured["body"]["messages"] if message["role"] == "system")
     assert "runtime_feedback.previous_reflect" in prompt_text
+    assert "runtime_feedback.previous_rationale" in prompt_text
     assert "file_context_cache" in prompt_text
     assert "最近五次读取结果" in prompt_text
     assert "cache_status=stale" in prompt_text
-    assert "previous_cross_round_plan" in prompt_text
-    assert "cross_round_plan" in prompt_text
+    assert "previous_donelist" in prompt_text
+    assert "donelist" in prompt_text
+    assert "loop_end" in prompt_text
+    assert "后续不再需要做任何读取、修改、命令检查、diff 检查或补充验证" in prompt_text
+    assert "loop_end 是 true，tool_calls 就必须是空数组" in prompt_text
+    assert "已经完成的事项列表" in prompt_text
+    assert "不是下一轮计划" in prompt_text
     assert "planned_actions" in prompt_text
     assert "ASCII stdout/stderr" in prompt_text
     assert "content_mode=\"full\"" in prompt_text
@@ -447,8 +463,9 @@ def test_openai_compatible_adapter_rejects_tool_input_type_mismatch(monkeypatch)
                 {
                     "summary": "修复文件",
                     "rationale": "new_text 不能是 null。",
+                    "loop_end": False,
                     "planned_actions": ["本轮尝试 patch"],
-                    "cross_round_plan": [],
+                    "donelist": [],
                     "tool_calls": [
                         {
                             "tool_name": "apply_patch",
@@ -488,8 +505,9 @@ def test_openai_compatible_adapter_rejects_new_tool_input_type_mismatch(monkeypa
                 {
                     "summary": "按行替换文件",
                     "rationale": "new_text 不能是 null。",
+                    "loop_end": False,
                     "planned_actions": ["本轮尝试按行替换"],
-                    "cross_round_plan": [],
+                    "donelist": [],
                     "tool_calls": [
                         {
                             "tool_name": "replace_lines",
@@ -525,6 +543,47 @@ def test_openai_compatible_adapter_rejects_new_tool_input_type_mismatch(monkeypa
         assert error.details["actual_type"] == "NoneType"
     else:
         raise AssertionError("invalid replace_lines new_text should raise ModelResponseError")
+
+
+def test_openai_compatible_adapter_rejects_loop_end_true_with_non_empty_tool_calls(monkeypatch) -> None:
+    def fake_urlopen(request, timeout):
+        return _FakeHttpResponse(
+            _openai_response(
+                {
+                    "summary": "结束求解",
+                    "rationale": "已经不需要继续工作。",
+                    "loop_end": True,
+                    "planned_actions": ["读取 README"],
+                    "donelist": ["已完成全部工作"],
+                    "tool_calls": [
+                        {
+                            "tool_name": "read_file",
+                            "tool_input": {"path": "README.md"},
+                        }
+                    ],
+                }
+            )
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", raising=False)
+    monkeypatch.setattr(model_module, "urlopen", fake_urlopen)
+    adapter = OpenAICompatibleModelAdapter(
+        provider="openai_compatible",
+        model_name="demo-model",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+        timeout_seconds=7,
+    )
+
+    try:
+        adapter.decide(task="检查 README", task_type="general", context_snapshot=None, config_data={})
+    except ModelResponseError as error:
+        assert error.details["field_path"] == "loop_end"
+        assert error.details["tool_call_count"] == 1
+        assert error.details["loop_end"] is True
+    else:
+        raise AssertionError("loop_end=true with non-empty tool_calls should raise ModelResponseError")
 
 
 def test_openai_compatible_adapter_raises_on_os_error(monkeypatch) -> None:
@@ -689,3 +748,4 @@ class _BytesBody:
 
     def read(self) -> bytes:
         return self.body
+

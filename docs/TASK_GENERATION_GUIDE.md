@@ -180,7 +180,7 @@ AI 应按以下顺序执行：
 - 下一轮模型没有利用上一轮失败事实。
 - feedback 过度主观，替模型下判断。
 - feedback 缺少关键源码、失败工具、验证失败细节。
-- `cross_round_plan` 没有承接跨轮意图。
+- `donelist` 没有承接跨轮意图。
 
 任务应遵守原则：harness 压缩事实，LLM 解释事实。
 
@@ -306,3 +306,4 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli `
 ## 一句话准则
 
 下一批任务不是从功能清单里“挑一个好看的”，而是从真实 run 的失败证据里提炼一个能被测试和文档固化的 harness 改进闭环。
+

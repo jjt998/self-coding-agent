@@ -76,8 +76,8 @@ class RuntimeState:
     context_snapshot: ContextSnapshot | None = None
     model_decision: ModelDecision | None = None
     model_decisions: list[ModelDecision] = field(default_factory=list)
-    cross_round_plan: list[str] = field(default_factory=list)
-    cross_round_plan_history: list[list[str]] = field(default_factory=list)
+    donelist: list[str] = field(default_factory=list)
+    donelist_history: list[list[str]] = field(default_factory=list)
     tool_executions: list[ToolExecution] = field(default_factory=list)
     recent_tool_executions: list[ToolExecution] = field(default_factory=list)
     file_context_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -212,7 +212,7 @@ class LoopOrchestrator:
             runtime_state.consecutive_empty_tool_call_count = 0
 
         reason = ""
-        if decision and decision.ready_to_finalize:
+        if decision and decision.loop_end:
             reason = "model_declared_ready"
         elif runtime_state.consecutive_empty_tool_call_count >= 2:
             reason = "consecutive_empty_tool_calls"
@@ -229,7 +229,7 @@ class LoopOrchestrator:
                 payload={
                     "iteration": runtime_state.current_iteration,
                     "solve_loop_exit_reason": reason,
-                    "ready_to_finalize": bool(decision.ready_to_finalize) if decision else False,
+                    "loop_end": bool(decision.loop_end) if decision else False,
                     "tool_call_count": tool_call_count,
                     "consecutive_empty_tool_call_count": runtime_state.consecutive_empty_tool_call_count,
                 },
@@ -309,7 +309,7 @@ class LoopOrchestrator:
             "changed_files": runtime_state.changed_files,
             "failed_tool_count": runtime_state.failed_tool_count,
             "reflect_feedback": dict(runtime_state.reflect_feedback),
-            "cross_round_plan": list(runtime_state.cross_round_plan),
+            "donelist": list(runtime_state.donelist),
             "token_usage": dict(runtime_state.token_usage),
         }
 
@@ -388,13 +388,16 @@ class LoopOrchestrator:
         runtime_state.current_state = to_state.value
 
     def _build_runtime_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """下一轮只传事实型 reflect 反馈和跨轮计划。"""
+        """下一轮只传事实型 reflect 反馈和累计已完成事项。"""
         if runtime_state.current_iteration <= 1 and not runtime_state.reflect_feedback:
             return {}
-        return {
+        runtime_feedback = {
             "previous_reflect": self._build_previous_reflect(runtime_state=runtime_state),
-            "previous_cross_round_plan": list(runtime_state.cross_round_plan),
+            "previous_donelist": list(runtime_state.donelist),
         }
+        if runtime_state.model_decision and runtime_state.model_decision.rationale:
+            runtime_feedback["previous_rationale"] = runtime_state.model_decision.rationale
+        return runtime_feedback
 
     def _build_previous_reflect(self, runtime_state: RuntimeState) -> dict[str, Any]:
         """返回上一轮 reflect 事实，并移除旧的 verification 字段。"""
@@ -511,7 +514,78 @@ class LoopOrchestrator:
             ]:
                 if field_name in output:
                     summary[field_name] = output[field_name]
+        if execution.tool_name == "run_command":
+            summary.update(self._build_run_command_summary(execution=execution))
         return summary
+
+    def _build_run_command_summary(self, execution: ToolExecution) -> dict[str, Any]:
+        """为命令工具生成高信号摘要，尤其保留失败 stderr 和 traceback 线索。"""
+        output = execution.tool_output
+        stdout_text = self._truncate_model_feedback_text(output.get("stdout"), limit=1200)
+        stderr_text = self._truncate_model_feedback_text(output.get("stderr"), limit=2000)
+        summary: dict[str, Any] = {}
+        if stdout_text:
+            summary["stdout_excerpt"] = stdout_text
+        if stderr_text:
+            summary["stderr_excerpt"] = stderr_text
+
+        traceback_summary = self._extract_python_traceback_summary(stderr_text)
+        if traceback_summary:
+            summary["traceback_summary"] = traceback_summary
+            summary.update(traceback_summary)
+        return summary
+
+    def _extract_python_traceback_summary(self, stderr_text: str) -> dict[str, Any]:
+        """从 Python traceback 中提取异常类型、文件、行号和关键符号。"""
+        if not isinstance(stderr_text, str) or "Traceback" not in stderr_text:
+            return {}
+
+        frame_matches = list(
+            re.finditer(
+                r'File "(?P<file>[^"]+)", line (?P<line>\d+), in (?P<func>[^\n]+)',
+                stderr_text,
+            )
+        )
+        last_frame = frame_matches[-1] if frame_matches else None
+
+        exception_line = ""
+        for line in reversed(stderr_text.splitlines()):
+            stripped = line.strip()
+            if stripped:
+                exception_line = stripped
+                break
+        if not exception_line:
+            return {}
+
+        exception_type = exception_line.split(":", 1)[0].strip()
+        exception_message = exception_line.split(":", 1)[1].strip() if ":" in exception_line else ""
+        traceback_summary: dict[str, Any] = {
+            "exception_type": exception_type,
+            "exception_message": self._truncate_model_feedback_text(exception_message, limit=400),
+        }
+        if last_frame:
+            traceback_summary["file"] = last_frame.group("file")
+            traceback_summary["line_number"] = int(last_frame.group("line"))
+            traceback_summary["function_name"] = last_frame.group("func").strip()
+
+        failing_symbol = self._extract_failing_symbol(exception_type=exception_type, exception_message=exception_message)
+        if failing_symbol:
+            traceback_summary["failing_symbol"] = failing_symbol
+        return traceback_summary
+
+    def _extract_failing_symbol(self, *, exception_type: str, exception_message: str) -> str:
+        """尽量从常见 Python 异常文案中提取关键失败符号。"""
+        if not exception_message:
+            return ""
+
+        quoted_match = re.search(r"'([^']+)'", exception_message)
+        if exception_type in {"NameError", "KeyError", "AttributeError"} and quoted_match:
+            return quoted_match.group(1)
+
+        syntax_match = re.search(r"invalid syntax(?:.*near)?\s+(.+)$", exception_message)
+        if exception_type == "SyntaxError" and syntax_match:
+            return syntax_match.group(1).strip()
+        return ""
 
     def _build_read_file_excerpt_summary(
         self,
@@ -785,7 +859,7 @@ class LoopOrchestrator:
         }
 
     def _run_plan(self, runtime_state: RuntimeState, config_data: dict[str, Any]) -> dict[str, Any]:
-        """Generate one model decision and record solve-loop diagnostics for this round."""
+        """生成一轮模型决策，并把累计 done list 一并落进运行时状态。"""
         model_adapter = build_model_adapter(config_data=config_data)
         runtime_feedback = self._build_runtime_feedback(runtime_state=runtime_state)
         reflect_feedback_summary = self._summarize_reflect_feedback_for_trace(runtime_feedback=runtime_feedback)
@@ -823,8 +897,13 @@ class LoopOrchestrator:
                     },
                 )
             )
-        runtime_state.cross_round_plan = list(runtime_state.model_decision.cross_round_plan)
-        runtime_state.cross_round_plan_history.append(list(runtime_state.model_decision.cross_round_plan))
+        merged_done_list = self._merge_cross_round_done_list(
+            previous_done_list=runtime_state.donelist,
+            current_done_list=runtime_state.model_decision.donelist,
+        )
+        runtime_state.model_decision.donelist = merged_done_list
+        runtime_state.donelist = list(merged_done_list)
+        runtime_state.donelist_history.append(list(merged_done_list))
         runtime_state.model_decisions.append(runtime_state.model_decision)
         next_empty_count = (
             runtime_state.consecutive_empty_tool_call_count + 1
@@ -847,15 +926,31 @@ class LoopOrchestrator:
         return {
             "summary": runtime_state.model_decision.summary,
             "planned_actions": list(runtime_state.model_decision.planned_actions),
-            "cross_round_plan": list(runtime_state.model_decision.cross_round_plan),
+            "donelist": list(runtime_state.model_decision.donelist),
             "rationale": runtime_state.model_decision.rationale,
             "provider": runtime_state.model_decision.provider,
             "model_name": runtime_state.model_decision.model_name,
-            "ready_to_finalize": runtime_state.model_decision.ready_to_finalize,
+            "loop_end": runtime_state.model_decision.loop_end,
             "token_usage": runtime_state.model_decision.token_usage.to_dict(),
             "run_token_usage": dict(runtime_state.token_usage),
             "consecutive_empty_tool_call_count": next_empty_count,
         }
+
+    def _merge_cross_round_done_list(
+        self,
+        previous_done_list: list[str],
+        current_done_list: list[str],
+    ) -> list[str]:
+        """把历史 done list 与本轮结果合并，避免模型漏写后丢失已完成事项。"""
+        merged_done_list: list[str] = []
+        seen_items: set[str] = set()
+        for item in [*previous_done_list, *current_done_list]:
+            normalized_item = str(item).strip()
+            if not normalized_item or normalized_item in seen_items:
+                continue
+            merged_done_list.append(normalized_item)
+            seen_items.add(normalized_item)
+        return merged_done_list
 
     def _run_act(self, runtime_state: RuntimeState, tool_runner: CoreToolRunner) -> dict[str, Any]:
         """执行模型为当前轮规划的工具调用。"""
@@ -936,7 +1031,7 @@ class LoopOrchestrator:
             "max_steps": runtime_state.max_steps,
             "tool_execution_count": len(runtime_state.tool_executions),
             "model_decision_count": len(runtime_state.model_decisions),
-            "cross_round_plan": list(runtime_state.cross_round_plan),
+            "donelist": list(runtime_state.donelist),
             "completed_states_before_finalize": list(runtime_state.completed_states),
             "token_usage": dict(runtime_state.token_usage),
         }
@@ -1115,22 +1210,20 @@ class LoopOrchestrator:
             if ok is False:
                 failed_execution_ids.add(index)
                 failed_tools.append(
-                    {
-                        "tool_name": execution.tool_name,
-                        "error": tool_output.get("error", ""),
-                        "returncode": tool_output.get("returncode"),
-                    }
+                    self._summarize_tool_execution(
+                        execution=execution,
+                        recent_executions=runtime_state.recent_tool_executions,
+                    )
                 )
 
             if execution.tool_name == "run_command" and tool_output.get("returncode", 0) != 0:
                 if index not in failed_execution_ids:
                     failed_execution_ids.add(index)
                     failed_tools.append(
-                        {
-                            "tool_name": execution.tool_name,
-                            "error": tool_output.get("stderr", ""),
-                            "returncode": tool_output.get("returncode"),
-                        }
+                        self._summarize_tool_execution(
+                            execution=execution,
+                            recent_executions=runtime_state.recent_tool_executions,
+                        )
                     )
 
         changed_files = list(dict.fromkeys(changed_files))

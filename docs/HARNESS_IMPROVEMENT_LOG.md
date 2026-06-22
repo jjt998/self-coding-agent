@@ -25,7 +25,7 @@
 ## 当前已知问题
 
 - `read_file` 关键片段反馈已经在 demo bugfix 任务中观察到正向效果，但还需要更多任务验证它对不同文件长度、不同 patch 形态是否稳定。
-- `planned_actions` 已重新定位为本轮 `tool_calls` 的可读说明，不再作为下一轮计划来源；仍需继续观察模型是否能稳定把跨轮安排写入 `cross_round_plan`。
+- `planned_actions` 已重新定位为本轮 `tool_calls` 的可读说明，不再作为下一轮计划来源；当前继续观察模型是否能稳定把累计已完成事项写入 `donelist`。
 - `run_command` 与 `git_diff` 的下一轮摘要仍偏轻量，后续可以继续补 stdout 关键行和 diff 短摘要，帮助模型修复“patch 成功但语义仍错”的情况。
 - Windows CLI 任务中，模型仍可能输出 emoji 或中文符号，导致 GBK 控制台出现 `UnicodeEncodeError`；后续应把“默认使用 ASCII stdout/stderr”固化到 prompt 或 runtime rule。
 
@@ -36,7 +36,7 @@
 - 模型是否减少编造 `apply_patch.old_text` 的情况。
 - 同一个 demo bugfix 任务是否更容易在第二轮产生真实 diff。
 - `trace.jsonl` 是否保持可读，没有被大段文件全文淹没。
-- `cross_round_plan` 是否能稳定承接跨轮安排，并通过 `runtime_feedback.previous_cross_round_plan` 影响下一轮 plan。
+- `donelist` 是否能稳定承接累计已完成事项，并通过 `runtime_feedback.previous_donelist` 影响下一轮 plan。
 - 工具入参类型校验是否能稳定把非法工具输入收口为 `ModelResponseError/model_error`，避免 Python traceback 泄漏到工具层。
 
 ## 改进记录
@@ -45,7 +45,7 @@
 
 - Situation（背景）：demo todo app 的真实 eval run `eval-demo_todo_app_complete_task_batch-20260619-180233/run-20260619-180233-2890e1a3` 暴露了一个典型问题：第 1 轮模型只执行 `read_file(todo_app.py)` 和 `read_file(tasks.json)`，这是合理的信息收集；第 2 轮模型尝试 `apply_patch`，但因为 `old_text_not_found` 失败，随后 `git_diff.changed_file_count = 0`。旧链路里 `observe` 会承担“是否有进展”的判断，容易把纯读取轮和真正失败的修改轮都粗糙归类为“无进展”。
 - Task（目标）：把 loop 从 `plan -> act -> observe -> verify/reflect` 收敛为 `plan -> act -> reflect -> verify`，让 harness 负责保真地压缩事实，让 LLM 自己解释上一轮是否有效并重规划；同时避免把当前轮数、剩余轮数或最大轮数暴露给模型。
-- Action（动作）：删除独立 `observe` 状态、`progress_observed` 事件和 `progress_made` 判断；每轮 `act` 后固定进入 `reflect`；`reflect_feedback` 只记录 `observation`、`signals`、`failed_tools`、`recent_tool_results`、`verification` 等事实。新增 `no_diff_after_edit_attempt` signal：只有本轮存在修改类工具且最新 `git_diff.changed_file_count == 0` 时才产生；纯读取/搜索轮不产生 no-diff signal。下一轮模型只接收 `runtime_feedback.previous_reflect`、兼容保留的 `previous_verification` 和 `previous_cross_round_plan`，并从模型请求中移除轮数预算字段。
+- Action（动作）：删除独立 `observe` 状态、`progress_observed` 事件和 `progress_made` 判断；每轮 `act` 后固定进入 `reflect`；`reflect_feedback` 只记录 `observation`、`signals`、`failed_tools`、`recent_tool_results`、`verification` 等事实。新增 `no_diff_after_edit_attempt` signal：只有本轮存在修改类工具且最新 `git_diff.changed_file_count == 0` 时才产生；纯读取/搜索轮不产生 no-diff signal。下一轮模型只接收 `runtime_feedback.previous_reflect`、兼容保留的 `previous_verification` 和 `previous_donelist`，并从模型请求中移除轮数预算字段。
 - Result（结果）：在真实 run 中，第 1 轮纯读取被压缩为 `signals=[]`、`changed_files=[]`、`failed_tool_count=0`，没有被 harness 误判；第 2 轮 patch 失败被压缩为 `signals=["no_diff_after_edit_attempt", "failed_tool_observed"]`，并在 `recent_tool_results` 中保留 `read_file(todo_app.py, excerpt_reason=old_text_not_found_candidate)` 与 `apply_patch(todo_app.py, error=old_text_not_found)`，比旧的“无进展”判断更可解释。回归测试已通过：`tests/test_loop.py tests/test_model.py tests/test_cli.py -q` 为 `47 passed`，全量 `pytest -q` 为 `88 passed`。
 - Benefit（收益）：上下文反馈从“harness 替模型下判断”变成“harness 保真压缩事实”，降低了纯读取/搜索轮被误判的风险；失败修改轮也能用更精确的 signal 表达“尝试编辑但没有 diff”。下一轮模型看到的是事实包而不是硬约束或预算提示，更符合真实 agent harness 的职责边界，也让 trace/report 的排查顺序稳定为 `plan -> act -> reflect -> verify`。
 - 是否固化：已固化为当前 Phase 9 loop 内核行为，并同步更新 README、架构书、使用手册、RUN_CHAIN.html、当前状态和进度文档；后续观察重点是模型是否能更稳定利用 `previous_reflect.recent_tool_results` 中的源码片段与失败工具摘要完成重规划。
@@ -61,7 +61,7 @@
 ### 2026-06-19：多轮 reflect 反馈帮助模型从 patch 失败和 Windows 编码失败中恢复
 
 - 问题现象：demo todo complete 任务 `run-20260619-155525-12419f63` 中，模型第 1 轮只读文件没有产生进展；第 2 轮两次 `apply_patch` 因 `old_text_not_found` 失败；第 3 轮成功实现 `complete` 子命令后，验证仍因 Windows GBK 控制台无法输出 emoji 触发 `UnicodeEncodeError`；第 4 轮尝试修复非 ASCII 输出时又遇到一次 `old_text_not_found`。
-- 改进动作：现有 harness 将每轮 `model_raw_response`、`model_decision`、`recent_tool_results`、`progress_observed`、`reflect_feedback`、失败验证检查和失败工具证据持续写入 trace，并通过 `runtime_feedback.previous_reflect_feedback` 与 `previous_cross_round_plan` 传给下一轮 plan；`reflect_feedback.replan_constraints.must_address` 持续要求模型处理 `fix_failing_verification_checks`、`fix_failed_tool_or_command` 和 `use_exact_old_text_from_read_file`。
+- 改进动作：现有 harness 将每轮 `model_raw_response`、`model_decision`、`recent_tool_results`、`progress_observed`、`reflect_feedback`、失败验证检查和失败工具证据持续写入 trace，并通过 `runtime_feedback.previous_reflect_feedback` 与 `previous_donelist` 传给下一轮 plan；`reflect_feedback.replan_constraints.must_address` 持续要求模型处理 `fix_failing_verification_checks`、`fix_failed_tool_or_command` 和 `use_exact_old_text_from_read_file`。
 - 预期改善：模型即使前几轮只读文件、patch 失败或实现后验证失败，也能通过下一轮反馈看到明确失败原因和源码证据，继续重规划而不是停在一次失败上；报告和 trace 能解释每一轮为什么失败、下一轮如何调整。
 - 实际反馈：真实 eval run `run-20260619-155525-12419f63` 最终通过。该 run 共 5 轮、4 次 reflect、18 次工具调用、5 次验证，最终 `success_rate=1.0`、`outcome=passed_cleanly`、`stop_reason=completed`。第 5 轮模型读取真实源码后成功把 `✅ 已完成任务` / `❌ 错误` 等非 ASCII 输出替换为 `Completed task #{task_id}: ...` 与 `Error: task #{task_id} not found`，`python todo_app.py complete 1` 返回 0，`json_file_value_equals` 与 diff 规则也全部通过。
 - 是否固化：已确认这是一次明确的 harness 改进成功案例，说明多轮 reflect、最近工具结果摘要、原始模型返回日志和跨轮计划能支撑真实任务从连续失败中恢复；新增待固化经验是 Windows CLI 任务默认应优先使用 ASCII stdout/stderr，除非任务明确要求 Unicode。
@@ -69,9 +69,9 @@
 ### 2026-06-19：结构化工具 schema、跨轮计划与工具入参校验固化
 
 - 问题现象：模型曾把 `read_file` 入参写成不存在的 `limit`，也曾把 `apply_patch.new_text` 返回为 `null`，导致非法工具输入一路打到工具层甚至触发 Python traceback；同时，旧 prompt 主要用自然语言描述工具约束，模型不容易稳定理解每个工具的准确入参。另一个语义混淆是 `planned_actions` 被误当作跨轮计划，但它本质更适合表达本轮工具调用意图。
-- 改进动作：模型请求中加入结构化 `decision_schema` 与结构化可用工具列表/入参 schema，而不是只依赖自然语言约束；新增 `cross_round_plan` 表示跨轮整体计划，并通过 `runtime_feedback.previous_cross_round_plan` 传给下一轮模型；明确 `planned_actions` 只描述本轮 `tool_calls` 实际要做的事情，主要用于 trace/report 可读性，不作为下一轮 plan 的状态来源；新增工具入参类型校验，使 `apply_patch.new_text = null` 这类非法输入收口为 `ModelResponseError/model_error`；`CoreToolRunner.apply_patch()` 也增加防御式 `invalid_tool_input` 返回；`model_decision` trace、plan state result 和 report 模型摘要均展示 `cross_round_plan`。
-- 预期改善：模型更容易按准确 schema 调用工具，非法输入能在模型响应层被清晰诊断，不再变成底层 traceback；跨轮规划和本轮行动分工更清楚，下一轮模型可以从 `previous_cross_round_plan` 继承整体安排，而不是误读上一轮 `planned_actions`。
-- 实际反馈：相关改动后，全量测试已通过 `89 passed`；后续真实 demo complete run 中，`cross_round_plan` 在每轮模型决策和报告里可见，并与 `runtime_feedback.previous_cross_round_plan` 一起支撑第 5 轮继续修复直到验证通过。工具输入非法时现在会以模型响应错误收口，避免 `apply_patch.new_text = null` 继续打到 `Path.write_text()` 产生 `TypeError` traceback。
+- 改进动作：模型请求中加入结构化 `decision_schema` 与结构化可用工具列表/入参 schema，而不是只依赖自然语言约束；新增 `donelist` 表示跨轮整体计划，并通过 `runtime_feedback.previous_donelist` 传给下一轮模型；明确 `planned_actions` 只描述本轮 `tool_calls` 实际要做的事情，主要用于 trace/report 可读性，不作为下一轮 plan 的状态来源；新增工具入参类型校验，使 `apply_patch.new_text = null` 这类非法输入收口为 `ModelResponseError/model_error`；`CoreToolRunner.apply_patch()` 也增加防御式 `invalid_tool_input` 返回；`model_decision` trace、plan state result 和 report 模型摘要均展示 `donelist`。
+- 预期改善：模型更容易按准确 schema 调用工具，非法输入能在模型响应层被清晰诊断，不再变成底层 traceback；跨轮规划和本轮行动分工更清楚，下一轮模型可以从 `previous_donelist` 继承整体安排，而不是误读上一轮 `planned_actions`。
+- 实际反馈：相关改动后，全量测试已通过 `89 passed`；后续真实 demo complete run 中，`donelist` 在每轮模型决策和报告里可见，并与 `runtime_feedback.previous_donelist` 一起支撑第 5 轮继续修复直到验证通过。工具输入非法时现在会以模型响应错误收口，避免 `apply_patch.new_text = null` 继续打到 `Path.write_text()` 产生 `TypeError` traceback。
 - 是否固化：已固化为当前 harness 的模型接口与工具执行安全边界；后续继续观察结构化 schema 是否能减少未知入参、空值入参和本轮计划/跨轮计划混淆。
 
 ### 2026-06-19：Windows CLI 输出默认 ASCII 的 prompt/runtime rule 候选
@@ -97,3 +97,4 @@
 - Result（结果）：加入 runtime rule 后，最近一次同类任务真实 run `eval-demo_refactor_task_board_export_batch-20260621-015235` 成功通过，`success_rate=1.0`、`outcome=passed_cleanly`、`step_count=19`、`tool_call_count=15`、`average_total_tokens=52511`。新增回归用例也已通过：`tests/test_model.py -k refactor_runtime_rule -q` 为 `1 passed`，`tests/test_loop.py -k refactor_runtime_rule --basetemp ... -q` 为 `1 passed`。更大范围测试中暴露的 `read_file_range.max_lines` 旧断言和 Windows 临时目录清理问题与本次改动无关。
 - Benefit（收益）：这次改进没有改变模型主 prompt，却把 `refactor` 任务的默认编辑策略向“先兼容通过、后考虑清理”推进了一步。对于共享 helper 抽取、行为保持重构和大文件局部重构场景，模型更容易先完成一个可验证的最小闭环，而不是在同一轮里试图同时完成抽取、替换和删除，降低了语法自毁和长时间自我修复失败的风险。
 - 是否固化：已固化为当前 `refactor` 任务的 runtime rule 行为，但仍属于“强建议”而不是模型响应硬校验。后续继续观察：这条规则是否足以稳定压制“先删旧函数”的倾向；如果真实 run 中仍反复出现同类失败，再考虑升级为“runtime rule + prompt 模板 + reflect 风险信号”的三层约束。
+

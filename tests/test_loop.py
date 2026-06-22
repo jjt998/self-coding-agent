@@ -33,8 +33,9 @@ def _fake_model_response(tool_calls: list[dict] | None = None, usage: dict | Non
     decision = {
         "summary": "已生成真实模型决策。",
         "rationale": "按模型返回的工具计划执行。",
-        "ready_to_finalize": True,
+        "loop_end": False,
         "planned_actions": ["执行模型工具计划"],
+        "donelist": ["已执行模型工具计划"],
         "tool_calls": tool_calls
         or [
             {"tool_name": "search_text", "tool_input": {"query": "Run Evidence", "limit": 5}},
@@ -76,7 +77,7 @@ def _constraint_aware_rationale(runtime_feedback: dict | None, *, repeat_reason:
         return "首轮执行常规计划。"
     parts = [
         " ".join(str(item) for item in reflect_feedback.get("signals", [])),
-        " ".join(str(item) for item in (runtime_feedback or {}).get("previous_cross_round_plan", [])),
+        " ".join(str(item) for item in (runtime_feedback or {}).get("previous_donelist", [])),
     ]
     suffix = "，再次重复相同工具序列是因为测试需要保持同一工具计划。" if repeat_reason else ""
     return "读取 previous_reflect 事实：" + " ".join(item for item in parts if item).strip() + suffix
@@ -207,7 +208,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
 
     runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
         settings=settings,
-        config_data=_model_config(),
+        config_data={**_model_config(), "runtime": {"max_steps": 1}},
     )
 
     assert runtime_state.model_decision is not None
@@ -225,7 +226,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert runtime_state.failed_tool_count == 0
     assert runtime_state.reflect_triggered is True
     assert runtime_state.iteration_count == 1
-    assert runtime_state.max_steps == 2
+    assert runtime_state.max_steps == 1
     assert runtime_state.token_usage == {
         "prompt_tokens": 40,
         "completion_tokens": 10,
@@ -275,9 +276,9 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert ingest_payload["setup_command_count"] == 0
     assert ingest_payload["verify_command_count"] == 0
     assert ingest_payload["verify_rule_count"] == 1
-    assert ingest_payload["max_steps"] == 2
+    assert ingest_payload["max_steps"] == 1
     assert ingest_payload["config_name"] == "default"
-    assert ingest_payload["config_keys"] == ["model"]
+    assert ingest_payload["config_keys"] == ["model", "runtime"]
     assert ingest_payload["model_provider"] == "openai_compatible"
     assert ingest_payload["model_name"] == "demo-model"
     finalize_payload = next(event["payload"] for event in trace_events if event["event_type"] == "finalize_summary")
@@ -286,7 +287,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert finalize_payload["failed_tool_count"] == 0
     assert finalize_payload["reflect_count"] == 1
     assert finalize_payload["iteration_count"] == 1
-    assert finalize_payload["max_steps"] == 2
+    assert finalize_payload["max_steps"] == 1
     assert finalize_payload["tool_execution_count"] == 5
     assert finalize_payload["token_usage"]["total_tokens"] == 50
     assert finalize_payload["token_usage"]["complete"] is True
@@ -364,7 +365,7 @@ def test_loop_verification_uses_system_diff_snapshot_instead_of_model_git_diff(
 
     runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
         settings=settings,
-        config_data=_model_config(),
+        config_data={**_model_config(), "runtime": {"max_steps": 1}},
     )
 
     assert runtime_state.stop_reason is not None
@@ -1049,6 +1050,89 @@ def test_runtime_feedback_includes_full_small_read_file_content(
     assert read_summary["excerpt_reason"] == "full_file"
 
 
+def test_runtime_feedback_includes_run_command_stderr_and_python_traceback_summary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "boom.py").write_text("raise NameError(\"name 'owner_ok' is not defined\")\n", encoding="utf-8")
+    feedbacks: list[dict] = []
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-run-command-traceback-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            if runtime_feedback:
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="second",
+                    rationale="已经拿到失败 traceback。",
+                    planned_actions=["结束"],
+                    tool_calls=[],
+                    loop_end=True,
+                )
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="first",
+                rationale="执行会失败的 Python 命令。",
+                planned_actions=["运行失败命令"],
+                tool_calls=[
+                    PlannedToolCall(
+                        tool_name="run_command",
+                        tool_input={"command": [sys.executable, "boom.py"]},
+                    )
+                ],
+            )
+
+    def fake_verification(*, settings, tool_executions):
+        return VerificationResult(
+            passed=True,
+            summary="ok",
+            checks=[VerificationCheck(name="fake_verify", passed=True, detail="fake")],
+            details={"verification_mode": "fake"},
+        )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    settings = build_settings(
+        task="让 run_command 产生 Python traceback",
+        task_type="bug_fix",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data={**_model_config(), "runtime": {"max_steps": 2}},
+    )
+
+    previous_reflect = feedbacks[1]["previous_reflect"]
+    failed_tool = previous_reflect["failed_tools"][0]
+    recent_result = previous_reflect["recent_tool_results"][0]
+    assert failed_tool["tool_name"] == "run_command"
+    assert failed_tool["returncode"] != 0
+    assert "Traceback" in failed_tool["stderr_excerpt"]
+    assert failed_tool["exception_type"] == "NameError"
+    assert failed_tool["line_number"] == 1
+    assert failed_tool["failing_symbol"] == "owner_ok"
+    assert failed_tool["traceback_summary"]["exception_type"] == "NameError"
+    assert recent_result["tool_name"] == "run_command"
+    assert recent_result["exception_type"] == "NameError"
+    assert recent_result["failing_symbol"] == "owner_ok"
+
+
 def test_runtime_feedback_includes_large_read_file_structure_summary(
     tmp_path: Path,
     monkeypatch,
@@ -1166,7 +1250,7 @@ def test_runtime_feedback_includes_explicit_structure_summary_tool_result(
                     rationale="已经看到显式结构摘要。",
                     planned_actions=["结束"],
                     tool_calls=[],
-                    ready_to_finalize=True,
+                    loop_end=True,
                 )
             return ModelDecision(
                 provider=self.provider,
@@ -1417,7 +1501,7 @@ def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshe
                 rationale="重读文件，刷新缓存。",
                 planned_actions=["重新读取 app.py"],
                 tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "app.py"})],
-                ready_to_finalize=True,
+                loop_end=True,
             )
 
     def fake_verification(*, settings, tool_executions):
@@ -1873,7 +1957,7 @@ def test_loop_model_error_includes_safe_raw_response_excerpt_for_invalid_tool_ca
     assert "secret-test-key" not in json.dumps(failure_payload, ensure_ascii=False)
 
 
-def test_second_plan_receives_previous_cross_round_plan(tmp_path: Path, monkeypatch) -> None:
+def test_second_plan_receives_previous_donelist(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
@@ -1892,7 +1976,7 @@ def test_second_plan_receives_previous_cross_round_plan(tmp_path: Path, monkeypa
                 summary="fake decision",
                 rationale=_constraint_aware_rationale(runtime_feedback),
                 planned_actions=["本轮执行可观察文件修改"],
-                cross_round_plan=["如果验证失败，下一轮读取 README.md 后继续修复。"],
+                donelist=["已写入 run_evidence.md", "已查看当前 diff"],
                 tool_calls=[
                     PlannedToolCall(
                         tool_name="apply_patch",
@@ -1937,14 +2021,215 @@ def test_second_plan_receives_previous_cross_round_plan(tmp_path: Path, monkeypa
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert feedbacks[0] == {}
-    assert feedbacks[1]["previous_cross_round_plan"] == ["如果验证失败，下一轮读取 README.md 后继续修复。"]
+    assert feedbacks[1]["previous_donelist"] == ["已写入 run_evidence.md", "已查看当前 diff"]
     trace_events = [
         json.loads(line)
         for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
-    assert model_decision_payloads[0]["cross_round_plan"] == ["如果验证失败，下一轮读取 README.md 后继续修复。"]
+    assert model_decision_payloads[0]["donelist"] == ["已写入 run_evidence.md", "已查看当前 diff"]
+    assert model_decision_payloads[0]["loop_end"] is False
+
+
+def test_second_plan_receives_previous_rationale(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+    feedbacks: list[dict] = []
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-previous-rationale-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            feedbacks.append(runtime_feedback or {})
+            if not runtime_feedback:
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="first decision",
+                    rationale="先读取 README，再决定是否修改文件。",
+                    planned_actions=["读取 README"],
+                    donelist=["已读取 README.md"],
+                    tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "README.md"})],
+                )
+            return ModelDecision(
+                provider=self.provider,
+                model_name=self.model_name,
+                task_type=task_type,
+                summary="second decision",
+                rationale="已经看到上一轮 rationale。",
+                planned_actions=["结束"],
+                tool_calls=[],
+                loop_end=True,
+            )
+
+    def fake_verification(*, settings, tool_executions):
+        return VerificationResult(
+            passed=True,
+            summary="ok",
+            checks=[VerificationCheck(name="fake_verify", passed=True, detail="fake")],
+            details={},
+        )
+
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+
+    settings = build_settings(
+        task="验证上一轮 rationale 会进入下一轮 feedback",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data={**_model_config(), "runtime": {"max_steps": 2}},
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    assert feedbacks[0] == {}
+    assert feedbacks[1]["previous_rationale"] == "先读取 README，再决定是否修改文件。"
+    assert feedbacks[1]["previous_donelist"] == ["已读取 README.md"]
+
+
+def test_donelist_is_merged_as_global_done_list(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    decisions = iter(
+        [
+            ModelDecision(
+                provider="openai_compatible",
+                model_name="fake-done-list-model",
+                task_type="general",
+                summary="first decision",
+                rationale="先读 README，确认任务背景。",
+                planned_actions=["读取 README"],
+                donelist=["已读取 README.md"],
+                tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "README.md"})],
+            ),
+            ModelDecision(
+                provider="openai_compatible",
+                model_name="fake-done-list-model",
+                task_type="general",
+                summary="second decision",
+                rationale="继续补充 run 证据文件。",
+                planned_actions=["写入 run_evidence"],
+                donelist=["已写入 run_evidence.md"],
+                tool_calls=[
+                    PlannedToolCall(
+                        tool_name="apply_patch",
+                        tool_input={"path": "run_evidence.md", "old_text": None, "new_text": "# Run Evidence\n"},
+                    )
+                ],
+            ),
+            ModelDecision(
+                provider="openai_compatible",
+                model_name="fake-done-list-model",
+                task_type="general",
+                summary="third decision",
+                rationale="done list 已完整，可以收尾。",
+                planned_actions=["结束求解"],
+                tool_calls=[],
+                loop_end=True,
+            ),
+        ]
+    )
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-done-list-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            return next(decisions)
+
+    def fake_verification(*, settings, tool_executions):
+        return VerificationResult(
+            passed=True,
+            summary="ok",
+            checks=[VerificationCheck(name="fake_verify", passed=True, detail="fake")],
+            details={},
+        )
+
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+
+    settings = build_settings(
+        task="验证 donelist 会累计保留已完成事项",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data={**_model_config(), "runtime": {"max_steps": 3}},
+    )
+
+    assert runtime_state.donelist == ["已读取 README.md", "已写入 run_evidence.md"]
+    assert runtime_state.donelist_history[0] == ["已读取 README.md"]
+    assert runtime_state.donelist_history[1] == ["已读取 README.md", "已写入 run_evidence.md"]
+
+
+def test_loop_rejects_loop_end_true_with_non_empty_tool_calls(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    class FakeAdapter:
+        provider = "openai_compatible"
+        model_name = "fake-invalid-loop-end-model"
+
+        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+            raise loop_module.ModelResponseError(
+                "模型决策不合法：loop_end 为 true 时，tool_calls 必须为空数组。",
+                provider=self.provider,
+                model_name=self.model_name,
+                details={
+                    "field_path": "loop_end",
+                    "tool_call_count": 1,
+                    "loop_end": True,
+                },
+            )
+
+    monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
+
+    settings = build_settings(
+        task="验证 loop_end=true 时不能再带 tool_calls",
+        task_type="general",
+        repo_root=str(repo_root),
+        output_root=str(tmp_path / "runs"),
+        config_name="default",
+    )
+    run_dir = Path(settings.output_root) / settings.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.initialize(settings.to_dict())
+
+    runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
+        settings=settings,
+        config_data={**_model_config(), "runtime": {"max_steps": 2}},
+    )
+
+    assert runtime_state.stop_reason is not None
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MODEL_ERROR
+    assert runtime_state.stop_reason.details["field_path"] == "loop_end"
+    assert runtime_state.stop_reason.details["tool_call_count"] == 1
 def test_loop_injects_refactor_runtime_rule_into_context_snapshot(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -2016,7 +2301,7 @@ def test_loop_injects_refactor_runtime_rule_into_context_snapshot(tmp_path: Path
 
     runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
         settings=settings,
-        config_data=_model_config(),
+        config_data={**_model_config(), "runtime": {"max_steps": 1}},
     )
 
     assert runtime_state.verification_result is not None
@@ -2025,3 +2310,4 @@ def test_loop_injects_refactor_runtime_rule_into_context_snapshot(tmp_path: Path
     compat_rule = next(item for item in runtime_rule_entries if item["title"] == "兼容式重构优先原则")
     assert "未验证通过前不要删除旧函数" in compat_rule["summary"]
     assert "默认允许保留旧函数" in compat_rule["summary"]
+

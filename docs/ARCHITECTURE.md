@@ -284,11 +284,11 @@ model_decision:
   task_type:
   summary:
   rationale:
-  ready_to_finalize:
+  loop_end:
   planned_actions:
     - "本轮 tool_calls 实际会执行的动作说明"
-  cross_round_plan:
-    - "跨轮安排、后续轮次意图、暂不执行的计划"
+  donelist:
+    - "到当前轮为止已经完成的事项列表（累计 done list）"
   tool_calls:
     - tool_name:
       tool_input:
@@ -300,7 +300,8 @@ model_decision:
 
 - `tool_calls` 是唯一执行源，`act` 阶段只按这个数组调用工具。
 - `planned_actions` 是本轮可读计划说明，不是跨轮任务队列，也不驱动执行。
-- `cross_round_plan` 承载跨轮安排，下一轮会通过 `runtime_feedback.previous_cross_round_plan` 回填给模型。
+- `donelist` 当前承载累计已完成事项，下一轮会通过 `runtime_feedback.previous_donelist` 回填给模型，帮助模型记住“已经做过什么”。
+- `loop_end` 不是“差不多做完了”的软信号，而是“后续不再执行任何读取、修改、命令检查、diff 检查或补充验证”的硬收口信号；当它为 `true` 时，同轮 `tool_calls` 必须为空。
 - `raw_response_content` 只写入本地 trace，用于排查模型显式返回内容，不包含 provider 隐藏推理链。
 - `normalization_notes` 记录展示字段的宽容归一化，例如缺失 `planned_actions` 时从 `tool_calls` 派生说明。
 
@@ -430,9 +431,9 @@ final verify failed -> finalize(verification_failed)
 当前实现里，进入第二轮及后续 `plan` 的跨轮输入由 `runtime_feedback` 承载：
 
 - `previous_reflect`：上一轮事实反馈，包含 observation、signals、failed_tools、recent_tool_results、`file_context_cache`、`stale_file_paths` 和最近缓存失效诊断。
-- `previous_cross_round_plan`：上一轮模型给出的跨轮安排。
+- `previous_donelist`：到上一轮为止的累计已完成事项列表。
 
-这些字段共同组成下一轮模型的“运行上下文窗口”。其中 `previous_reflect.recent_tool_results`、`previous_reflect.file_context_cache` 和 `previous_cross_round_plan` 是为了减少模型在第二轮继续猜测源码或忘记跨轮安排；窗口中不会包含当前第几轮、还剩几轮或最大轮数。
+这些字段共同组成下一轮模型的“运行上下文窗口”。其中 `previous_reflect.recent_tool_results`、`previous_reflect.file_context_cache` 和 `previous_donelist` 是为了减少模型在第二轮继续猜测源码，或忘记已经完成的事项；窗口中不会包含当前第几轮、还剩几轮或最大轮数。
 
 `memory_context`
 
@@ -855,6 +856,7 @@ MVP 阶段不需要复杂存储后端，JSONL 和本地文件已经足够。
 - 如果 trace payload 策略不控制，trace 会很快变得噪音过多。
 - 如果过早放松 memory 写入规则，未来 run 会被污染。
 - 如果 success criteria 没有按任务类型区分，eval 会失去可信度。
-- 如果把可读计划说明和真实工具执行混为一谈，模型可能“文字上计划修复、实际只读文件”；当前通过 `planned_actions`、`cross_round_plan`、`tool_calls` 三字段拆分降低这个风险。
+- 如果把可读计划说明、累计完成记录和真实工具执行混为一谈，模型可能“文字上看起来很忙、实际只读文件”；当前通过 `planned_actions`、`donelist`、`tool_calls` 三字段拆分降低这个风险。
 
 MVP 架构选择故意偏保守，目标是在保证后续扩展点的同时，降低这些风险。
+

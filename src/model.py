@@ -162,16 +162,16 @@ class ModelTokenUsage:
 
 @dataclass(slots=True)
 class ModelDecision:
-    """保存一次任务级决策结果，包括计划说明和准备执行的工具步骤。"""
+    """保存一次任务级决策结果，包括本轮动作说明和累计已完成事项。"""
 
     provider: str
     model_name: str
     task_type: str
     summary: str
     rationale: str
-    ready_to_finalize: bool = False
+    loop_end: bool = False
     planned_actions: list[str] = field(default_factory=list)
-    cross_round_plan: list[str] = field(default_factory=list)
+    donelist: list[str] = field(default_factory=list)
     tool_calls: list[PlannedToolCall] = field(default_factory=list)
     token_usage: ModelTokenUsage = field(default_factory=ModelTokenUsage)
     raw_response_content: str = ""
@@ -435,7 +435,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     "content": (
                         "你是本地代码任务 harness 的决策层。"
                         "必须只返回 JSON 对象，不要 Markdown。"
-                        "JSON 字段必须包含 summary、rationale、ready_to_finalize、planned_actions、cross_round_plan、tool_calls。"
+                        "JSON 字段必须包含 summary、rationale、loop_end、planned_actions、donelist、tool_calls。"
                         "tool_calls 里的 tool_name 只能是 search_text、read_file、read_file_structure_summary、read_file_range、apply_patch、replace_lines、run_command、git_diff，"
                         "tool_input 必须是对象。"
                         "工具参数必须严格遵守 user message 里的 tool_schema，"
@@ -449,17 +449,22 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "runtime_feedback.previous_reflect.file_context_cache 会按文件保留最近五次读取结果。"
                         "当 file_context_cache 某个文件的 cache_status=stale 时，说明这个文件在编辑后已整文件失效；"
                         "这种旧缓存只代表你以前读过它，不能继续把其中内容当成当前可信源码。"
-                        "runtime_feedback.previous_cross_round_plan 是上一轮模型留下的跨轮安排。"
-                        "你需要在 rationale 中自行解释这些事实，并据此重规划之后的计划。"
+                        "runtime_feedback.previous_rationale 是上一轮模型自己给出的判断理由，可用来延续或修正上一轮思路。"
+                        "runtime_feedback.previous_donelist 是到上一轮为止已经完成的事项列表。"
+                        "你需要在 rationale 中自行解释这些事实，并据此避免重复兜圈。"
                     ),
                 },
                 {
                     "role": "system",
                     "content": (
                         "请严格遵守 user message 中的 decision_schema："
-                        "ready_to_finalize 用来表达当前是否已经完成求解、可以进入最终验证；"
+                        "loop_end 用来表达当前是否已经结束求解循环；"
+                        "只有当你确认自己后续不再需要做任何读取、修改、命令检查、diff 检查或补充验证时，才能把 loop_end 设为 true；"
+                        "只要 loop_end 是 true，tool_calls 就必须是空数组；"
+                        "只要你后续还打算继续做任何工作，loop_end 就必须是 false；"
                         "planned_actions 只写本轮 tool_calls 实际会执行的动作；"
-                        "跨轮安排即总安排写入 cross_round_plan；"
+                        "donelist 必须写成到当前这一轮为止已经完成的事项列表，而不是下一轮计划；"
+                        "如果上一轮 done list 里已有某项且本轮没有推翻它，就继续保留，避免遗漏已经做过的事；"
                         "tool_calls 是唯一执行源。"
                         "在 Windows CLI 任务中，默认要求 ASCII stdout/stderr；"
                         "除非任务明确要求 Unicode，否则避免 emoji、全角符号和非必要中文输出。"
@@ -488,12 +493,16 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                             "decision_schema": {
                                 "summary": "字符串：本轮决策摘要。",
                                 "rationale": "字符串：解释为什么本轮这样安排。",
-                                "ready_to_finalize": "布尔值：true 表示当前已完成求解；false 表示还需要下一轮继续处理。",
+                                "loop_end": (
+                                    "布尔值：只有当你确认自己后续不再需要做任何读取、修改、命令检查、"
+                                    "diff 检查或补充验证时，才能设为 true；否则必须是 false。"
+                                    "当 loop_end 为 true 时，tool_calls 必须为空数组。"
+                                ),
                                 "planned_actions": [
                                     "字符串列表：只能描述本轮 tool_calls 实际会执行的动作。"
                                 ],
-                                "cross_round_plan": [
-                                    "字符串列表：跨轮安排、后续轮次意图、暂不执行的计划。"
+                                "donelist": [
+                                    "字符串列表：到当前这一轮为止已经完成的事项列表（累计 done list），不要写未来计划。"
                                 ],
                                 "tool_calls": "数组：唯一会被 act 阶段实际执行的工具调用。",
                             },
@@ -517,15 +526,27 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         """校验模型决策字段，并转换成内部数据结构。"""
         summary = _required_string(raw_decision, "summary", self)
         rationale = _required_string(raw_decision, "rationale", self)
-        ready_to_finalize = _required_bool(raw_decision, "ready_to_finalize", self)
+        loop_end = _required_bool(raw_decision, "loop_end", self)
         tool_calls = _required_tool_calls(raw_decision, self)
         planned_actions, normalization_notes = _normalize_planned_actions(
             raw_decision=raw_decision,
             tool_calls=tool_calls,
         )
-        cross_round_plan, cross_round_notes = _normalize_optional_string_list(
+        if loop_end and tool_calls:
+            raise ModelResponseError(
+                "模型决策不合法：loop_end 为 true 时，tool_calls 必须为空数组。",
+                provider=self.provider,
+                model_name=self.model_name,
+                details=self._diagnostic_details(
+                    field_path="loop_end",
+                    response_excerpt=raw_response_content,
+                    loop_end=loop_end,
+                    tool_call_count=len(tool_calls),
+                ),
+            )
+        donelist, cross_round_notes = _normalize_optional_string_list(
             raw_decision=raw_decision,
-            field_name="cross_round_plan",
+            field_name="donelist",
         )
         normalization_notes.extend(cross_round_notes)
         return ModelDecision(
@@ -534,9 +555,9 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             task_type=task_type,
             summary=summary,
             rationale=rationale,
-            ready_to_finalize=ready_to_finalize,
+            loop_end=loop_end,
             planned_actions=planned_actions,
-            cross_round_plan=cross_round_plan,
+            donelist=donelist,
             tool_calls=tool_calls,
             token_usage=token_usage or ModelTokenUsage(),
             raw_response_content=raw_response_content,
