@@ -21,6 +21,15 @@ ALLOWED_TOOL_NAMES = {
     "run_command",
     "git_diff",
 }
+WORKING_MEMORY_FIELDS = (
+    "confirmed_facts",
+    "open_questions",
+    "invalidated_beliefs",
+    "completed_actions",
+    "next_risks",
+)
+WorkingMemoryValue = str | list[str]
+WorkingMemoryDocument = dict[str, WorkingMemoryValue]
 TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     "search_text": {
         "description": "在仓库文本文件中搜索精确字符串。",
@@ -160,9 +169,14 @@ class ModelTokenUsage:
         return asdict(self)
 
 
+def build_empty_working_memory() -> WorkingMemoryDocument:
+    """构造一份空的 working_memory，统一五个固定字段。"""
+    return {field_name: [] for field_name in WORKING_MEMORY_FIELDS}
+
+
 @dataclass(slots=True)
 class ModelDecision:
-    """保存一次任务级决策结果，包括本轮动作说明和累计已完成事项。"""
+    """保存一次任务级决策结果，包括本轮动作说明和模型维护的工作记忆。"""
 
     provider: str
     model_name: str
@@ -170,7 +184,7 @@ class ModelDecision:
     summary: str
     rationale: str
     planned_actions: list[str] = field(default_factory=list)
-    donelist: list[str] = field(default_factory=list)
+    working_memory: WorkingMemoryDocument = field(default_factory=build_empty_working_memory)
     tool_calls: list[PlannedToolCall] = field(default_factory=list)
     token_usage: ModelTokenUsage = field(default_factory=ModelTokenUsage)
     raw_response_content: str = ""
@@ -183,6 +197,7 @@ class ModelDecision:
         data.pop("normalization_notes", None)
         data["tool_calls"] = [tool_call.to_dict() for tool_call in self.tool_calls]
         data["token_usage"] = self.token_usage.to_dict()
+        data["working_memory"] = _clone_working_memory(self.working_memory)
         return data
 
 
@@ -459,7 +474,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     "content": (
                         "你是本地代码任务 harness 的决策层。"
                         "必须只返回 JSON 对象，不要 Markdown。"
-                        "JSON 字段必须包含 summary、rationale、planned_actions、donelist、tool_calls。"
+                        "JSON 字段必须包含 summary、rationale、planned_actions、working_memory、tool_calls。"
                         "tool_calls 里的 tool_name 只能是 search_text、read_file、read_file_structure_summary、read_file_range、apply_patch、replace_lines、run_command、git_diff，"
                         "tool_input 必须是对象。"
                         "工具参数必须严格遵守 user message 里的 tool_schema，"
@@ -473,8 +488,12 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "runtime_feedback.previous_reflect.file_context_cache 会按文件保留最近五次读取结果。"
                         "当 file_context_cache 某个文件的 cache_status=stale 时，说明这个文件在编辑后已整文件失效；"
                         "这种旧缓存只代表你以前读过它，不能继续把其中内容当成当前可信源码。"
+                        "runtime_feedback.previous_reflect.stale_file_paths 只列出当前仍然 stale 的文件；"
+                        "如果某个文件不在 stale_file_paths 里，就不要再把它描述成当前 stale。"
+                        "runtime_feedback.previous_reflect.reread_fresh_ranges 会列出上一轮已经重读恢复为 fresh 的文件范围；"
+                        "这些范围虽然历史上 stale 过，但现在已经可以直接信任，不要再把'曾经 stale'误写成'当前 stale'。"
                         "runtime_feedback.previous_rationale 是上一轮模型自己给出的判断理由，可用来延续或修正上一轮思路。"
-                        "runtime_feedback.previous_donelist 是到上一轮为止已经完成的事项列表。"
+                        "runtime_feedback.working_memory 是上一轮模型原样返回的工作记忆对象。"
                         "你需要在 rationale 中自行解释这些事实，并据此避免重复兜圈。"
                     ),
                 },
@@ -483,9 +502,12 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     "content": (
                         "请严格遵守 user message 中的 decision_schema："
                         "planned_actions 只写本轮 tool_calls 实际会执行的动作；"
-                        "donelist 必须写成到当前这一轮为止已经完成的事项列表，而不是下一轮计划；"
-                        "donelist 只写你做过什么事情，禁止在里面做解释和分析类的描述；"
-                        "如果上一轮 done list 里已有某项且本轮没有推翻它，就继续保留，避免遗漏已经做过的事；"
+                        "working_memory 必须是完整对象，并且固定包含 confirmed_facts、open_questions、invalidated_beliefs、completed_actions、next_risks 五个字段；"
+                        "每个字段可以写成一个字符串，也可以写成字符串列表；"
+                        "下一轮会直接看到你这一轮原样返回的 runtime_feedback.working_memory；"
+                        "如果上一轮判断被推翻，必须在本轮主动改写对应字段，不要依赖 harness 帮你 merge、修正或补写；"
+                        "凡是被当前轮代码读取结果、命令输出或 diff 直接否定的旧怀疑，必须从 open_questions 移出，并写入 invalidated_beliefs；"
+                        "不要让已经被否定的问题继续留在 open_questions 里反复驱动下一轮。"
                         "tool_calls 是唯一执行源。"
                         "由 harness 根据本轮 tool_calls 是否为空来决定是否继续求解。"
                         "在 Windows CLI 任务中，默认要求 ASCII stdout/stderr；"
@@ -502,13 +524,23 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "若只需要重新定位结构，先调用 read_file_structure_summary，再按行号调用 read_file_range。"
                         "如果 runtime_feedback.previous_reflect.stale_reread_guidance 已给出 stale 文件的 recommended_sequence，默认按这个顺序执行；"
                         "也就是说，编辑后的重读优先走 read_file_structure_summary -> read_file_range，不要一上来就反复读取同一小段旧附近行号。"
+                        "如果 runtime_feedback.previous_reflect.reread_fresh_ranges 已经列出了某个文件的 safe_to_rely_ranges，优先直接使用这些已重读范围；"
+                        "除非这些范围仍然不够，否则不要仅因为文件曾经 stale 过就重复读取同一函数。"
                         "编辑规则：默认先使用 apply_patch，不要一开始就把 replace_lines 当成主编辑方式。"
                         "只有在 apply_patch 连续失败、old_text_not_found、文件存在换行/缩进/不可见字符等问题导致精确文本难以匹配，并且你已经重新读取目标范围并确认最新行号时，才使用 replace_lines。"
                         "编辑规则：如果同一文件连续多次出现 old_text_not_found，尤其接近 3 次时，优先基于最近源码行号使用 replace_lines；"
                         "不要继续猜测大段 apply_patch.old_text。"
+                        "bug_fix 收口规则：如果当前 diff 已经命中任务目标修改点，并且针对任务描述的核心验证命令已经符合预期，优先进入结束判断；"
+                        "不要在这种情况下继续扩展读取外围函数、补做低价值旁路确认或重新打开已经被命令验证过的主假设。"
+                        "对于 bug_fix，核心命令优先指任务描述、verify_commands、recent_tool_results 或当前轮计划里直接针对缺陷现象的命令；"
+                        "如果这些核心命令已经证明主缺陷修复成立，默认下一轮应减少读取并准备让 tool_calls 为空。"
                         "请注意："
                         "任务描述描述的是待修复现象，不保证与当前轮已修改后的文件内容一致。"
                         "当任务描述、当前代码、recent_tool_results 和 git_diff 看起来冲突时，优先相信当前轮可验证的运行时证据，而不是反复把初始任务描述当成当前代码事实。"
+                        "如果关键目标函数已经处于 fresh 状态，并且你已经直接读到其当前实现，"
+                        "不要仅因为任务描述与当前代码冲突，就立刻扩展读取外围 helper；"
+                        "先把这个冲突写入 working_memory 的 open_questions 或 invalidated_beliefs，"
+                        "并优先运行核心命令校验当前代码行为。"
                     ),
                 },
                 {
@@ -525,9 +557,13 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                                 "planned_actions": [
                                     "字符串列表：只能描述本轮 tool_calls 实际会执行的动作。"
                                 ],
-                                "donelist": [
-                                    "字符串列表：到当前这一轮为止已经完成的事项列表（累计 done list），不要写未来计划。"
-                                ],
+                                "working_memory": {
+                                    "confirmed_facts": "字符串或字符串列表：当前已确认的事实。",
+                                    "open_questions": "字符串或字符串列表：当前仍未确认的问题。",
+                                    "invalidated_beliefs": "字符串或字符串列表：本轮已推翻的旧怀疑、旧判断。",
+                                    "completed_actions": "字符串或字符串列表：到当前轮为止已经完成的动作。",
+                                    "next_risks": "字符串或字符串列表：若现在结束或继续，最需要注意的风险。",
+                                },
                                 "tool_calls": "数组：唯一会被 act 阶段实际执行的工具调用。",
                             },
                             "tool_schema": TOOL_SCHEMAS,
@@ -555,11 +591,11 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             raw_decision=raw_decision,
             tool_calls=tool_calls,
         )
-        donelist, cross_round_notes = _normalize_optional_string_list(
+        working_memory, working_memory_notes = _normalize_working_memory(
             raw_decision=raw_decision,
-            field_name="donelist",
+            adapter=self,
         )
-        normalization_notes.extend(cross_round_notes)
+        normalization_notes.extend(working_memory_notes)
         return ModelDecision(
             provider=self.provider,
             model_name=self.model_name,
@@ -567,7 +603,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             summary=summary,
             rationale=rationale,
             planned_actions=planned_actions,
-            donelist=donelist,
+            working_memory=working_memory,
             tool_calls=tool_calls,
             token_usage=token_usage or ModelTokenUsage(),
             raw_response_content=raw_response_content,
@@ -696,29 +732,18 @@ def _required_string(raw_decision: dict[str, Any], field_name: str, adapter: Ope
     return value.strip()
 
 
-def _required_string_list(
-    raw_decision: dict[str, Any],
-    field_name: str,
-    adapter: OpenAICompatibleModelAdapter,
-) -> list[str]:
-    """读取必填字符串列表字段。"""
-    value = raw_decision.get(field_name)
-    if not isinstance(value, list):
-        raise ModelResponseError(
-            f"模型决策字段必须是字符串列表：{field_name}",
-            provider=adapter.provider,
-            model_name=adapter.model_name,
-            details=adapter._diagnostic_details(field_path=field_name),
-        )
-    normalized = [str(item).strip() for item in value if str(item).strip()]
-    if not normalized:
-        raise ModelResponseError(
-            f"模型决策字段不能为空：{field_name}",
-            provider=adapter.provider,
-            model_name=adapter.model_name,
-            details=adapter._diagnostic_details(field_path=field_name),
-        )
-    return normalized
+def _clone_working_memory(working_memory: WorkingMemoryDocument) -> WorkingMemoryDocument:
+    """复制 working_memory，避免 trace/report 后续误改原对象。"""
+    cloned = build_empty_working_memory()
+    for field_name in WORKING_MEMORY_FIELDS:
+        field_value = working_memory.get(field_name, [])
+        if isinstance(field_value, list):
+            cloned[field_name] = list(field_value)
+        elif isinstance(field_value, str):
+            cloned[field_name] = field_value
+        else:
+            cloned[field_name] = []
+    return cloned
 
 
 def _validate_tool_input_types(
@@ -843,28 +868,77 @@ def _extract_action_text_from_dict(item: dict[str, Any]) -> str:
     return json.dumps(item, ensure_ascii=False)
 
 
-def _normalize_optional_string_list(
+def _normalize_working_memory(
     raw_decision: dict[str, Any],
-    field_name: str,
-) -> tuple[list[str], list[dict[str, Any]]]:
-    """把可选的字符串列表字段宽容归一化，缺失时保持空列表兼容旧模型。"""
-    value = raw_decision.get(field_name)
-    if value is None:
-        return [], []
-    if isinstance(value, list):
-        normalized = [str(item).strip() for item in value if str(item).strip()]
-        if normalized:
-            return normalized, []
-        return [], [{"field_path": field_name, "reason": "empty_list_normalized_to_empty"}]
-    if isinstance(value, str) and value.strip():
-        return [value.strip()], [{"field_path": field_name, "reason": "coerced_string_to_single_item_list"}]
-    return [], [
-        {
-            "field_path": field_name,
-            "reason": "unusable_value_normalized_to_empty",
-            "raw_type": type(value).__name__,
-        }
-    ]
+    adapter: OpenAICompatibleModelAdapter,
+) -> tuple[WorkingMemoryDocument, list[dict[str, Any]]]:
+    """校验并做最小归一化，确保模型每轮都返回完整 working_memory。"""
+    value = raw_decision.get("working_memory")
+    if not isinstance(value, dict):
+        raise ModelResponseError(
+            "模型决策字段 working_memory 必须是对象。",
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+            details=adapter._diagnostic_details(field_path="working_memory"),
+        )
+
+    missing_fields = [field_name for field_name in WORKING_MEMORY_FIELDS if field_name not in value]
+    if missing_fields:
+        raise ModelResponseError(
+            f"working_memory 缺少必填字段：{', '.join(missing_fields)}。",
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+            details=adapter._diagnostic_details(
+                field_path="working_memory",
+                missing_fields=missing_fields,
+            ),
+        )
+
+    normalized = build_empty_working_memory()
+    normalization_notes: list[dict[str, Any]] = []
+    for field_name in WORKING_MEMORY_FIELDS:
+        field_value = value.get(field_name)
+        if isinstance(field_value, str):
+            normalized[field_name] = field_value
+            continue
+        if isinstance(field_value, list):
+            cleaned_items: list[str] = []
+            dropped_empty = False
+            for item in field_value:
+                if not isinstance(item, str):
+                    raise ModelResponseError(
+                        f"working_memory.{field_name} 数组内必须全部是字符串。",
+                        provider=adapter.provider,
+                        model_name=adapter.model_name,
+                        details=adapter._diagnostic_details(
+                            field_path=f"working_memory.{field_name}",
+                            invalid_item_type=type(item).__name__,
+                        ),
+                    )
+                trimmed_item = item.strip()
+                if not trimmed_item:
+                    dropped_empty = True
+                    continue
+                cleaned_items.append(trimmed_item)
+            normalized[field_name] = cleaned_items
+            if dropped_empty:
+                normalization_notes.append(
+                    {
+                        "field_path": f"working_memory.{field_name}",
+                        "reason": "dropped_empty_string_items",
+                    }
+                )
+            continue
+        raise ModelResponseError(
+            f"working_memory.{field_name} 必须是字符串或字符串列表。",
+            provider=adapter.provider,
+            model_name=adapter.model_name,
+            details=adapter._diagnostic_details(
+                field_path=f"working_memory.{field_name}",
+                raw_type=type(field_value).__name__,
+            ),
+        )
+    return normalized, normalization_notes
 
 
 def _planned_actions_from_tool_calls(tool_calls: list[PlannedToolCall]) -> list[str]:

@@ -286,8 +286,12 @@ model_decision:
   rationale:
   planned_actions:
     - "本轮 tool_calls 实际会执行的动作说明"
-  donelist:
-    - "到当前轮为止已经完成的事项列表（累计 done list）"
+  working_memory:
+    confirmed_facts: "字符串或字符串列表"
+    open_questions: "字符串或字符串列表"
+    invalidated_beliefs: "字符串或字符串列表"
+    completed_actions: "字符串或字符串列表"
+    next_risks: "字符串或字符串列表"
   tool_calls:
     - tool_name:
       tool_input:
@@ -299,8 +303,8 @@ model_decision:
 
 - `tool_calls` 是唯一执行源，`act` 阶段只按这个数组调用工具。
 - `planned_actions` 是本轮可读计划说明，不是跨轮任务队列，也不驱动执行。
-- `donelist` 当前承载累计已完成事项，下一轮会通过 `runtime_feedback.previous_donelist` 回填给模型，帮助模型记住“已经做过什么”。
-- ????????????????????? harness ???? `tool_calls` ?????????
+- `working_memory` 当前承载模型维护的结构化运行时记忆；下一轮会通过 `runtime_feedback.working_memory` 原样回填给模型，帮助模型延续事实、问题、已完成动作和风险判断。
+- harness 不会再自动 merge 或补写 working_memory；如果上一轮判断失效，必须由模型在本轮主动改写对应字段。
 - `raw_response_content` 只写入本地 trace，用于排查模型显式返回内容，不包含 provider 隐藏推理链。
 - `normalization_notes` 记录展示字段的宽容归一化，例如缺失 `planned_actions` 时从 `tool_calls` 派生说明。
 
@@ -430,9 +434,9 @@ final verify failed -> finalize(verification_failed)
 当前实现里，进入第二轮及后续 `plan` 的跨轮输入由 `runtime_feedback` 承载：
 
 - `previous_reflect`：上一轮事实反馈，包含 observation、signals、failed_tools、recent_tool_results、`file_context_cache`、`stale_file_paths` 和最近缓存失效诊断。
-- `previous_donelist`：到上一轮为止的累计已完成事项列表。
+- `working_memory`：上一轮模型原样返回的结构化工作记忆对象。
 
-这些字段共同组成下一轮模型的“运行上下文窗口”。其中 `previous_reflect.recent_tool_results`、`previous_reflect.file_context_cache` 和 `previous_donelist` 是为了减少模型在第二轮继续猜测源码，或忘记已经完成的事项；窗口中不会包含当前第几轮、还剩几轮或最大轮数。
+这些字段共同组成下一轮模型的“运行上下文窗口”。其中 `previous_reflect.recent_tool_results`、`previous_reflect.file_context_cache` 和 `working_memory` 是为了减少模型在第二轮继续猜测源码，或忘记已经确认/推翻过的判断；窗口中不会包含当前第几轮、还剩几轮或最大轮数。
 
 `memory_context`
 
@@ -855,7 +859,7 @@ MVP 阶段不需要复杂存储后端，JSONL 和本地文件已经足够。
 - 如果 trace payload 策略不控制，trace 会很快变得噪音过多。
 - 如果过早放松 memory 写入规则，未来 run 会被污染。
 - 如果 success criteria 没有按任务类型区分，eval 会失去可信度。
-- 如果把可读计划说明、累计完成记录和真实工具执行混为一谈，模型可能“文字上看起来很忙、实际只读文件”；当前通过 `planned_actions`、`donelist`、`tool_calls` 三字段拆分降低这个风险。
+- 如果把可读计划说明、工作记忆和真实工具执行混为一谈，模型可能“文字上看起来很忙、实际只读文件”；当前通过 `planned_actions`、`working_memory`、`tool_calls` 三字段拆分降低这个风险。
 
 MVP 架构选择故意偏保守，目标是在保证后续扩展点的同时，降低这些风险。
 

@@ -19,8 +19,6 @@
 - 当前已接入运行时记忆污染治理第一版：成功编辑过的文件会把旧读取缓存整文件标记为 `stale`，后续只有重新读取后才恢复为 `fresh`。
 - `reflect_feedback` 现已补充 `stale_file_paths` 和最近缓存失效诊断，便于在 trace 中直接看出“为什么又读了一次这个文件”。
 - stale 文件的 `previous_reflect` 现已新增 `stale_reread_guidance`，把“先 `read_file_structure_summary`、再 `read_file_range`”固化成编辑后重读默认顺序，优先减少重复读取同一小段旧附近行号。
-- `reflect_feedback` 与 `previous_reflect` 现已新增 `reread_fresh_ranges`，专门标记“上一轮曾 stale，但本轮已经重读恢复 fresh”的可信范围，避免模型把历史 stale 状态误判成当前 stale。
-- `src/model.py` 现已补充 stale/fresh 解释规则：`stale_file_paths` 只代表当前仍失效的文件；如果某个文件已出现在 `reread_fresh_ranges` 中，默认应直接复用这些 `safe_to_rely_ranges`，而不是仅因它曾 stale 过就继续重复读取。
 - `src/model.py` 现已补充 `bug_fix` 收口规则：若当前 diff 已命中任务目标修改点，且核心验证命令已经符合预期，模型应优先准备让 `tool_calls` 收空，而不是继续扩展外围读取。
 - `src/model.py` 现已补充 `working_memory` 迁移规则：被当前轮代码读取、命令输出或 diff 直接否定的旧怀疑，必须从 `open_questions` 移入 `invalidated_beliefs`。
 

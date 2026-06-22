@@ -17,6 +17,23 @@ def _model_config() -> dict:
     return {"model": {"provider": "openai_compatible", "name": "demo-model"}}
 
 
+def _working_memory(
+    *,
+    confirmed_facts: str | list[str] = "",
+    open_questions: str | list[str] = "",
+    invalidated_beliefs: str | list[str] = "",
+    completed_actions: str | list[str] = "",
+    next_risks: str | list[str] = "",
+) -> dict:
+    return {
+        "confirmed_facts": confirmed_facts,
+        "open_questions": open_questions,
+        "invalidated_beliefs": invalidated_beliefs,
+        "completed_actions": completed_actions,
+        "next_risks": next_risks,
+    }
+
+
 def test_src_no_longer_contains_phase3_stub_loop_markers() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     src_text = "\n".join(
@@ -34,7 +51,7 @@ def _fake_model_response(tool_calls: list[dict] | None = None, usage: dict | Non
         "summary": "已生成真实模型决策。",
         "rationale": "按模型返回的工具计划执行。",
         "planned_actions": ["执行模型工具计划"],
-        "donelist": ["已执行模型工具计划"],
+        "working_memory": _working_memory(completed_actions=["已执行模型工具计划"]),
         "tool_calls": tool_calls
         or [
             {"tool_name": "search_text", "tool_input": {"query": "Run Evidence", "limit": 5}},
@@ -76,7 +93,14 @@ def _constraint_aware_rationale(runtime_feedback: dict | None, *, repeat_reason:
         return "首轮执行常规计划。"
     parts = [
         " ".join(str(item) for item in reflect_feedback.get("signals", [])),
-        " ".join(str(item) for item in (runtime_feedback or {}).get("previous_donelist", [])),
+        " ".join(
+            str(item)
+            for item in (
+                (runtime_feedback or {}).get("working_memory", {}).get("completed_actions", [])
+                if isinstance((runtime_feedback or {}).get("working_memory", {}).get("completed_actions", []), list)
+                else [str((runtime_feedback or {}).get("working_memory", {}).get("completed_actions", ""))]
+            )
+        ),
     ]
     suffix = "，再次重复相同工具序列是因为测试需要保持同一工具计划。" if repeat_reason else ""
     return "读取 previous_reflect 事实：" + " ".join(item for item in parts if item).strip() + suffix
@@ -1574,14 +1598,24 @@ def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshe
                         )
                     ],
                 )
+            if round_index == 3:
+                return ModelDecision(
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    task_type=task_type,
+                    summary="third",
+                    rationale="重读文件，刷新缓存。",
+                    planned_actions=["重新读取 app.py"],
+                    tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "app.py"})],
+                )
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
                 task_type=task_type,
-                summary="third",
-                rationale="重读文件，刷新缓存。",
-                planned_actions=["重新读取 app.py"],
-                tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "app.py"})],
+                summary="fourth",
+                rationale="检查上一轮已重读后的反馈。",
+                planned_actions=[],
+                tool_calls=[],
             )
 
     def fake_verification(*, settings, tool_executions):
@@ -1608,7 +1642,7 @@ def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshe
 
     runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
         settings=settings,
-        config_data={"runtime": {"max_steps": 3}, **_model_config()},
+        config_data={"runtime": {"max_steps": 4}, **_model_config()},
     )
 
     stale_cache = feedbacks[2]["previous_reflect"]["file_context_cache"]["app.py"]
@@ -1630,6 +1664,20 @@ def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshe
         }
     ]
     assert feedbacks[2]["previous_reflect"]["recent_file_context_invalidations"][0]["path"] == "app.py"
+    reread_feedback = feedbacks[3]["previous_reflect"]
+    assert reread_feedback["stale_file_paths"] == []
+    assert reread_feedback["stale_reread_guidance"] == []
+    assert reread_feedback["reread_fresh_ranges"] == [
+        {
+            "path": "app.py",
+            "cache_status": "fresh",
+            "became_fresh_after_reread": True,
+            "last_invalidated_iteration": 2,
+            "last_refreshed_iteration": 3,
+            "safe_to_rely_ranges": ["1-3"],
+            "why": "这个文件前一轮或更早曾因编辑失效，但这些范围已经按当前源码重新读取，可直接作为当前可信上下文使用。",
+        }
+    ]
 
     fresh_cache = runtime_state.reflect_feedback["file_context_cache"]["app.py"]
     assert fresh_cache["cache_status"] == "fresh"
@@ -1638,6 +1686,17 @@ def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshe
     assert fresh_cache["snippets"][0]["content_excerpt"] == "one\nTWO\nthree\n"
     assert runtime_state.reflect_feedback["stale_file_paths"] == []
     assert runtime_state.reflect_feedback["stale_reread_guidance"] == []
+    assert runtime_state.reflect_feedback["reread_fresh_ranges"] == [
+        {
+            "path": "app.py",
+            "cache_status": "fresh",
+            "became_fresh_after_reread": True,
+            "last_invalidated_iteration": 2,
+            "last_refreshed_iteration": 3,
+            "safe_to_rely_ranges": ["1-3"],
+            "why": "这个文件前一轮或更早曾因编辑失效，但这些范围已经按当前源码重新读取，可直接作为当前可信上下文使用。",
+        }
+    ]
 
 
 def _run_factual_reflect_feedback_case(
@@ -1842,12 +1901,13 @@ def test_loop_records_model_response_normalized_for_planned_actions(tmp_path: Pa
                     {
                         "message": {
                             "content": json.dumps(
-                                {
-                                    "summary": "读取 README",
-                                    "rationale": "planned_actions 缺失时仍应执行安全的工具计划。",
-                                    "tool_calls": [
-                                        {
-                                            "tool_name": "read_file",
+                                    {
+                                        "summary": "读取 README",
+                                        "rationale": "planned_actions 缺失时仍应执行安全的工具计划。",
+                                        "working_memory": _working_memory(completed_actions=["已准备读取 README.md"]),
+                                        "tool_calls": [
+                                            {
+                                                "tool_name": "read_file",
                                             "tool_input": {"path": "README.md"},
                                         }
                                     ],
@@ -2049,7 +2109,7 @@ def test_loop_model_error_includes_safe_raw_response_excerpt_for_invalid_tool_ca
     assert "secret-test-key" not in json.dumps(failure_payload, ensure_ascii=False)
 
 
-def test_second_plan_receives_previous_donelist(tmp_path: Path, monkeypatch) -> None:
+def test_second_plan_receives_working_memory_from_previous_round(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
@@ -2068,7 +2128,7 @@ def test_second_plan_receives_previous_donelist(tmp_path: Path, monkeypatch) -> 
                 summary="fake decision",
                 rationale=_constraint_aware_rationale(runtime_feedback),
                 planned_actions=["本轮执行可观察文件修改"],
-                donelist=["已写入 run_evidence.md", "已查看当前 diff"],
+                working_memory=_working_memory(completed_actions=["已写入 run_evidence.md", "已查看当前 diff"]),
                 tool_calls=[
                     PlannedToolCall(
                         tool_name="apply_patch",
@@ -2113,14 +2173,18 @@ def test_second_plan_receives_previous_donelist(tmp_path: Path, monkeypatch) -> 
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert feedbacks[0] == {}
-    assert feedbacks[1]["previous_donelist"] == ["已写入 run_evidence.md", "已查看当前 diff"]
+    assert feedbacks[1]["working_memory"] == _working_memory(
+        completed_actions=["已写入 run_evidence.md", "已查看当前 diff"]
+    )
     trace_events = [
         json.loads(line)
         for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
-    assert model_decision_payloads[0]["donelist"] == ["已写入 run_evidence.md", "已查看当前 diff"]
+    assert model_decision_payloads[0]["working_memory"] == _working_memory(
+        completed_actions=["已写入 run_evidence.md", "已查看当前 diff"]
+    )
 
 
 def test_second_plan_receives_previous_rationale(tmp_path: Path, monkeypatch) -> None:
@@ -2143,7 +2207,7 @@ def test_second_plan_receives_previous_rationale(tmp_path: Path, monkeypatch) ->
                     summary="first decision",
                     rationale="先读取 README，再决定是否修改文件。",
                     planned_actions=["读取 README"],
-                    donelist=["已读取 README.md"],
+                    working_memory=_working_memory(completed_actions=["已读取 README.md"]),
                     tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "README.md"})],
                 )
             return ModelDecision(
@@ -2188,10 +2252,10 @@ def test_second_plan_receives_previous_rationale(tmp_path: Path, monkeypatch) ->
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert feedbacks[0] == {}
     assert feedbacks[1]["previous_rationale"] == "先读取 README，再决定是否修改文件。"
-    assert feedbacks[1]["previous_donelist"] == ["已读取 README.md"]
+    assert feedbacks[1]["working_memory"] == _working_memory(completed_actions=["已读取 README.md"])
 
 
-def test_donelist_is_merged_as_global_done_list(tmp_path: Path, monkeypatch) -> None:
+def test_working_memory_is_replaced_by_latest_model_output(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
@@ -2205,7 +2269,7 @@ def test_donelist_is_merged_as_global_done_list(tmp_path: Path, monkeypatch) -> 
                 summary="first decision",
                 rationale="先读 README，确认任务背景。",
                 planned_actions=["读取 README"],
-                donelist=["已读取 README.md"],
+                working_memory=_working_memory(completed_actions=["已读取 README.md"]),
                 tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "README.md"})],
             ),
             ModelDecision(
@@ -2215,7 +2279,7 @@ def test_donelist_is_merged_as_global_done_list(tmp_path: Path, monkeypatch) -> 
                 summary="second decision",
                 rationale="继续补充 run 证据文件。",
                 planned_actions=["写入 run_evidence"],
-                donelist=["已写入 run_evidence.md"],
+                working_memory=_working_memory(completed_actions=["已写入 run_evidence.md"]),
                 tool_calls=[
                     PlannedToolCall(
                         tool_name="apply_patch",
@@ -2223,15 +2287,16 @@ def test_donelist_is_merged_as_global_done_list(tmp_path: Path, monkeypatch) -> 
                     )
                 ],
             ),
-            ModelDecision(
-                provider="openai_compatible",
-                model_name="fake-done-list-model",
-                task_type="general",
-                summary="third decision",
-                rationale="done list 已完整，可以收尾。",
-                planned_actions=["结束求解"],
-                tool_calls=[],
-            ),
+                ModelDecision(
+                    provider="openai_compatible",
+                    model_name="fake-done-list-model",
+                    task_type="general",
+                    summary="third decision",
+                    rationale="done list 已完整，可以收尾。",
+                    planned_actions=["结束求解"],
+                    working_memory=_working_memory(completed_actions=["已确认可以收尾"]),
+                    tool_calls=[],
+                ),
         ]
     )
 
@@ -2254,7 +2319,7 @@ def test_donelist_is_merged_as_global_done_list(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
 
     settings = build_settings(
-        task="验证 donelist 会累计保留已完成事项",
+        task="验证 working_memory 会直接被最新模型输出覆盖",
         task_type="general",
         repo_root=str(repo_root),
         output_root=str(tmp_path / "runs"),
@@ -2270,9 +2335,7 @@ def test_donelist_is_merged_as_global_done_list(tmp_path: Path, monkeypatch) -> 
         config_data={**_model_config(), "runtime": {"max_steps": 3}},
     )
 
-    assert runtime_state.donelist == ["已读取 README.md", "已写入 run_evidence.md"]
-    assert runtime_state.donelist_history[0] == ["已读取 README.md"]
-    assert runtime_state.donelist_history[1] == ["已读取 README.md", "已写入 run_evidence.md"]
+    assert runtime_state.working_memory == _working_memory(completed_actions=["已确认可以收尾"])
 
 
 def test_loop_exits_when_model_returns_no_planned_tool_calls(tmp_path: Path, monkeypatch) -> None:
@@ -2292,7 +2355,7 @@ def test_loop_exits_when_model_returns_no_planned_tool_calls(tmp_path: Path, mon
                 summary="no more tools",
                 rationale="enough evidence to enter final verification",
                 planned_actions=[],
-                donelist=["confirmed no more reads or edits are needed"],
+                working_memory=_working_memory(completed_actions=["confirmed no more reads or edits are needed"]),
                 tool_calls=[],
             )
 

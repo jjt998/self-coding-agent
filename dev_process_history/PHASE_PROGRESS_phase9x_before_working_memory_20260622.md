@@ -2,7 +2,7 @@
 
 ## 总览
 
-- 最后更新时间：2026-06-22
+- 最后更新时间：2026-06-21
 - 当前激活阶段：`Phase 9.x：Verify 收敛为末尾单次裁判`
 - 当前阶段状态：`in_progress`
 
@@ -10,7 +10,7 @@
 
 - 当前 loop 已从 `ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize` 调整为 `ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize`。
 - `verify` 现在只会在求解阶段退出后执行一次，验证结果不再回灌给后续模型轮次。
-- 当前不再要求模型显式输出结束字段；harness 仅根据本轮 `tool_calls` 是否为空来决定是否继续求解。
+- ????????????????????? harness ???? `tool_calls` ?????????
 - Runtime 已新增“连续两次空 `tool_calls`”收口信号；命中后会直接退出求解阶段并进入最终验证。
 - `previous_verification` 已从模型输入中移除，`previous_reflect.verification` 也已从事实反馈中移除。
 - token diagnostics 仍会继续流入 `model_raw_response`、`model_decision`、`run_finished`、`report.md`、`summary.json`、`summary.md` 和 comparison delta；provider 缺失 `usage` 时不做本地估算。
@@ -19,10 +19,6 @@
 - 当前已接入运行时记忆污染治理第一版：成功编辑过的文件会把旧读取缓存整文件标记为 `stale`，后续只有重新读取后才恢复为 `fresh`。
 - `reflect_feedback` 现已补充 `stale_file_paths` 和最近缓存失效诊断，便于在 trace 中直接看出“为什么又读了一次这个文件”。
 - stale 文件的 `previous_reflect` 现已新增 `stale_reread_guidance`，把“先 `read_file_structure_summary`、再 `read_file_range`”固化成编辑后重读默认顺序，优先减少重复读取同一小段旧附近行号。
-- `reflect_feedback` 与 `previous_reflect` 现已新增 `reread_fresh_ranges`，专门标记“上一轮曾 stale，但本轮已经重读恢复 fresh”的可信范围，避免模型把历史 stale 状态误判成当前 stale。
-- `src/model.py` 现已补充 stale/fresh 解释规则：`stale_file_paths` 只代表当前仍失效的文件；如果某个文件已出现在 `reread_fresh_ranges` 中，默认应直接复用这些 `safe_to_rely_ranges`，而不是仅因它曾 stale 过就继续重复读取。
-- `src/model.py` 现已补充 `bug_fix` 收口规则：若当前 diff 已命中任务目标修改点，且核心验证命令已经符合预期，模型应优先准备让 `tool_calls` 收空，而不是继续扩展外围读取。
-- `src/model.py` 现已补充 `working_memory` 迁移规则：被当前轮代码读取、命令输出或 diff 直接否定的旧怀疑，必须从 `open_questions` 移入 `invalidated_beliefs`。
 
 > 说明：下方按 Phase 保留历史推进记录，其中部分旧条目描述的是更早期的 loop 或 verify 形态；当前实现以上方“最新 Phase 9.x 收口”为准。
 
@@ -119,7 +115,7 @@
   - 当前 `verify_rules` 第二版已补齐一批更贴近真实任务的断言：命令 stdout/stderr 不包含检查、文件不存在检查、文件最小/最大行数检查
   - 回归测试新增覆盖：负向命令输出检查、文件不存在检查、文件行数上下界检查，以及对应 task spec 字段解析
   - 已重构 `src/model.py`，移除 `rule_based` adapter，当前只支持 `openai_compatible` 决策层
-  - 当前 OpenAI 兼容决策层会调用 `/chat/completions`，并要求模型返回 `summary`、`rationale`、`planned_actions`、`working_memory`、`tool_calls` JSON
+  - 当前 OpenAI 兼容决策层会调用 `/chat/completions`，并要求模型返回 `summary`、`rationale`、`planned_actions`、`donelist`、`tool_calls` JSON
   - 当前模型工具计划只允许 `search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`，且 `tool_input` 必须是对象，并会校验字段名、必填字段和字段类型
   - `src/loop.py` 的 `plan` 阶段现已捕获模型配置、请求和响应异常，并以 `stop_reason.code = model_error` 结束 run
   - `model_decision_failed` 已进入 trace，错误 details 包含 provider、model name、error type 和 error message，不记录 API key
@@ -273,11 +269,11 @@
 
 ### Phase 9 本轮新增：跨轮计划与工具入参类型校验
 
-- `ModelDecision.working_memory` 当前已替代旧版累计事项列表字段，用于表达模型维护的结构化运行时记忆；`planned_actions` 明确收敛为本轮 `tool_calls` 的可读说明，不再承担跨轮任务队列职责。
-- `runtime_feedback.working_memory` 当前会把上一轮模型原样返回的工作记忆对象直接回填给模型，而不是由 harness 再做跨轮 merge。
-- harness 不再维护任何工作记忆历史列表；每轮只保存当前最新 working_memory，并由模型自己负责修正已失效判断。
-- OpenAI compatible 请求中的 `decision_schema` 已更新为：`tool_calls` 是唯一执行源、`planned_actions` 是本轮说明、`working_memory` 是完整结构化工作记忆对象。
-- `model_decision` trace、plan state result、finalize 摘要、stop reason details 和 report 均会展示或保留当前 working_memory。
+- `ModelDecision.donelist` 当前已重定义为累计 done list，用于表达“到当前轮为止已经完成了什么”；`planned_actions` 明确收敛为本轮 `tool_calls` 的可读说明，不再承担跨轮任务队列职责。
+- `runtime_feedback.previous_donelist` 当前回填的是上一轮累计 done list，而不是下一轮计划，第二轮及后续 plan 会据此减少重复兜圈。
+- harness 会自动合并历史 done list 与本轮模型返回，避免模型漏写后把既有完成事项覆盖掉。
+- OpenAI compatible 请求中的 `decision_schema` 已更新为：`tool_calls` 是唯一执行源、`planned_actions` 是本轮说明、`donelist` 是累计已完成事项。
+- `model_decision` trace、plan state result、finalize 摘要、stop reason details 和 report 均会展示或保留跨轮计划。
 - 工具 schema 校验已从字段名扩展到字段类型，非法类型会进入 `ModelResponseError` / `model_error`，例如 `apply_patch.new_text = null` 不会再导致工具层 traceback。
 - `apply_patch` 工具本身也增加防御式非法输入返回，统一为 `ToolExecution(ok=false, error=invalid_tool_input)`。
 - 本轮保持边界：不新增 verify rule，不修改 loop 轮数，不做 `planned_actions` 与 `tool_calls` 的一致性强诊断。

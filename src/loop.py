@@ -9,7 +9,15 @@ from typing import Any
 from context import ContextBuilder, ContextSnapshot
 from config import RunSettings
 from memory import RuntimeMemoryManager
-from model import ModelDecision, ModelError, ModelResponseError, TOOL_SCHEMAS, build_model_adapter
+from model import (
+    TOOL_SCHEMAS,
+    ModelDecision,
+    ModelError,
+    ModelResponseError,
+    WorkingMemoryDocument,
+    build_empty_working_memory,
+    build_model_adapter,
+)
 from runtime_trace import TraceEvent, TraceWriter
 from tools import FULL_READ_FILE_MAX_CHARS, FULL_READ_FILE_MAX_LINES, CoreToolRunner, ToolExecution
 from verify import VerificationResult, build_phase_4_verification
@@ -75,8 +83,7 @@ class RuntimeState:
     context_snapshot: ContextSnapshot | None = None
     model_decision: ModelDecision | None = None
     model_decisions: list[ModelDecision] = field(default_factory=list)
-    donelist: list[str] = field(default_factory=list)
-    donelist_history: list[list[str]] = field(default_factory=list)
+    working_memory: WorkingMemoryDocument = field(default_factory=build_empty_working_memory)
     tool_executions: list[ToolExecution] = field(default_factory=list)
     recent_tool_executions: list[ToolExecution] = field(default_factory=list)
     file_context_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -298,7 +305,7 @@ class LoopOrchestrator:
             "changed_files": runtime_state.changed_files,
             "failed_tool_count": runtime_state.failed_tool_count,
             "reflect_feedback": dict(runtime_state.reflect_feedback),
-            "donelist": list(runtime_state.donelist),
+            "working_memory": deepcopy(runtime_state.working_memory),
             "token_usage": dict(runtime_state.token_usage),
         }
 
@@ -378,12 +385,12 @@ class LoopOrchestrator:
         runtime_state.current_state = to_state.value
 
     def _build_runtime_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """下一轮只传事实型 reflect 反馈和累计已完成事项。"""
+        """下一轮只传事实型 reflect 反馈和上一轮原样 working_memory。"""
         if runtime_state.current_iteration <= 1 and not runtime_state.reflect_feedback:
             return {}
         runtime_feedback = {
             "previous_reflect": self._build_previous_reflect(runtime_state=runtime_state),
-            "previous_donelist": list(runtime_state.donelist),
+            "working_memory": deepcopy(runtime_state.working_memory),
         }
         if runtime_state.model_decision and runtime_state.model_decision.rationale:
             runtime_feedback["previous_rationale"] = runtime_state.model_decision.rationale
@@ -859,7 +866,7 @@ class LoopOrchestrator:
         }
 
     def _run_plan(self, runtime_state: RuntimeState, config_data: dict[str, Any]) -> dict[str, Any]:
-        """生成一轮模型决策，并把累计 done list 一并落进运行时状态。"""
+        """生成一轮模型决策，并把这一轮 working_memory 原样落进运行时状态。"""
         model_adapter = build_model_adapter(config_data=config_data)
         runtime_feedback = self._build_runtime_feedback(runtime_state=runtime_state)
         reflect_feedback_summary = self._summarize_reflect_feedback_for_trace(runtime_feedback=runtime_feedback)
@@ -916,13 +923,7 @@ class LoopOrchestrator:
                     },
                 )
             )
-        merged_done_list = self._merge_cross_round_done_list(
-            previous_done_list=runtime_state.donelist,
-            current_done_list=runtime_state.model_decision.donelist,
-        )
-        runtime_state.model_decision.donelist = merged_done_list
-        runtime_state.donelist = list(merged_done_list)
-        runtime_state.donelist_history.append(list(merged_done_list))
+        runtime_state.working_memory = deepcopy(runtime_state.model_decision.working_memory)
         runtime_state.model_decisions.append(runtime_state.model_decision)
         self.trace_writer.write_event(
             TraceEvent(
@@ -939,29 +940,13 @@ class LoopOrchestrator:
         return {
             "summary": runtime_state.model_decision.summary,
             "planned_actions": list(runtime_state.model_decision.planned_actions),
-            "donelist": list(runtime_state.model_decision.donelist),
+            "working_memory": deepcopy(runtime_state.model_decision.working_memory),
             "rationale": runtime_state.model_decision.rationale,
             "provider": runtime_state.model_decision.provider,
             "model_name": runtime_state.model_decision.model_name,
             "token_usage": runtime_state.model_decision.token_usage.to_dict(),
             "run_token_usage": dict(runtime_state.token_usage),
         }
-
-    def _merge_cross_round_done_list(
-        self,
-        previous_done_list: list[str],
-        current_done_list: list[str],
-    ) -> list[str]:
-        """把历史 done list 与本轮结果合并，避免模型漏写后丢失已完成事项。"""
-        merged_done_list: list[str] = []
-        seen_items: set[str] = set()
-        for item in [*previous_done_list, *current_done_list]:
-            normalized_item = str(item).strip()
-            if not normalized_item or normalized_item in seen_items:
-                continue
-            merged_done_list.append(normalized_item)
-            seen_items.add(normalized_item)
-        return merged_done_list
 
     def _run_act(self, runtime_state: RuntimeState, tool_runner: CoreToolRunner) -> dict[str, Any]:
         """执行模型为当前轮规划的工具调用。"""
@@ -1041,7 +1026,7 @@ class LoopOrchestrator:
             "max_steps": runtime_state.max_steps,
             "tool_execution_count": len(runtime_state.tool_executions),
             "model_decision_count": len(runtime_state.model_decisions),
-            "donelist": list(runtime_state.donelist),
+            "working_memory": deepcopy(runtime_state.working_memory),
             "completed_states_before_finalize": list(runtime_state.completed_states),
             "token_usage": dict(runtime_state.token_usage),
         }
@@ -1378,6 +1363,7 @@ class LoopOrchestrator:
             "file_context_cache": runtime_state.file_context_cache,
             "stale_file_paths": self._collect_stale_file_paths(runtime_state=runtime_state),
             "stale_reread_guidance": self._build_stale_reread_guidance(runtime_state=runtime_state),
+            "reread_fresh_ranges": self._build_reread_fresh_ranges(runtime_state=runtime_state),
             "recent_file_context_invalidations": list(runtime_state.file_context_invalidations),
         }
 
@@ -1403,6 +1389,34 @@ class LoopOrchestrator:
                 }
             )
         return guidance_items
+
+    def _build_reread_fresh_ranges(self, runtime_state: RuntimeState) -> list[dict[str, Any]]:
+        """
+        显式告诉下一轮：哪些文件虽然之前 stale 过，但当前轮已经重读恢复为 fresh。
+        这里单独输出，是为了避免模型把“历史上 stale 过”误说成“当前仍 stale”。
+        """
+        fresh_items: list[dict[str, Any]] = []
+        for path, cache_entry in runtime_state.file_context_cache.items():
+            if cache_entry.get("cache_status") != "fresh":
+                continue
+            last_invalidated_iteration = int(cache_entry.get("last_invalidated_iteration", 0) or 0)
+            last_refreshed_iteration = int(cache_entry.get("last_refreshed_iteration", 0) or 0)
+            if last_invalidated_iteration <= 0:
+                continue
+            if last_refreshed_iteration < last_invalidated_iteration:
+                continue
+            fresh_items.append(
+                {
+                    "path": path,
+                    "cache_status": "fresh",
+                    "became_fresh_after_reread": True,
+                    "last_invalidated_iteration": last_invalidated_iteration,
+                    "last_refreshed_iteration": last_refreshed_iteration,
+                    "safe_to_rely_ranges": list(cache_entry.get("covered_ranges", [])),
+                    "why": "这个文件前一轮或更早曾因编辑失效，但这些范围已经按当前源码重新读取，可直接作为当前可信上下文使用。",
+                }
+            )
+        return fresh_items
 
     def _update_file_context_cache(self, runtime_state: RuntimeState) -> None:
         """

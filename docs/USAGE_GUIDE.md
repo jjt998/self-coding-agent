@@ -87,20 +87,20 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 - `Token 消耗`：单任务模型请求数、缺失 usage 请求数、`prompt_tokens`、`completion_tokens`、`total_tokens`。
 - `进展观察`：是否观察到文件变更、变更文件数、失败工具数。
 - `反思反馈`：最近一次 reflect trigger、失败检查、建议关注点。
-- `模型返回摘要`：最近一次模型显式返回的 summary、rationale、planned_actions、donelist 和 tool_calls；其中 `donelist` 现在表示累计已完成事项。
+- `模型返回摘要`：最近一次模型显式返回的 summary、rationale、planned_actions、working_memory 和 tool_calls；其中 `working_memory` 会按五类结构化工作记忆展示。
 - `验证结果`：每条验证检查是否通过。
 
 `trace.jsonl` 是结构化事件流，适合脚本分析和定位细节。排查模型为什么只读文件、不修改文件或没有响应 reflect feedback 时，优先查看：
 
 - `model_raw_response`：模型显式返回的原始 `choices[0].message.content`。
-- ????????????????????? harness ???? `tool_calls` ?????????
+- `model_decision`：解析后的结构化决策，最适合看本轮 `tool_calls`、`working_memory`、`rationale` 和 token usage。
 - `run_finished`：单任务最终聚合字段，包括 stop reason 和任务级 `token_usage`。
 
 字段定位说明：
 - `tool_calls` 是唯一会被 `act` 阶段实际执行的工具调用。
 - `planned_actions` 只描述本轮 `tool_calls` 实际会做的事情，不作为跨轮任务队列。
-- `donelist` 记录到当前轮为止已经完成的事项；下一轮模型会通过 `runtime_feedback.previous_donelist` 看到上一轮累计 done list。
-- ????????????????????? harness ???? `tool_calls` ?????????
+- `working_memory` 记录上一轮模型原样返回的结构化工作记忆；下一轮模型会通过 `runtime_feedback.working_memory` 直接看到这份对象。
+- `working_memory` 由模型自己维护；若上一轮判断失效，需要模型在本轮主动改写字段，harness 不负责 merge 或补写。
 - `tool_input` 会按 `tool_schema` 校验字段名和类型，类型不匹配会以 `model_error` 收口，不会继续进入工具层 traceback。
 
 这里记录的是模型显式返回内容，不包含 provider 隐藏推理链，也不会记录 API key 或请求头。
@@ -445,7 +445,7 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
 - CLI 单次运行暂不支持直接传入 `verify_commands` / `verify_rules`。
 - 默认 `runtime.max_steps = 2`，暂不开放更高预算。
 - `runtime.max_steps` 只由 harness 内部使用；模型请求不会看到当前轮数、剩余轮数或最大轮数。
-- 第二轮及后续模型只通过 `runtime_feedback.previous_reflect` 接收上一轮事实压缩，并通过 `previous_donelist` 接收上一轮累计 done list。
+- 第二轮及后续模型只通过 `runtime_feedback.previous_reflect` 接收上一轮事实压缩，并通过 `runtime_feedback.working_memory` 接收上一轮原样工作记忆。
 - 读取缓存治理当前只做第一版“文件级全失效”：文件一旦被编辑，旧读取缓存整文件失效，不做行号偏移修补。
 - 回归测试不依赖真实外网模型，使用 fake model 环境。
 

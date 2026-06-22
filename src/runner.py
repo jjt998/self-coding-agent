@@ -81,6 +81,31 @@ class SetupCommandResult:
     stderr: str
 
 
+def _format_working_memory_value_for_report(value: Any) -> str:
+    """把 working_memory 单个字段整理成报告可读文本。"""
+    if isinstance(value, str):
+        return value or "无"
+    if isinstance(value, list):
+        items = [str(item) for item in value if str(item).strip()]
+        return "；".join(items) if items else "无"
+    return "无"
+
+
+def _format_working_memory_for_report(working_memory: dict[str, Any]) -> str:
+    """按五个固定字段输出 working_memory，避免再假设它一定是字符串数组。"""
+    ordered_fields = [
+        ("confirmed_facts", "已确认事实"),
+        ("open_questions", "待确认问题"),
+        ("invalidated_beliefs", "已推翻判断"),
+        ("completed_actions", "已完成动作"),
+        ("next_risks", "后续风险"),
+    ]
+    return "\n".join(
+        f"- {label}：{_format_working_memory_value_for_report(working_memory.get(field_name))}"
+        for field_name, label in ordered_fields
+    )
+
+
 def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
     """初始化单次 run，并执行当前真实 loop 状态机流程。"""
     # run 初始化、setup、loop、报告写入都在这里串联，保证 CLI 和 eval 入口复用同一条路径。
@@ -1053,14 +1078,15 @@ def _build_phase_4_report(
     if model_decision:
         model_tool_sequence = ", ".join(tool_call.tool_name for tool_call in model_decision.tool_calls) or "none"
         model_actions = "；".join(model_decision.planned_actions) or "无"
-        model_donelist = "；".join(model_decision.donelist) or "无"
+        model_working_memory = _format_working_memory_for_report(model_decision.working_memory)
         model_response_summary = (
             f"- provider：`{model_decision.provider}`\n"
             f"- model：`{model_decision.model_name}`\n"
             f"- summary：{model_decision.summary}\n"
             f"- rationale：{model_decision.rationale}\n"
             f"- planned_actions：{model_actions}\n"
-            f"- donelist（累计已完成事项）：{model_donelist}\n"
+            f"- working_memory：\n"
+            f"{model_working_memory}\n"
             f"- tool_calls：`{model_tool_sequence}`\n"
             f"- 原始返回：见 `trace.jsonl` 中的 `model_raw_response` 事件。"
         )

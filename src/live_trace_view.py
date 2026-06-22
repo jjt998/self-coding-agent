@@ -486,6 +486,39 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
       document.getElementById("detailJson").textContent = safeJson(value);
     }}
 
+    function normalizeWorkingMemory(value) {{
+      if (!value || typeof value !== "object" || Array.isArray(value)) return {{}};
+      return value;
+    }}
+
+    function workingMemoryFieldPreview(value) {{
+      if (typeof value === "string") return value || "无";
+      if (Array.isArray(value)) return value.join(" | ") || "无";
+      return "无";
+    }}
+
+    function countFilledWorkingMemoryFields(workingMemory) {{
+      return Object.values(normalizeWorkingMemory(workingMemory)).filter((value) => {{
+        if (typeof value === "string") return Boolean(value);
+        if (Array.isArray(value)) return value.length > 0;
+        return false;
+      }}).length;
+    }}
+
+    function renderWorkingMemoryRows(workingMemory) {{
+      const normalized = normalizeWorkingMemory(workingMemory);
+      const fieldPairs = [
+        ["confirmed_facts", "confirmed_facts"],
+        ["open_questions", "open_questions"],
+        ["invalidated_beliefs", "invalidated_beliefs"],
+        ["completed_actions", "completed_actions"],
+        ["next_risks", "next_risks"],
+      ];
+      return fieldPairs.map(([fieldName, label]) => `
+        <div class="kv-row"><strong>${{escapeHtml(label)}}</strong><div>${{escapeHtml(workingMemoryFieldPreview(normalized[fieldName]))}}</div></div>
+      `).join("");
+    }}
+
     function parseUserPayload(requestPayload) {{
       const messages = Array.isArray(requestPayload?.messages) ? requestPayload.messages : [];
       const userMessage = [...messages].reverse().find((item) => item && item.role === "user");
@@ -579,14 +612,14 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
       const runtimeFeedback = userPayload?.runtime_feedback || {{}};
       const reflect = runtimeFeedback.previous_reflect || {{}};
       const stalePaths = Array.isArray(reflect.stale_file_paths) ? reflect.stale_file_paths : [];
-      const previousDone = Array.isArray(runtimeFeedback.previous_donelist) ? runtimeFeedback.previous_donelist : [];
+      const workingMemory = normalizeWorkingMemory(runtimeFeedback.working_memory);
       return [
         ["model", requestPayload?.model || ""],
         ["selected_file_count", repoContext.selected_file_count ?? 0],
         ["runtime_rule_count", Array.isArray(memoryContext.runtime_rule_entries) ? memoryContext.runtime_rule_entries.length : 0],
         ["long_term_count", Array.isArray(memoryContext.long_term_entries) ? memoryContext.long_term_entries.length : 0],
         ["stale_file_paths", stalePaths.length ? stalePaths.join(", ") : "无"],
-        ["previous_donelist_count", previousDone.length],
+        ["working_memory_filled_fields", countFilledWorkingMemoryFields(workingMemory)],
         ["previous_rationale", runtimeFeedback.previous_rationale || "无"],
       ];
     }}
@@ -636,7 +669,7 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
       const summary = decisionPayload?.summary || "";
       const rationale = decisionPayload?.rationale || "";
       const plannedActions = Array.isArray(decisionPayload?.planned_actions) ? decisionPayload.planned_actions : [];
-      const doneList = Array.isArray(decisionPayload?.donelist) ? decisionPayload.donelist : [];
+      const workingMemory = normalizeWorkingMemory(decisionPayload?.working_memory);
       const toolCalls = Array.isArray(decisionPayload?.tool_calls) ? decisionPayload.tool_calls : [];
       const tokenUsage = decisionPayload?.token_usage || {{}};
       const notes = Array.isArray(decisionPayload?.normalization_notes) ? decisionPayload.normalization_notes : [];
@@ -645,7 +678,8 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
           <div class="kv-row"><strong>summary</strong><div>${{escapeHtml(summary)}}</div></div>
           <div class="kv-row"><strong>rationale</strong><div>${{escapeHtml(rationale)}}</div></div>
           <div class="kv-row"><strong>planned_actions</strong><div>${{escapeHtml(plannedActions.join(" | ") || "无")}}</div></div>
-          <div class="kv-row"><strong>donelist</strong><div>${{escapeHtml(doneList.join(" | ") || "无")}}</div></div>
+          <div class="kv-row"><strong>working_memory</strong><div>${{escapeHtml(`filled_fields=${{countFilledWorkingMemoryFields(workingMemory)}}`)}}</div></div>
+          ${{renderWorkingMemoryRows(workingMemory)}}
           <div class="kv-row"><strong>tool_calls</strong><div>${{escapeHtml(toolCalls.map((item) => item.tool_name).join(", ") || "无")}}</div></div>
           <div class="kv-row"><strong>token_usage</strong><div>${{escapeHtml(`prompt=${{tokenUsage.prompt_tokens ?? 0}}, completion=${{tokenUsage.completion_tokens ?? 0}}, total=${{tokenUsage.total_tokens ?? 0}}`)}}</div></div>
         </div>

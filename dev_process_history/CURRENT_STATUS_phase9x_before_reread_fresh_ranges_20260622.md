@@ -23,8 +23,6 @@
 - 当前已落地运行时记忆污染治理第一版：文件一旦被 `apply_patch` 或 `replace_lines` 成功编辑，旧读取缓存会按整文件标记为 `stale`；只有后续重新读取后才恢复为 `fresh`。
 - 当前 `reflect_feedback` 与后续轮次的 `runtime_feedback.previous_reflect` 已能显式区分 `fresh` / `stale` 文件缓存，并保留最近一次缓存失效原因与失效发生轮次，帮助分析“为什么又重读了该文件”。
 - 当前 stale 文件已新增 `stale_reread_guidance`：默认建议模型在编辑后先调用 `read_file_structure_summary` 重新建立结构和最新行号，再调用 `read_file_range` 精读关键片段，避免反复读取同一小段旧附近行号。
-- 当前 `runtime_feedback.previous_reflect.stale_file_paths` 的语义已收紧为“当前仍处于 stale 的文件列表”；如果某个文件已经在上一轮完成重读恢复为 `fresh`，它不应继续出现在这里。
-- 当前 `runtime_feedback.previous_reflect.reread_fresh_ranges` 已新增“编辑后已重读恢复 fresh 的可信范围”摘要，显式告诉模型哪些范围虽然历史上 stale 过，但现在已经可以直接作为当前源码上下文使用，减少把“曾经 stale”误写成“当前 stale”的摇摆。
 - 当前 `bug_fix` 提示词已补充收口规则：一旦当前 diff 已命中任务目标修改点，且针对任务描述的核心验证命令已经符合预期，模型应优先准备结束求解，而不是继续扩展读取外围函数。
 - 当前 `working_memory` 提示词已补充失效迁移规则：凡是被当前轮代码读取、命令输出或 diff 直接否定的旧怀疑，必须移出 `open_questions` 并写入 `invalidated_beliefs`。
 

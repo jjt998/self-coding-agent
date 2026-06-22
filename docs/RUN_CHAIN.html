@@ -622,11 +622,11 @@
         }
       ],
     },
-    "previous_donelist": "到上一轮为止已经完成的事项列表"
+    "working_memory": "上一轮模型原样返回的结构化工作记忆对象"
   },
   "decision_schema": {
     "planned_actions": "只能描述本轮 tool_calls 实际会做的事",
-    "donelist": "到当前轮为止已经完成的事项列表",
+    "working_memory": "固定包含五个字段的结构化工作记忆对象",
     "tool_calls": "唯一会被 act 阶段实际执行的工具调用"
   },
   "tool_schema": {
@@ -650,7 +650,7 @@
           </article>
           <article class="context-layer risk-box">
             <strong>第二轮 plan：叠加 <code>runtime_feedback</code></strong>
-            下一轮会收到观察摘要、最近工具结果摘要、<code>reflect_feedback</code> 和 <code>previous_donelist</code>；其中 <code>previous_donelist</code> 现在是累计 done list，不再是下一轮计划。<span class="risk-text">旧风险是工具摘要过短，只告诉模型读了多少行，却没给关键源码片段。</span>
+            下一轮会收到观察摘要、最近工具结果摘要、<code>reflect_feedback</code> 和 <code>working_memory</code>；其中 <code>working_memory</code> 会把上一轮模型原样返回的结构化工作记忆直接回灌给下一轮。<span class="risk-text">旧风险是工具摘要过短，只告诉模型读了多少行，却没给关键源码片段。</span>
             改进后，<code>read_file</code> 摘要会携带 <code>path</code>、短 <code>content_excerpt</code> 和行号范围。
           </article>
           <article class="context-layer risk-box">
@@ -769,10 +769,10 @@
             <td>当模型本轮不再规划任何工具调用时，harness 会直接结束求解并进入最终验证。</td>
           </tr>
           <tr>
-            <td><code>donelist</code></td>
-            <td>到当前轮为止已经完成的事项列表，用于提醒模型不要重复走回头路。</td>
+            <td><code>working_memory</code></td>
+            <td>模型维护的结构化运行时记忆，包含事实、问题、已推翻判断、已完成动作和后续风险。</td>
             <td>否</td>
-            <td>下一轮会通过 <code>runtime_feedback.previous_donelist</code> 回填给模型，帮助模型记住已经做过什么。</td>
+            <td>下一轮会通过 <code>runtime_feedback.working_memory</code> 原样回填给模型，帮助模型记住已经确认过什么、推翻过什么，以及做过什么。</td>
           </tr>
           <tr>
             <td><code>tool_calls</code></td>
@@ -847,8 +847,8 @@
         </article>
         <article class="mini">
           <h3>结构化模型决策</h3>
-          <p><code>model_decision</code> 保存解析后的 <code>summary</code>、<code>rationale</code>、<code>planned_actions</code>、<code>donelist</code>、<code>tool_calls</code>。</p>
-          <p><code>planned_actions</code> 只解释本轮真实执行动作，<code>donelist</code> 记录累计已完成事项；<code>tool_calls</code> 是唯一执行源。</p>
+          <p><code>model_decision</code> 保存解析后的 <code>summary</code>、<code>rationale</code>、<code>planned_actions</code>、<code>working_memory</code>、<code>tool_calls</code>。</p>
+          <p><code>planned_actions</code> 只解释本轮真实执行动作，<code>working_memory</code> 记录结构化运行时记忆；<code>tool_calls</code> 是唯一执行源。</p>
         </article>
         <article class="mini">
           <h3>工具调用结果</h3>

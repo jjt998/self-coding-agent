@@ -34,12 +34,33 @@ def _openai_response(decision: dict, usage: dict | None = None) -> dict:
     return response
 
 
+def _working_memory(
+    *,
+    confirmed_facts: str | list[str] = "",
+    open_questions: str | list[str] = "",
+    invalidated_beliefs: str | list[str] = "",
+    completed_actions: str | list[str] = "",
+    next_risks: str | list[str] = "",
+) -> dict:
+    return {
+        "confirmed_facts": confirmed_facts,
+        "open_questions": open_questions,
+        "invalidated_beliefs": invalidated_beliefs,
+        "completed_actions": completed_actions,
+        "next_risks": next_risks,
+    }
+
+
 def _valid_decision() -> dict:
     return {
         "summary": "已生成真实模型决策。",
         "rationale": "先搜索任务相关文本。",
         "planned_actions": ["搜索相关文件"],
-        "donelist": ["已搜索任务相关文本"],
+        "working_memory": _working_memory(
+            confirmed_facts=["任务需要定位 Demo 相关代码"],
+            completed_actions=["已搜索任务相关文本"],
+            next_risks=["还未读取源码片段"],
+        ),
         "tool_calls": [
             {
                 "tool_name": "search_text",
@@ -154,12 +175,12 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
     assert user_payload["tool_schema"]["replace_lines"]["required"] == ["path", "start_line", "end_line", "new_text"]
     assert user_payload["tool_schema"]["replace_lines"]["properties"]["new_text"]["type"] == "string"
     assert user_payload["tool_schema"]["search_text"]["optional"] == ["limit"]
-    assert "donelist" in user_payload["decision_schema"]
+    assert "working_memory" in user_payload["decision_schema"]
     assert "本轮 tool_calls" in user_payload["decision_schema"]["planned_actions"][0]
     assert decision.provider == "openai_compatible"
     assert decision.model_name == "demo-model"
     assert decision.planned_actions == ["搜索相关文件"]
-    assert decision.donelist == ["已搜索任务相关文本"]
+    assert decision.working_memory["completed_actions"] == ["已搜索任务相关文本"]
     assert decision.tool_calls[0].tool_name == "search_text"
     assert decision.tool_calls[0].tool_input == {"query": "Demo", "limit": 5}
     assert decision.token_usage.available is False
@@ -221,14 +242,14 @@ def test_openai_compatible_adapter_includes_runtime_feedback(monkeypatch) -> Non
         config_data={},
         runtime_feedback={
             "previous_rationale": "上一轮先读 README，再确认修改点。",
-            "previous_donelist": ["已读取 README.md"],
+            "working_memory": _working_memory(completed_actions=["已读取 README.md"]),
         },
     )
 
     user_payload = json.loads(captured["body"]["messages"][-1]["content"])
     assert user_payload["runtime_feedback"] == {
         "previous_rationale": "上一轮先读 README，再确认修改点。",
-        "previous_donelist": ["已读取 README.md"],
+        "working_memory": _working_memory(completed_actions=["已读取 README.md"]),
     }
     assert "tool_schema" in user_payload
 
@@ -257,7 +278,10 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
             "signals": ["failed_tool_observed"],
             "failed_tools": [{"tool_name": "apply_patch", "error": "old_text_not_found"}],
         },
-        "previous_donelist": ["已修复失败 patch", "已运行验证命令"],
+        "working_memory": _working_memory(
+            completed_actions=["已修复失败 patch", "已运行验证命令"],
+            next_risks="还未重新验证新 patch。",
+        ),
     }
     adapter.decide(
         task="Demo",
@@ -275,15 +299,28 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert "file_context_cache" in prompt_text
     assert "最近五次读取结果" in prompt_text
     assert "cache_status=stale" in prompt_text
-    assert "previous_donelist" in prompt_text
-    assert "donelist" in prompt_text
+    assert "stale_file_paths 只列出当前仍然 stale 的文件" in prompt_text
+    assert "reread_fresh_ranges" in prompt_text
+    assert "safe_to_rely_ranges" in prompt_text
+    assert "runtime_feedback.working_memory" in prompt_text
+    assert "working_memory" in prompt_text
     assert "任务描述描述的是待修复现象，不保证与当前轮已修改后的文件内容一致" in prompt_text
     assert "优先相信当前轮可验证的运行时证据" in prompt_text
+    assert "如果关键目标函数已经处于 fresh 状态" in prompt_text
+    assert "不要仅因为任务描述与当前代码冲突，就立刻扩展读取外围 helper" in prompt_text
+    assert "并优先运行核心命令校验当前代码行为" in prompt_text
+    assert "凡是被当前轮代码读取结果、命令输出或 diff 直接否定的旧怀疑" in prompt_text
+    assert "必须从 open_questions 移出，并写入 invalidated_beliefs" in prompt_text
     assert "由 harness 根据本轮 tool_calls 是否为空来决定" in prompt_text
+    assert "bug_fix 收口规则" in prompt_text
+    assert "当前 diff 已经命中任务目标修改点" in prompt_text
+    assert "核心验证命令已经符合预期" in prompt_text
+    assert "继续扩展读取外围函数" in prompt_text
     assert "不要再输出 loop_end" not in prompt_text
     assert "tool_calls" in prompt_text
-    assert "已经完成的事项列表" in prompt_text
-    assert "不是下一轮计划" in prompt_text
+    assert "confirmed_facts" in prompt_text
+    assert "completed_actions" in prompt_text
+    assert "不要依赖 harness 帮你 merge" in prompt_text
     assert "planned_actions" in prompt_text
     assert "ASCII stdout/stderr" in prompt_text
     assert "content_mode=\"full\"" in prompt_text
@@ -301,6 +338,7 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert "stale_reread_guidance" in prompt_text
     assert "recommended_sequence" in prompt_text
     assert "read_file_structure_summary -> read_file_range" in prompt_text
+    assert "不要仅因为文件曾经 stale 过就重复读取同一函数" in prompt_text
     assert "previous_reflect_feedback" not in prompt_text
     assert "replan_constraints" not in prompt_text
     assert "avoid_exact_tool_sequence" not in prompt_text
@@ -435,6 +473,7 @@ def test_openai_compatible_adapter_normalizes_declared_tool_input_alias(monkeypa
                     "summary": "读取文件。",
                     "rationale": "使用兼容别名读取文件。",
                     "planned_actions": ["读取 README"],
+                    "working_memory": _working_memory(completed_actions=["已准备读取 README.md"]),
                     "tool_calls": [
                         {
                             "tool_name": "read_file",
@@ -469,7 +508,7 @@ def test_openai_compatible_adapter_rejects_tool_input_type_mismatch(monkeypatch)
                     "summary": "patch file",
                     "rationale": "new_text cannot be null",
                     "planned_actions": ["apply patch"],
-                    "donelist": [],
+                    "working_memory": _working_memory(),
                     "tool_calls": [
                         {
                             "tool_name": "apply_patch",
@@ -509,7 +548,7 @@ def test_openai_compatible_adapter_rejects_new_tool_input_type_mismatch(monkeypa
                     "summary": "按行替换文件",
                     "rationale": "new_text 不能是 null。",
                     "planned_actions": ["本轮尝试按行替换"],
-                    "donelist": [],
+                    "working_memory": _working_memory(),
                     "tool_calls": [
                         {
                             "tool_name": "replace_lines",
@@ -556,7 +595,7 @@ def test_openai_compatible_adapter_ignores_legacy_loop_end_field(monkeypatch) ->
                     "rationale": "no more work is needed",
                     "loop_end": True,
                     "planned_actions": ["read README"],
-                    "donelist": ["checked existing result"],
+                    "working_memory": _working_memory(completed_actions=["checked existing result"]),
                     "tool_calls": [
                         {
                             "tool_name": "read_file",
@@ -582,7 +621,7 @@ def test_openai_compatible_adapter_ignores_legacy_loop_end_field(monkeypatch) ->
 
     assert decision.summary == "finish solve"
     assert decision.tool_calls[0].tool_name == "read_file"
-    assert decision.donelist == ["checked existing result"]
+    assert decision.working_memory["completed_actions"] == ["checked existing result"]
 
 def test_openai_compatible_adapter_raises_on_os_error(monkeypatch) -> None:
     def fake_urlopen(_request, timeout=None):
@@ -696,6 +735,80 @@ def test_openai_compatible_adapter_normalizes_non_executable_planned_actions(mon
         assert decision.normalization_notes[0]["field_path"] == "planned_actions"
         assert decision.normalization_notes[0]["reason"] == expected_reason
         assert "normalization_notes" not in decision.to_dict()
+
+
+def test_openai_compatible_adapter_accepts_working_memory_as_strings_lists_or_mixed(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    adapter = OpenAICompatibleModelAdapter(
+        provider="openai_compatible",
+        model_name="demo-model",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+        timeout_seconds=7,
+    )
+
+    cases = [
+        _working_memory(
+            confirmed_facts="已确认事实",
+            open_questions="待确认问题",
+            invalidated_beliefs="旧判断无效",
+            completed_actions="已完成动作",
+            next_risks="还要再验证",
+        ),
+        _working_memory(
+            confirmed_facts=["已确认事实"],
+            open_questions=["待确认问题"],
+            invalidated_beliefs=["旧判断无效"],
+            completed_actions=["已完成动作"],
+            next_risks=["还要再验证"],
+        ),
+        _working_memory(
+            confirmed_facts="已确认事实",
+            open_questions=["待确认问题"],
+            invalidated_beliefs="旧判断无效",
+            completed_actions=["已完成动作"],
+            next_risks="还要再验证",
+        ),
+    ]
+    for working_memory in cases:
+        response_payload = _openai_response({**_valid_decision(), "working_memory": working_memory})
+        monkeypatch.setenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", json.dumps(response_payload, ensure_ascii=False))
+        decision = adapter.decide(task="任务", task_type="general", context_snapshot=None, config_data={})
+        assert decision.working_memory == working_memory
+
+
+def test_openai_compatible_adapter_rejects_invalid_working_memory_shape(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    adapter = OpenAICompatibleModelAdapter(
+        provider="openai_compatible",
+        model_name="demo-model",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+        timeout_seconds=7,
+    )
+
+    cases = [
+        ({**_valid_decision(), "working_memory": "bad"}, "working_memory"),
+        ({**_valid_decision(), "working_memory": {"confirmed_facts": "only one field"}}, "working_memory"),
+        (
+            {
+                **_valid_decision(),
+                "working_memory": _working_memory(completed_actions=["ok", 1]),
+            },
+            "working_memory.completed_actions",
+        ),
+    ]
+    for raw_decision, field_path in cases:
+        monkeypatch.setenv(
+            "SELF_CODING_AGENT_FAKE_MODEL_RESPONSE",
+            json.dumps(_openai_response(raw_decision), ensure_ascii=False),
+        )
+        try:
+            adapter.decide(task="任务", task_type="general", context_snapshot=None, config_data={})
+        except ModelResponseError as error:
+            assert error.details["field_path"] == field_path
+        else:
+            raise AssertionError("invalid working_memory should raise ModelResponseError")
 
 
 def test_openai_compatible_adapter_rejects_invalid_response(monkeypatch) -> None:
