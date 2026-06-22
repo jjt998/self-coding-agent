@@ -169,7 +169,6 @@ class ModelDecision:
     task_type: str
     summary: str
     rationale: str
-    loop_end: bool = False
     planned_actions: list[str] = field(default_factory=list)
     donelist: list[str] = field(default_factory=list)
     tool_calls: list[PlannedToolCall] = field(default_factory=list)
@@ -460,7 +459,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     "content": (
                         "你是本地代码任务 harness 的决策层。"
                         "必须只返回 JSON 对象，不要 Markdown。"
-                        "JSON 字段必须包含 summary、rationale、loop_end、planned_actions、donelist、tool_calls。"
+                        "JSON 字段必须包含 summary、rationale、planned_actions、donelist、tool_calls。"
                         "tool_calls 里的 tool_name 只能是 search_text、read_file、read_file_structure_summary、read_file_range、apply_patch、replace_lines、run_command、git_diff，"
                         "tool_input 必须是对象。"
                         "工具参数必须严格遵守 user message 里的 tool_schema，"
@@ -476,8 +475,6 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "这种旧缓存只代表你以前读过它，不能继续把其中内容当成当前可信源码。"
                         "runtime_feedback.previous_rationale 是上一轮模型自己给出的判断理由，可用来延续或修正上一轮思路。"
                         "runtime_feedback.previous_donelist 是到上一轮为止已经完成的事项列表。"
-                        "任务描述描述的是待修复现象，不保证与当前轮已修改后的文件内容一致。"
-                        "当任务描述、当前代码、recent_tool_results 和 git_diff 看起来冲突时，优先相信当前轮可验证的运行时证据，而不是反复把初始任务描述当成当前代码事实。"
                         "你需要在 rationale 中自行解释这些事实，并据此避免重复兜圈。"
                     ),
                 },
@@ -485,15 +482,12 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     "role": "system",
                     "content": (
                         "请严格遵守 user message 中的 decision_schema："
-                        "loop_end 用来表达当前是否已经结束求解循环；"
-                        "只有当你确认自己后续不再需要做任何读取、修改、命令检查、diff 检查或补充验证时，才能把 loop_end 设为 true；"
-                        "也就是说，你下一轮计划的tool_calls为空时，才能把 loop_end 设为 true；"
-                        "只要你后续还打算继续做任何工作，loop_end 就必须是 false；"
                         "planned_actions 只写本轮 tool_calls 实际会执行的动作；"
                         "donelist 必须写成到当前这一轮为止已经完成的事项列表，而不是下一轮计划；"
                         "donelist 只写你做过什么事情，禁止在里面做解释和分析类的描述；"
                         "如果上一轮 done list 里已有某项且本轮没有推翻它，就继续保留，避免遗漏已经做过的事；"
                         "tool_calls 是唯一执行源。"
+                        "由 harness 根据本轮 tool_calls 是否为空来决定是否继续求解。"
                         "在 Windows CLI 任务中，默认要求 ASCII stdout/stderr；"
                         "除非任务明确要求 Unicode，否则避免 emoji、全角符号和非必要中文输出。"
                     ),
@@ -506,8 +500,15 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "当 read_file 或 read_file_structure_summary 返回 content_mode=\"structure_summary\" 时，说明当前只拿到了结构摘要与行号索引，若缺少关键区域，请使用 read_file_range(path,start_line,end_line) 精确补齐；read_file_range 每次只能读取 1 到 80 行，不要用它读取整个文件。"
                         "如果某个文件在上一轮编辑后被标记为 stale，不要继续依赖编辑前读取到的旧片段；"
                         "若只需要重新定位结构，先调用 read_file_structure_summary，再按行号调用 read_file_range。"
+                        "如果 runtime_feedback.previous_reflect.stale_reread_guidance 已给出 stale 文件的 recommended_sequence，默认按这个顺序执行；"
+                        "也就是说，编辑后的重读优先走 read_file_structure_summary -> read_file_range，不要一上来就反复读取同一小段旧附近行号。"
+                        "编辑规则：默认先使用 apply_patch，不要一开始就把 replace_lines 当成主编辑方式。"
+                        "只有在 apply_patch 连续失败、old_text_not_found、文件存在换行/缩进/不可见字符等问题导致精确文本难以匹配，并且你已经重新读取目标范围并确认最新行号时，才使用 replace_lines。"
                         "编辑规则：如果同一文件连续多次出现 old_text_not_found，尤其接近 3 次时，优先基于最近源码行号使用 replace_lines；"
                         "不要继续猜测大段 apply_patch.old_text。"
+                        "请注意："
+                        "任务描述描述的是待修复现象，不保证与当前轮已修改后的文件内容一致。"
+                        "当任务描述、当前代码、recent_tool_results 和 git_diff 看起来冲突时，优先相信当前轮可验证的运行时证据，而不是反复把初始任务描述当成当前代码事实。"
                     ),
                 },
                 {
@@ -521,11 +522,6 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                             "decision_schema": {
                                 "summary": "字符串：本轮决策摘要。",
                                 "rationale": "字符串：解释为什么本轮这样安排。",
-                                "loop_end": (
-                                    "布尔值：只有当你确认自己后续不再需要做任何读取、修改、命令检查、"
-                                    "diff 检查或补充验证时，才能设为 true；否则必须是 false。"
-                                    "当 loop_end 为 true 时，tool_calls 必须为空数组。"
-                                ),
                                 "planned_actions": [
                                     "字符串列表：只能描述本轮 tool_calls 实际会执行的动作。"
                                 ],
@@ -554,24 +550,11 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         """校验模型决策字段，并转换成内部数据结构。"""
         summary = _required_string(raw_decision, "summary", self)
         rationale = _required_string(raw_decision, "rationale", self)
-        loop_end = _required_bool(raw_decision, "loop_end", self)
         tool_calls = _required_tool_calls(raw_decision, self)
         planned_actions, normalization_notes = _normalize_planned_actions(
             raw_decision=raw_decision,
             tool_calls=tool_calls,
         )
-        if loop_end and tool_calls:
-            raise ModelResponseError(
-                "模型决策不合法：loop_end 为 true 时，tool_calls 必须为空数组。",
-                provider=self.provider,
-                model_name=self.model_name,
-                details=self._diagnostic_details(
-                    field_path="loop_end",
-                    response_excerpt=raw_response_content,
-                    loop_end=loop_end,
-                    tool_call_count=len(tool_calls),
-                ),
-            )
         donelist, cross_round_notes = _normalize_optional_string_list(
             raw_decision=raw_decision,
             field_name="donelist",
@@ -583,7 +566,6 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             task_type=task_type,
             summary=summary,
             rationale=rationale,
-            loop_end=loop_end,
             planned_actions=planned_actions,
             donelist=donelist,
             tool_calls=tool_calls,

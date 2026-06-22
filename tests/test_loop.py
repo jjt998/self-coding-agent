@@ -33,7 +33,6 @@ def _fake_model_response(tool_calls: list[dict] | None = None, usage: dict | Non
     decision = {
         "summary": "已生成真实模型决策。",
         "rationale": "按模型返回的工具计划执行。",
-        "loop_end": False,
         "planned_actions": ["执行模型工具计划"],
         "donelist": ["已执行模型工具计划"],
         "tool_calls": tool_calls
@@ -1081,7 +1080,6 @@ def test_runtime_feedback_includes_full_git_diff_content(
                     rationale="上一轮的完整 diff 已经可见。",
                     planned_actions=["结束"],
                     tool_calls=[],
-                    loop_end=True,
                 )
             return ModelDecision(
                 provider=self.provider,
@@ -1159,7 +1157,6 @@ def test_runtime_feedback_includes_run_command_stderr_and_python_traceback_summa
                     rationale="已经拿到失败 traceback。",
                     planned_actions=["结束"],
                     tool_calls=[],
-                    loop_end=True,
                 )
             return ModelDecision(
                 provider=self.provider,
@@ -1335,7 +1332,6 @@ def test_runtime_feedback_includes_explicit_structure_summary_tool_result(
                     rationale="已经看到显式结构摘要。",
                     planned_actions=["结束"],
                     tool_calls=[],
-                    loop_end=True,
                 )
             return ModelDecision(
                 provider=self.provider,
@@ -1586,7 +1582,6 @@ def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshe
                 rationale="重读文件，刷新缓存。",
                 planned_actions=["重新读取 app.py"],
                 tool_calls=[PlannedToolCall(tool_name="read_file", tool_input={"path": "app.py"})],
-                loop_end=True,
             )
 
     def fake_verification(*, settings, tool_executions):
@@ -1623,6 +1618,17 @@ def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshe
     assert stale_cache["stale_snippet_count"] == 1
     assert stale_cache["stale_covered_ranges"] == ["1-3"]
     assert feedbacks[2]["previous_reflect"]["stale_file_paths"] == ["app.py"]
+    stale_guidance = feedbacks[2]["previous_reflect"]["stale_reread_guidance"]
+    assert stale_guidance == [
+        {
+            "path": "app.py",
+            "reason": "file_was_edited_and_previous_snippets_are_stale",
+            "recommended_sequence": ["read_file_structure_summary", "read_file_range"],
+            "why": "先重新建立当前文件结构和最新行号，再按新的行号范围精读，不要直接重复读取旧片段附近的小范围。",
+            "stale_reason": "edited_by_replace_lines",
+            "previous_covered_ranges": ["1-3"],
+        }
+    ]
     assert feedbacks[2]["previous_reflect"]["recent_file_context_invalidations"][0]["path"] == "app.py"
 
     fresh_cache = runtime_state.reflect_feedback["file_context_cache"]["app.py"]
@@ -1631,6 +1637,7 @@ def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshe
     assert fresh_cache["covered_ranges"] == ["1-3"]
     assert fresh_cache["snippets"][0]["content_excerpt"] == "one\nTWO\nthree\n"
     assert runtime_state.reflect_feedback["stale_file_paths"] == []
+    assert runtime_state.reflect_feedback["stale_reread_guidance"] == []
 
 
 def _run_factual_reflect_feedback_case(
@@ -2114,7 +2121,6 @@ def test_second_plan_receives_previous_donelist(tmp_path: Path, monkeypatch) -> 
     ]
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
     assert model_decision_payloads[0]["donelist"] == ["已写入 run_evidence.md", "已查看当前 diff"]
-    assert model_decision_payloads[0]["loop_end"] is False
 
 
 def test_second_plan_receives_previous_rationale(tmp_path: Path, monkeypatch) -> None:
@@ -2148,7 +2154,6 @@ def test_second_plan_receives_previous_rationale(tmp_path: Path, monkeypatch) ->
                 rationale="已经看到上一轮 rationale。",
                 planned_actions=["结束"],
                 tool_calls=[],
-                loop_end=True,
             )
 
     def fake_verification(*, settings, tool_executions):
@@ -2226,7 +2231,6 @@ def test_donelist_is_merged_as_global_done_list(tmp_path: Path, monkeypatch) -> 
                 rationale="done list 已完整，可以收尾。",
                 planned_actions=["结束求解"],
                 tool_calls=[],
-                loop_end=True,
             ),
         ]
     )
@@ -2271,31 +2275,41 @@ def test_donelist_is_merged_as_global_done_list(tmp_path: Path, monkeypatch) -> 
     assert runtime_state.donelist_history[1] == ["已读取 README.md", "已写入 run_evidence.md"]
 
 
-def test_loop_rejects_loop_end_true_with_non_empty_tool_calls(tmp_path: Path, monkeypatch) -> None:
+def test_loop_exits_when_model_returns_no_planned_tool_calls(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
 
     class FakeAdapter:
         provider = "openai_compatible"
-        model_name = "fake-invalid-loop-end-model"
+        model_name = "fake-empty-tool-call-model"
 
         def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            raise loop_module.ModelResponseError(
-                "模型决策不合法：loop_end 为 true 时，tool_calls 必须为空数组。",
+            return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
-                details={
-                    "field_path": "loop_end",
-                    "tool_call_count": 1,
-                    "loop_end": True,
-                },
+                task_type=task_type,
+                summary="no more tools",
+                rationale="enough evidence to enter final verification",
+                planned_actions=[],
+                donelist=["confirmed no more reads or edits are needed"],
+                tool_calls=[],
             )
 
     monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
 
+    def fake_verification(*, settings, tool_executions):
+        return VerificationResult(
+            passed=True,
+            summary="ok",
+            checks=[VerificationCheck(name="fake_verify", passed=True, detail="fake")],
+            details={},
+        )
+
+    monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
+
     settings = build_settings(
-        task="验证 loop_end=true 时不能再带 tool_calls",
+        task="empty tool calls should end solve loop",
         task_type="general",
         repo_root=str(repo_root),
         output_root=str(tmp_path / "runs"),
@@ -2312,9 +2326,18 @@ def test_loop_rejects_loop_end_true_with_non_empty_tool_calls(tmp_path: Path, mo
     )
 
     assert runtime_state.stop_reason is not None
-    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.MODEL_ERROR
-    assert runtime_state.stop_reason.details["field_path"] == "loop_end"
-    assert runtime_state.stop_reason.details["tool_call_count"] == 1
+    assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
+    assert runtime_state.stop_reason.details["solve_loop_exit_reason"] == "no_planned_tool_calls"
+
+    trace_events = [
+        json.loads(line)
+        for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    exit_payload = next(event["payload"] for event in trace_events if event["event_type"] == "solve_loop_exit_detected")
+    assert exit_payload["solve_loop_exit_reason"] == "no_planned_tool_calls"
+    assert exit_payload["tool_call_count"] == 0
+
 def test_loop_injects_refactor_runtime_rule_into_context_snapshot(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()

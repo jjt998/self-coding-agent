@@ -644,7 +644,6 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
         <div class="kv">
           <div class="kv-row"><strong>summary</strong><div>${{escapeHtml(summary)}}</div></div>
           <div class="kv-row"><strong>rationale</strong><div>${{escapeHtml(rationale)}}</div></div>
-          <div class="kv-row"><strong>loop_end</strong><div>${{escapeHtml(decisionPayload?.loop_end ?? false)}}</div></div>
           <div class="kv-row"><strong>planned_actions</strong><div>${{escapeHtml(plannedActions.join(" | ") || "无")}}</div></div>
           <div class="kv-row"><strong>donelist</strong><div>${{escapeHtml(doneList.join(" | ") || "无")}}</div></div>
           <div class="kv-row"><strong>tool_calls</strong><div>${{escapeHtml(toolCalls.map((item) => item.tool_name).join(", ") || "无")}}</div></div>

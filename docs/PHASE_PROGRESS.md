@@ -10,15 +10,15 @@
 
 - 当前 loop 已从 `ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize` 调整为 `ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize`。
 - `verify` 现在只会在求解阶段退出后执行一次，验证结果不再回灌给后续模型轮次。
-- `ModelDecision` 已新增 `loop_end`，用于让模型显式表达“当前是否真的已经不再需要任何后续工作”；只有后续不再读、改、跑命令、看 diff 或补充验证时才允许设为 `true`，并且同轮 `tool_calls` 必须为空。
+- ????????????????????? harness ???? `tool_calls` ?????????
 - Runtime 已新增“连续两次空 `tool_calls`”收口信号；命中后会直接退出求解阶段并进入最终验证。
-- trace 已新增 `solve_loop_exit_detected`，`run_finished.stop_reason.details` 已补充 `solve_loop_exit_reason`、`final_verification_passed` 和 `consecutive_empty_tool_call_count`。
 - `previous_verification` 已从模型输入中移除，`previous_reflect.verification` 也已从事实反馈中移除。
 - token diagnostics 仍会继续流入 `model_raw_response`、`model_decision`、`run_finished`、`report.md`、`summary.json`、`summary.md` 和 comparison delta；provider 缺失 `usage` 时不做本地估算。
 - 当前产品定位继续向 `bug_fix` 主赛道收敛，其它任务类型保持兼容，但不再默认依赖过程内 verify 反馈。
 - 当前已新增显式结构摘要工具 `read_file_structure_summary(path)`，让模型能先看结构、再按行号精读，而不是总从 `read_file` 间接触发大文件摘要。
 - 当前已接入运行时记忆污染治理第一版：成功编辑过的文件会把旧读取缓存整文件标记为 `stale`，后续只有重新读取后才恢复为 `fresh`。
 - `reflect_feedback` 现已补充 `stale_file_paths` 和最近缓存失效诊断，便于在 trace 中直接看出“为什么又读了一次这个文件”。
+- stale 文件的 `previous_reflect` 现已新增 `stale_reread_guidance`，把“先 `read_file_structure_summary`、再 `read_file_range`”固化成编辑后重读默认顺序，优先减少重复读取同一小段旧附近行号。
 
 > 说明：下方按 Phase 保留历史推进记录，其中部分旧条目描述的是更早期的 loop 或 verify 形态；当前实现以上方“最新 Phase 9.x 收口”为准。
 

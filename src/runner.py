@@ -1322,12 +1322,11 @@ def _build_phase_4_report(
     stop_reason_details = runtime_state.stop_reason.details if runtime_state.stop_reason else {}
     solve_loop_exit_reason = str(stop_reason_details.get("solve_loop_exit_reason", "")).strip() or "unknown"
     final_verification_passed = bool(stop_reason_details.get("final_verification_passed"))
-    empty_stop = solve_loop_exit_reason == "consecutive_empty_tool_calls"
     appendix = (
         "\n\n## 最终验证语义\n\n"
         f"- 本次 verify 为末尾单次最终验证：`true`\n"
         f"- 求解阶段退出原因：`{solve_loop_exit_reason}`\n"
-        f"- 是否命中连续两次空 tool_calls：`{'true' if empty_stop else 'false'}`\n"
+        f"- 是否命中连续两次空 tool_calls：`{'true' if solve_loop_exit_reason == 'no_planned_tool_calls' else 'false'}`\n"
         f"- 最终验证是否通过：`{'true' if final_verification_passed else 'false'}`\n"
     )
     return base_report + appendix

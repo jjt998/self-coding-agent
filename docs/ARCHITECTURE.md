@@ -284,7 +284,6 @@ model_decision:
   task_type:
   summary:
   rationale:
-  loop_end:
   planned_actions:
     - "本轮 tool_calls 实际会执行的动作说明"
   donelist:
@@ -301,7 +300,7 @@ model_decision:
 - `tool_calls` 是唯一执行源，`act` 阶段只按这个数组调用工具。
 - `planned_actions` 是本轮可读计划说明，不是跨轮任务队列，也不驱动执行。
 - `donelist` 当前承载累计已完成事项，下一轮会通过 `runtime_feedback.previous_donelist` 回填给模型，帮助模型记住“已经做过什么”。
-- `loop_end` 不是“差不多做完了”的软信号，而是“后续不再执行任何读取、修改、命令检查、diff 检查或补充验证”的硬收口信号；当它为 `true` 时，同轮 `tool_calls` 必须为空。
+- ????????????????????? harness ???? `tool_calls` ?????????
 - `raw_response_content` 只写入本地 trace，用于排查模型显式返回内容，不包含 provider 隐藏推理链。
 - `normalization_notes` 记录展示字段的宽容归一化，例如缺失 `planned_actions` 时从 `tool_calls` 派生说明。
 

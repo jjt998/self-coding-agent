@@ -12,9 +12,9 @@
 
 - 最新 loop 形态已收敛为 `ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize`；`verify` 不再在每轮 `act` 后执行，而是在求解阶段退出后只执行一次末尾最终验证。
 - 当前 `verify` 已明确退回纯裁判角色：同一次 run 最多执行一次，只负责最终通过/失败判定、报告展示和 eval 聚合，不再把验证结果反馈给后续模型轮次。
-- 当前求解阶段有四类显式退出信号：`loop_end = true`、连续两次 `tool_calls` 为空、达到 `runtime.max_steps`、或遇到 `model_error / setup_failed / internal_error`。
-- `ModelDecision` 已新增 `loop_end`，用于让模型显式表达“后续是否真的不再做任何工作”；只有确认后续不再需要读取、修改、命令检查、diff 检查或补充验证时，才允许设为 `true`，且此时 `tool_calls` 必须为空数组。
-- `trace.jsonl` 已新增或明确记录 `model_decision.loop_end`、`solve_loop_exit_detected`、单次 `verification_result`，以及 `run_finished.stop_reason.details.solve_loop_exit_reason`。
+- 当前求解阶段的默认退出信号已收敛为：本轮 `tool_calls` 为空、达到 `runtime.max_steps`、或遇到 `model_error / setup_failed / internal_error`。
+- ????????????????????? harness ???? `tool_calls` ?????????
+- `trace.jsonl` 会继续记录 `solve_loop_exit_detected`、单次 `verification_result`，以及 `run_finished.stop_reason.details.solve_loop_exit_reason`。
 - 后续模型轮次现在只接收事实型 `runtime_feedback.previous_reflect` 和 `previous_donelist`；其中 `previous_donelist` 已重定义为“到上一轮为止已经完成的事项列表”，用于减少模型反复兜圈；`previous_verification` 与 `previous_reflect.verification` 已从链路中移除。
 - `reflect` 仍保留在 loop 内，但职责已收敛为事实压缩：最近工具结果、失败工具、文件读取缓存、diff 状态、变更文件和轻量 `signals`，不再承担“响应 verify failure”职责。
 - 当前单任务 run 仍保留 token diagnostics：聚合 `prompt_tokens`、`completion_tokens`、`total_tokens`、`request_count`、`missing_usage_count` 和 `complete`；provider 缺少 `usage` 时不做本地估算，而是保留为“不完整但真实”。
@@ -22,6 +22,7 @@
 - 当前已新增显式结构摘要工具 `read_file_structure_summary(path)`，用于只读取指定文件的结构摘要；`.py` 文件会继续暴露 `class` / `def` 的起始行号，供后续 `read_file_range` 精读。
 - 当前已落地运行时记忆污染治理第一版：文件一旦被 `apply_patch` 或 `replace_lines` 成功编辑，旧读取缓存会按整文件标记为 `stale`；只有后续重新读取后才恢复为 `fresh`。
 - 当前 `reflect_feedback` 与后续轮次的 `runtime_feedback.previous_reflect` 已能显式区分 `fresh` / `stale` 文件缓存，并保留最近一次缓存失效原因与失效发生轮次，帮助分析“为什么又重读了该文件”。
+- 当前 stale 文件已新增 `stale_reread_guidance`：默认建议模型在编辑后先调用 `read_file_structure_summary` 重新建立结构和最新行号，再调用 `read_file_range` 精读关键片段，避免反复读取同一小段旧附近行号。
 
 > 说明：下面保留了 Phase 8/Phase 9 早期推进记录，其中部分段落描述的是历史状态；当前行为以上方最新条目为准。
 
@@ -54,7 +55,7 @@
 - 当前真实验证已从“只看 verify 命令退出码”升级到“命令执行结果 + 结构化规则联合判定”，失败时会直接落到 `verification_result.checks`，便于 eval 和 trace 解释具体未满足条件。
 - 当前 `verify_rules` 第二批规则类型已补齐：除首批正向包含/存在检查外，现已支持命令输出“不包含”检查、文件“不存在”检查、文件最小/最大行数检查，能更自然表达“错误输出不应出现”“临时文件应被删除”“测试文件至少补到几行”等真实任务通过条件。
 - 当前已补上强制真实模型决策层第一版：`src/model.py` 不再保留 `rule_based` adapter，配置层只支持 `openai_compatible` provider。
-- 当前 OpenAI 兼容决策层会调用 `/chat/completions`，要求模型返回结构化 JSON：`summary`、`rationale`、`loop_end`、`planned_actions`、`donelist`、`tool_calls`；其中 `donelist` 当前语义是“到当前轮为止已经完成的事项列表”。
+- ????????????????????? harness ???? `tool_calls` ?????????
 - 当前模型工具计划已做 schema 校验：只允许 `search_text`、`read_file`、`apply_patch`、`run_command`、`git_diff`，且 `tool_input` 必须是对象，并会校验字段名、必填字段和字段类型。
 - 当前 `plan` 阶段模型配置、请求或响应失败会写入 `model_decision_failed` trace，并以 `stop_reason.code = model_error` 结束 run，不再回退到本地规则决策。
 - 当前所有 `configs/*.json` 已统一切到 `openai_compatible`，默认使用 DeepSeek endpoint，并通过 `.env` 或系统环境变量中的 `DEEPSEEK_API_KEY` 提供密钥；无 API key 是预期的模型配置错误。
@@ -78,7 +79,7 @@
 
 ## 当前最小闭环缺口
 
-- `loop_end` 与“连续两次空 `tool_calls`”虽然已经接入求解收口，但还需要更多真实 run 才能判断这两个信号是否稳定、是否会过早结束。
+- ????????????????????? harness ???? `tool_calls` ?????????
 - `verify` 已经更接近纯裁判，但任务级 `verify_rules` 设计仍需继续加强，尤其是面向 `bug_fix` 的“修好了没有、回归没回归”这类行为级验证。
 - 过程诊断信息已经能从 `trace.jsonl` 反推，但当前 trace 查看体验仍偏原始；后续仍需继续加强 `trace_view.html`、报告摘要和高信号定位能力。
 - `refactor`、`test_generation`、`code_understanding` 目前仍更适合作为兼容研究题；当前主要评测赛道仍应继续聚焦更难但可客观裁判的 `bug_fix` 任务。
@@ -88,7 +89,7 @@
 
 - 继续扩充 `bug_fix` 任务和末尾最终 verify 规则，优先保证“是否修复”和“是否回归”可稳定裁判。
 - 继续加强 trace、report 和 `trace_view.html`，重点提升 `model_decision`、收口信号、最终验证和 diff 快照的可读性。
-- 继续观察 `loop_end` 与连续空 `tool_calls` 的真实收口质量，在拿到更多 run 证据前，不急着引入更细的新收口启发式。
+- ????????????????????? harness ???? `tool_calls` ?????????
 - 在拿到更多真实 trace 后，再决定是否把文件缓存治理从“整文件全失效”升级为“按区间失效 + 行号映射”。
 
 ## 当前阻塞
@@ -234,7 +235,7 @@
 ## Phase 9 本轮新增进展：跨轮计划与工具入参类型校验
 
 - 模型决策 JSON 中的 `donelist` 已重定义为累计 done list，用于记录“到当前轮为止已经做过什么”；`planned_actions` 明确只描述本轮 `tool_calls` 实际会执行的动作。
-- 模型决策 JSON 中的 `loop_end` 现在要求更严格：只要模型还计划继续做任何读取、修改、检查或补充验证，就必须保持 `false`，不能因为“接近完成”而提前结束；一旦 `loop_end=true`，同轮 `tool_calls` 必须为空，否则直接视为非法模型决策。
+- ????????????????????? harness ???? `tool_calls` ?????????
 - 下一轮 `runtime_feedback.previous_donelist` 会把上一轮累计 done list 回填给模型，帮助模型延续已完成事项，而不是重复生成未来计划。
 - harness 会在运行时合并上一轮 done list 与本轮返回结果；即使模型本轮漏写历史事项，也不会把已完成记录直接丢掉。
 - `model_decision` trace、plan state result、`finalize_summary` 和 `run_finished.stop_reason.details` 均会保留当前累计 done list；报告的“模型返回摘要”也会展示 `donelist`。

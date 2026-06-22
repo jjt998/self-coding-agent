@@ -38,7 +38,6 @@ def _valid_decision() -> dict:
     return {
         "summary": "已生成真实模型决策。",
         "rationale": "先搜索任务相关文本。",
-        "loop_end": False,
         "planned_actions": ["搜索相关文件"],
         "donelist": ["已搜索任务相关文本"],
         "tool_calls": [
@@ -68,17 +67,17 @@ def test_build_model_adapter_rejects_missing_or_unsupported_provider() -> None:
     try:
         build_model_adapter({})
     except ModelConfigError as error:
-        assert "缺少 model 配置" in str(error)
+        assert error.details["field_path"] == "model"
     else:
         raise AssertionError("missing model config should fail")
 
     try:
         build_model_adapter({"model": {"provider": "rule_based", "name": "demo"}})
     except ModelConfigError as error:
-        assert "不支持的 model.provider" in str(error)
+        assert error.details["field_path"] == "model.provider"
+        assert error.details["provider"] == "rule_based"
     else:
         raise AssertionError("unsupported provider should fail")
-
 
 def test_build_model_adapter_requires_api_key(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
@@ -155,11 +154,8 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
     assert user_payload["tool_schema"]["replace_lines"]["required"] == ["path", "start_line", "end_line", "new_text"]
     assert user_payload["tool_schema"]["replace_lines"]["properties"]["new_text"]["type"] == "string"
     assert user_payload["tool_schema"]["search_text"]["optional"] == ["limit"]
-    assert "loop_end" in user_payload["decision_schema"]
     assert "donelist" in user_payload["decision_schema"]
     assert "本轮 tool_calls" in user_payload["decision_schema"]["planned_actions"][0]
-    assert "后续不再需要做任何读取、修改、命令检查、diff 检查或补充验证" in user_payload["decision_schema"]["loop_end"]
-    assert "tool_calls 必须为空数组" in user_payload["decision_schema"]["loop_end"]
     assert decision.provider == "openai_compatible"
     assert decision.model_name == "demo-model"
     assert decision.planned_actions == ["搜索相关文件"]
@@ -283,8 +279,8 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert "donelist" in prompt_text
     assert "任务描述描述的是待修复现象，不保证与当前轮已修改后的文件内容一致" in prompt_text
     assert "优先相信当前轮可验证的运行时证据" in prompt_text
-    assert "loop_end" in prompt_text
-    assert "后续不再需要做任何读取、修改、命令检查、diff 检查或补充验证" in prompt_text
+    assert "由 harness 根据本轮 tool_calls 是否为空来决定" in prompt_text
+    assert "不要再输出 loop_end" not in prompt_text
     assert "tool_calls" in prompt_text
     assert "已经完成的事项列表" in prompt_text
     assert "不是下一轮计划" in prompt_text
@@ -297,7 +293,14 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert "1 到 80 行" in prompt_text
     assert "不要用它读取整个文件" in prompt_text
     assert "replace_lines" in prompt_text
+    assert "默认先使用 apply_patch" in prompt_text
+    assert "不要一开始就把 replace_lines 当成主编辑方式" in prompt_text
+    assert "apply_patch 连续失败" in prompt_text
     assert "old_text_not_found" in prompt_text
+    assert "重新读取目标范围并确认最新行号" in prompt_text
+    assert "stale_reread_guidance" in prompt_text
+    assert "recommended_sequence" in prompt_text
+    assert "read_file_structure_summary -> read_file_range" in prompt_text
     assert "previous_reflect_feedback" not in prompt_text
     assert "replan_constraints" not in prompt_text
     assert "avoid_exact_tool_sequence" not in prompt_text
@@ -390,9 +393,9 @@ def test_openai_compatible_adapter_rejects_tool_input_fields_not_declared_in_sch
         return _FakeHttpResponse(
             _openai_response(
                 {
-                    "summary": "读取文件。",
-                    "rationale": "错误地给 read_file 传入 limit。",
-                    "planned_actions": ["读取 README"],
+                    "summary": "read file",
+                    "rationale": "invalid extra field",
+                    "planned_actions": ["read README"],
                     "tool_calls": [
                         {
                             "tool_name": "read_file",
@@ -415,16 +418,14 @@ def test_openai_compatible_adapter_rejects_tool_input_fields_not_declared_in_sch
     )
 
     try:
-        adapter.decide(task="读取 README", task_type="general", context_snapshot=None, config_data={})
+        adapter.decide(task="read README", task_type="general", context_snapshot=None, config_data={})
     except ModelResponseError as error:
-        assert "未声明字段" in str(error)
         assert error.details["field_path"] == "tool_calls[1].tool_input"
         assert error.details["tool_name"] == "read_file"
         assert error.details["invalid_fields"] == ["limit"]
         assert "path" in error.details["allowed_fields"]
     else:
         raise AssertionError("invalid read_file limit should raise ModelResponseError")
-
 
 def test_openai_compatible_adapter_normalizes_declared_tool_input_alias(monkeypatch) -> None:
     def fake_urlopen(request, timeout):
@@ -465,10 +466,9 @@ def test_openai_compatible_adapter_rejects_tool_input_type_mismatch(monkeypatch)
         return _FakeHttpResponse(
             _openai_response(
                 {
-                    "summary": "修复文件",
-                    "rationale": "new_text 不能是 null。",
-                    "loop_end": False,
-                    "planned_actions": ["本轮尝试 patch"],
+                    "summary": "patch file",
+                    "rationale": "new_text cannot be null",
+                    "planned_actions": ["apply patch"],
                     "donelist": [],
                     "tool_calls": [
                         {
@@ -492,7 +492,7 @@ def test_openai_compatible_adapter_rejects_tool_input_type_mismatch(monkeypatch)
     )
 
     try:
-        adapter.decide(task="修复 README", task_type="general", context_snapshot=None, config_data={})
+        adapter.decide(task="fix README", task_type="general", context_snapshot=None, config_data={})
     except ModelResponseError as error:
         assert error.details["field_path"] == "tool_calls[1].tool_input.new_text"
         assert error.details["tool_name"] == "apply_patch"
@@ -501,7 +501,6 @@ def test_openai_compatible_adapter_rejects_tool_input_type_mismatch(monkeypatch)
     else:
         raise AssertionError("invalid apply_patch new_text should raise ModelResponseError")
 
-
 def test_openai_compatible_adapter_rejects_new_tool_input_type_mismatch(monkeypatch) -> None:
     def fake_urlopen(request, timeout):
         return _FakeHttpResponse(
@@ -509,7 +508,6 @@ def test_openai_compatible_adapter_rejects_new_tool_input_type_mismatch(monkeypa
                 {
                     "summary": "按行替换文件",
                     "rationale": "new_text 不能是 null。",
-                    "loop_end": False,
                     "planned_actions": ["本轮尝试按行替换"],
                     "donelist": [],
                     "tool_calls": [
@@ -549,16 +547,16 @@ def test_openai_compatible_adapter_rejects_new_tool_input_type_mismatch(monkeypa
         raise AssertionError("invalid replace_lines new_text should raise ModelResponseError")
 
 
-def test_openai_compatible_adapter_rejects_loop_end_true_with_non_empty_tool_calls(monkeypatch) -> None:
+def test_openai_compatible_adapter_ignores_legacy_loop_end_field(monkeypatch) -> None:
     def fake_urlopen(request, timeout):
         return _FakeHttpResponse(
             _openai_response(
                 {
-                    "summary": "结束求解",
-                    "rationale": "已经不需要继续工作。",
+                    "summary": "finish solve",
+                    "rationale": "no more work is needed",
                     "loop_end": True,
-                    "planned_actions": ["读取 README"],
-                    "donelist": ["已完成全部工作"],
+                    "planned_actions": ["read README"],
+                    "donelist": ["checked existing result"],
                     "tool_calls": [
                         {
                             "tool_name": "read_file",
@@ -580,15 +578,11 @@ def test_openai_compatible_adapter_rejects_loop_end_true_with_non_empty_tool_cal
         timeout_seconds=7,
     )
 
-    try:
-        adapter.decide(task="检查 README", task_type="general", context_snapshot=None, config_data={})
-    except ModelResponseError as error:
-        assert error.details["field_path"] == "loop_end"
-        assert error.details["tool_call_count"] == 1
-        assert error.details["loop_end"] is True
-    else:
-        raise AssertionError("loop_end=true with non-empty tool_calls should raise ModelResponseError")
+    decision = adapter.decide(task="check README", task_type="general", context_snapshot=None, config_data={})
 
+    assert decision.summary == "finish solve"
+    assert decision.tool_calls[0].tool_name == "read_file"
+    assert decision.donelist == ["checked existing result"]
 
 def test_openai_compatible_adapter_raises_on_os_error(monkeypatch) -> None:
     def fake_urlopen(_request, timeout=None):

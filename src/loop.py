@@ -71,7 +71,6 @@ class RuntimeState:
     current_iteration: int = 0
     iteration_count: int = 0
     max_steps: int = 4
-    consecutive_empty_tool_call_count: int = 0
     solve_loop_exit_reason: str = ""
     context_snapshot: ContextSnapshot | None = None
     model_decision: ModelDecision | None = None
@@ -206,16 +205,9 @@ class LoopOrchestrator:
         """根据收口信号判断是否结束求解阶段。"""
         decision = runtime_state.model_decision
         tool_call_count = len(decision.tool_calls) if decision else 0
-        if tool_call_count == 0:
-            runtime_state.consecutive_empty_tool_call_count += 1
-        else:
-            runtime_state.consecutive_empty_tool_call_count = 0
-
         reason = ""
-        if decision and decision.loop_end:
-            reason = "model_declared_ready"
-        elif runtime_state.consecutive_empty_tool_call_count >= 2:
-            reason = "consecutive_empty_tool_calls"
+        if tool_call_count == 0:
+            reason = "no_planned_tool_calls"
         elif runtime_state.iteration_count >= runtime_state.max_steps:
             reason = "max_steps_reached"
 
@@ -229,9 +221,7 @@ class LoopOrchestrator:
                 payload={
                     "iteration": runtime_state.current_iteration,
                     "solve_loop_exit_reason": reason,
-                    "loop_end": bool(decision.loop_end) if decision else False,
                     "tool_call_count": tool_call_count,
-                    "consecutive_empty_tool_call_count": runtime_state.consecutive_empty_tool_call_count,
                 },
             )
         )
@@ -304,7 +294,6 @@ class LoopOrchestrator:
             "verification_passed": verification_passed,
             "final_verification_passed": verification_passed,
             "solve_loop_exit_reason": runtime_state.solve_loop_exit_reason,
-            "consecutive_empty_tool_call_count": runtime_state.consecutive_empty_tool_call_count,
             "verification_failure": self._build_verification_failure_details(runtime_state=runtime_state),
             "changed_files": runtime_state.changed_files,
             "failed_tool_count": runtime_state.failed_tool_count,
@@ -935,11 +924,6 @@ class LoopOrchestrator:
         runtime_state.donelist = list(merged_done_list)
         runtime_state.donelist_history.append(list(merged_done_list))
         runtime_state.model_decisions.append(runtime_state.model_decision)
-        next_empty_count = (
-            runtime_state.consecutive_empty_tool_call_count + 1
-            if not runtime_state.model_decision.tool_calls
-            else 0
-        )
         self.trace_writer.write_event(
             TraceEvent(
                 event_type="model_decision",
@@ -949,7 +933,6 @@ class LoopOrchestrator:
                     "has_reflect_feedback": bool(reflect_feedback_summary),
                     "reflect_feedback_summary": reflect_feedback_summary,
                     "run_token_usage": dict(runtime_state.token_usage),
-                    "consecutive_empty_tool_call_count": next_empty_count,
                 },
             )
         )
@@ -960,10 +943,8 @@ class LoopOrchestrator:
             "rationale": runtime_state.model_decision.rationale,
             "provider": runtime_state.model_decision.provider,
             "model_name": runtime_state.model_decision.model_name,
-            "loop_end": runtime_state.model_decision.loop_end,
             "token_usage": runtime_state.model_decision.token_usage.to_dict(),
             "run_token_usage": dict(runtime_state.token_usage),
-            "consecutive_empty_tool_call_count": next_empty_count,
         }
 
     def _merge_cross_round_done_list(
@@ -1052,7 +1033,6 @@ class LoopOrchestrator:
             "final_status": "success" if verification_passed else "incomplete",
             "verification_passed": verification_passed,
             "solve_loop_exit_reason": runtime_state.solve_loop_exit_reason,
-            "consecutive_empty_tool_call_count": runtime_state.consecutive_empty_tool_call_count,
             "changed_files": list(runtime_state.changed_files),
             "failed_tool_count": runtime_state.failed_tool_count,
             "reflect_count": runtime_state.reflect_count,
@@ -1397,8 +1377,32 @@ class LoopOrchestrator:
             "recent_tool_results": recent_tool_results,
             "file_context_cache": runtime_state.file_context_cache,
             "stale_file_paths": self._collect_stale_file_paths(runtime_state=runtime_state),
+            "stale_reread_guidance": self._build_stale_reread_guidance(runtime_state=runtime_state),
             "recent_file_context_invalidations": list(runtime_state.file_context_invalidations),
         }
+
+    def _build_stale_reread_guidance(self, runtime_state: RuntimeState) -> list[dict[str, Any]]:
+        """
+        为 stale 文件提供统一的重读顺序建议。
+        这里先重建结构和行号，再精读局部，避免编辑后继续反复读取旧行号附近的小片段。
+        """
+        guidance_items: list[dict[str, Any]] = []
+        for path in self._collect_stale_file_paths(runtime_state=runtime_state):
+            cache_entry = runtime_state.file_context_cache.get(path, {})
+            guidance_items.append(
+                {
+                    "path": path,
+                    "reason": "file_was_edited_and_previous_snippets_are_stale",
+                    "recommended_sequence": [
+                        "read_file_structure_summary",
+                        "read_file_range",
+                    ],
+                    "why": "先重新建立当前文件结构和最新行号，再按新的行号范围精读，不要直接重复读取旧片段附近的小范围。",
+                    "stale_reason": cache_entry.get("stale_reason", ""),
+                    "previous_covered_ranges": list(cache_entry.get("stale_covered_ranges", [])),
+                }
+            )
+        return guidance_items
 
     def _update_file_context_cache(self, runtime_state: RuntimeState) -> None:
         """
