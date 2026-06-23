@@ -22,6 +22,12 @@ def _fake_model_response() -> str:
             "task_verification_configured / verify_command_1 / no_progress_after_observe / "
             "produce_observable_file_change / fix_failing_verification_checks"
         ],
+        "working_memory": {
+            "confirmed_facts": [],
+            "invalidated_beliefs": [],
+            "completed_actions": ["已准备执行测试工具计划"],
+            "next_risks": [],
+        },
         "tool_calls": [
             {"tool_name": "search_text", "tool_input": {"query": "Run Evidence", "limit": 5}},
             {

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -119,7 +119,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert tool_results[4]["tool_output"]["changed_file_count"] == 1
     assert "run_evidence.md" in tool_results[4]["tool_output"]["diffs"][0]["path"]
 
-    reflect_events = [event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback"]
+    reflect_events = [event["payload"] for event in trace_events if event["event_type"] == "reflect_content"]
     assert len(reflect_events) >= 2
     assert reflect_events[0]["trigger"] == "after_act"
     assert reflect_events[0]["observation"]["changed_files"] == ["run_evidence.md"]
@@ -147,34 +147,21 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert memory_write_events[0]["written"] is False
     assert memory_write_events[0]["store_path"].endswith(".agent_memory\\long_term_memory.jsonl")
 
-    context_events = [event["payload"] for event in trace_events if event["event_type"] == "context_snapshot"]
+    context_events = [event["payload"] for event in trace_events if event["event_type"] == "initial_guide"]
     assert len(context_events) == 1
-    assert context_events[0]["task_context"]["task"] == "创建脚手架"
-    assert context_events[0]["repo_context"]["candidate_file_count"] >= 3
-    assert context_events[0]["repo_context"]["selected_file_count"] == 3
-    assert context_events[0]["repo_context"]["clipped_file_count"] >= 1
-    assert context_events[0]["repo_context"]["total_original_lines"] >= context_events[0]["repo_context"]["total_selected_lines"]
-    assert context_events[0]["memory_context"]["enabled"] is True
-    assert context_events[0]["memory_context"]["query"] == "general:创建脚手架"
-    assert context_events[0]["memory_context"]["source"] == "runtime_memory_manager"
-    assert len(context_events[0]["memory_context"]["matched_entries"]) >= 1
-    assert len(context_events[0]["memory_context"]["runtime_rule_entries"]) >= 1
-    assert context_events[0]["memory_context"]["long_term_entries"] == []
-    assert context_events[0]["memory_context"]["suppressed_long_term_entries"] == []
-    assert context_events[0]["memory_context"]["conflict_evidence"] == []
-    assert context_events[0]["memory_context"]["diagnostic_labels"] == []
-    selected_files = context_events[0]["repo_context"]["selected_files"]
+    assert context_events[0]["task"]["text"] == "创建脚手架"
+    assert context_events[0]["repo_guide"]["candidate_file_count"] >= 3
+    assert len(context_events[0]["repo_guide"]["selected_files"]) == 3
+    assert context_events[0]["memory_guide"]["long_term_memory"] == []
+    assert context_events[0]["memory_guide"]["suppressed_long_term_memory"] == []
+    assert context_events[0]["memory_guide"]["diagnostic_labels"] == []
+    selected_files = context_events[0]["repo_guide"]["selected_files"]
     selected_by_path = {item["path"]: item for item in selected_files}
-    assert selected_by_path["README.md"]["injection_mode"] == "original"
-    assert selected_by_path["README.md"]["included_line_count"] >= 1
-    assert selected_by_path["README.md"]["was_clipped"] is False
-    assert "# 项目说明" in selected_by_path["README.md"]["injection_content"]
-    assert selected_by_path["LONG_GUIDE.md"]["injection_mode"] == "summary"
-    assert selected_by_path["LONG_GUIDE.md"]["was_clipped"] is True
-    assert "内容摘要：" in selected_by_path["LONG_GUIDE.md"]["injection_content"]
-    assert selected_by_path["LONG_GUIDE.md"]["included_line_count"] == 8
-    assert selected_by_path["DIRECTORY_GUIDE.md"]["injection_mode"] == "index"
-    assert "索引提示：" in selected_by_path["DIRECTORY_GUIDE.md"]["injection_content"]
+    assert selected_by_path["README.md"]["score"] >= 4
+    assert any(item["kind"] == "heading" for item in selected_by_path["README.md"]["structure_summary"])
+    assert selected_by_path["LONG_GUIDE.md"]["score"] >= 3
+    assert len(selected_by_path["LONG_GUIDE.md"]["structure_summary"]) >= 10
+    assert selected_by_path["DIRECTORY_GUIDE.md"]["score"] >= 1
 
     evidence_path = repo_root / "run_evidence.md"
     assert evidence_path.exists()
@@ -208,10 +195,9 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "## 上下文摘要" in report_text
     assert "`README.md`" in report_text
     assert "`LONG_GUIDE.md`" in report_text
-    assert "是否裁剪：是" in report_text
+    assert "结构条目" in report_text
     assert "选中文件数：`3`" in report_text
-    assert "memory：已启用" in report_text
-    assert "长期 memory `0` 条" in report_text
+    assert "memory：长期 `0` 条" in report_text
     assert "## 工具调用摘要" in report_text
     assert "## 验证结果" in report_text
     assert "## Memory 写入" in report_text
@@ -730,29 +716,24 @@ def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path)
         for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
-    assert context_payload["task_context"]["task_type"] == "bug_fix"
-    assert context_payload["repo_context"]["recall_strategy"] == "优先测试文件和相关代码文件"
-    assert context_payload["memory_context"]["query"] == "bug_fix:修复 fail 错误"
-    assert context_payload["memory_context"]["source"] == "runtime_memory_manager"
-    assert len(context_payload["memory_context"]["matched_entries"]) >= 2
-    assert len(context_payload["memory_context"]["runtime_rule_entries"]) >= 2
-    assert context_payload["memory_context"]["long_term_entries"] == []
-    assert context_payload["memory_context"]["conflict_evidence"] == []
-    assert context_payload["memory_context"]["diagnostic_labels"] == []
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "initial_guide")
+    assert context_payload["task"]["task_type"] == "bug_fix"
+    assert context_payload["repo_guide"]["recall_strategy"] == "优先测试文件和相关代码文件"
+    assert context_payload["memory_guide"]["long_term_memory"] == []
+    assert context_payload["memory_guide"]["diagnostic_labels"] == []
 
-    selected_files = context_payload["repo_context"]["selected_files"]
+    selected_files = context_payload["repo_guide"]["selected_files"]
     selected_paths = [item["path"] for item in selected_files]
     assert "tests/test_app.py" in selected_paths
     assert "app.py" in selected_paths
 
     selected_by_path = {item["path"]: item for item in selected_files}
-    assert "当前任务像修 bug" in selected_by_path["tests/test_app.py"]["reason"]
-    assert "当前任务像修 bug" in selected_by_path["app.py"]["reason"]
+    assert "bug_fix 优先测试文件" in selected_by_path["tests/test_app.py"]["reason"]
+    assert "bug_fix 优先相关代码文件" in selected_by_path["app.py"]["reason"]
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "召回倾向：优先测试文件和相关代码文件" in report_text
-    assert "memory：已启用" in report_text
+    assert "memory：长期 `0` 条" in report_text
     assert "写入状态：未写入" in report_text
 
 
@@ -897,10 +878,10 @@ def test_cli_uses_naive_recent_context_strategy_from_config(tmp_path: Path) -> N
         for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
-    assert context_payload["repo_context"]["recall_strategy"] == "优先最近修改的文本文件（naive_recent_context）"
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "initial_guide")
+    assert context_payload["repo_guide"]["recall_strategy"] == "优先最近修改的文本文件（naive_recent_context）"
 
-    selected_files = context_payload["repo_context"]["selected_files"]
+    selected_files = context_payload["repo_guide"]["selected_files"]
     selected_paths = [item["path"] for item in selected_files]
     assert selected_paths == ["latest.txt", "notes.md", "app.py"]
     assert "README.md" not in selected_paths
@@ -1004,17 +985,13 @@ def test_cli_reads_long_term_memory_with_task_type_keyword_and_path_filters(tmp_
     assert memory_search_payload["suppressed_long_term_count"] == 0
     assert memory_search_payload["matched_count"] >= 3
 
-    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
-    memory_context = context_payload["memory_context"]
-    assert memory_context["enabled"] is True
-    assert len(memory_context["runtime_rule_entries"]) >= 2
-    assert len(memory_context["long_term_entries"]) == 1
-    assert memory_context["suppressed_long_term_entries"] == []
-    assert len(memory_context["matched_entries"]) >= 3
-    assert memory_context["conflict_evidence"] == []
-    assert memory_context["diagnostic_labels"] == []
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "initial_guide")
+    memory_guide = context_payload["memory_guide"]
+    assert len(memory_guide["long_term_memory"]) == 1
+    assert memory_guide["suppressed_long_term_memory"] == []
+    assert memory_guide["diagnostic_labels"] == []
 
-    long_term_entry = memory_context["long_term_entries"][0]
+    long_term_entry = memory_guide["long_term_memory"][0]
     assert long_term_entry["source"] == "long_term_memory"
     assert long_term_entry["evidence"]["run_id"] == "run-memory-match"
     assert long_term_entry["evidence"]["summary_was_compressed"] is True
@@ -1029,7 +1006,7 @@ def test_cli_reads_long_term_memory_with_task_type_keyword_and_path_filters(tmp_
     assert "tests/test_app.py" in long_term_entry["evidence"]["matched_on"]["file_paths"]
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
-    assert "长期 memory `1` 条" in report_text
+    assert "memory：长期 `1` 条，suppressed `0` 条" in report_text
 
 
 def test_cli_records_memory_conflict_evidence_and_pollution_labels(tmp_path: Path) -> None:
@@ -1118,18 +1095,17 @@ def test_cli_records_memory_conflict_evidence_and_pollution_labels(tmp_path: Pat
     assert memory_search_payload["long_term_count"] == 1
     assert memory_search_payload["suppressed_long_term_count"] == 1
 
-    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
-    memory_context = context_payload["memory_context"]
-    assert len(memory_context["long_term_entries"]) == 1
-    assert len(memory_context["suppressed_long_term_entries"]) == 1
-    assert "memory_conflict" in memory_context["diagnostic_labels"]
-    assert "memory_pollution" in memory_context["diagnostic_labels"]
-    assert "memory_injection_suppressed" in memory_context["diagnostic_labels"]
-    assert len(memory_context["conflict_evidence"]) == 1
-    assert memory_context["suppressed_long_term_entries"][0]["task_type"] == "refactor"
-    assert memory_context["suppressed_long_term_entries"][0]["reason"] == "strong_conflict_with_current_task"
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "initial_guide")
+    memory_guide = context_payload["memory_guide"]
+    assert len(memory_guide["long_term_memory"]) == 1
+    assert len(memory_guide["suppressed_long_term_memory"]) == 1
+    assert "memory_conflict" in memory_guide["diagnostic_labels"]
+    assert "memory_pollution" in memory_guide["diagnostic_labels"]
+    assert "memory_injection_suppressed" in memory_guide["diagnostic_labels"]
+    assert memory_guide["suppressed_long_term_memory"][0]["task_type"] == "refactor"
+    assert memory_guide["suppressed_long_term_memory"][0]["reason"] == "strong_conflict_with_current_task"
 
-    conflict = memory_context["conflict_evidence"][0]
+    conflict = conflict_events[0]["conflicts"][0]
     assert conflict["kind"] == "task_type_mismatch"
     assert conflict["severity"] == "strong"
     assert "bug_fix" in conflict["task_types"]
@@ -1139,9 +1115,8 @@ def test_cli_records_memory_conflict_evidence_and_pollution_labels(tmp_path: Pat
     assert conflict["shared_signal_types"] == 2
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
-    assert "memory 诊断标签：`memory_conflict, memory_pollution, memory_injection_suppressed`" in report_text
-    assert "memory 冲突：[强冲突]" in report_text
-    assert "memory 注入抑制：" in report_text
+    assert "memory：长期 `1` 条，suppressed `1` 条，诊断标签 `memory_conflict, memory_pollution, memory_injection_suppressed`" in report_text
+    assert "suppressed `1` 条" in report_text
 
 
 def test_cli_records_weak_memory_conflict_warning_when_only_single_signal_is_shared(tmp_path: Path) -> None:
@@ -1227,18 +1202,18 @@ def test_cli_records_weak_memory_conflict_warning_when_only_single_signal_is_sha
     assert memory_search_payload["long_term_count"] == 2
     assert memory_search_payload["suppressed_long_term_count"] == 0
 
-    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
-    memory_context = context_payload["memory_context"]
-    assert len(memory_context["long_term_entries"]) == 2
-    assert memory_context["suppressed_long_term_entries"] == []
-    assert len(memory_context["conflict_evidence"]) == 1
-    assert memory_context["diagnostic_labels"] == ["memory_conflict_warning"]
-    assert memory_context["conflict_evidence"][0]["severity"] == "weak"
-    assert memory_context["conflict_evidence"][0]["shared_keywords"] == ["app", "fail"]
-    assert memory_context["conflict_evidence"][0]["shared_file_paths"] == []
-    assert memory_context["long_term_entries"][0]["evidence"]["summary_was_compressed"] is False
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "initial_guide")
+    memory_guide = context_payload["memory_guide"]
+    assert len(memory_guide["long_term_memory"]) == 2
+    assert memory_guide["suppressed_long_term_memory"] == []
+    conflict = conflict_events[0]["conflicts"][0]
+    assert memory_guide["diagnostic_labels"] == ["memory_conflict_warning"]
+    assert conflict["severity"] == "weak"
+    assert conflict["shared_keywords"] == ["app", "fail"]
+    assert conflict["shared_file_paths"] == []
+    assert memory_guide["long_term_memory"][0]["evidence"]["summary_was_compressed"] is False
     weak_penalized_entry = next(
-        item for item in memory_context["long_term_entries"] if item["evidence"]["task_type"] == "refactor"
+        item for item in memory_guide["long_term_memory"] if item["evidence"]["task_type"] == "refactor"
     )
     assert weak_penalized_entry["evidence"]["ranking_penalty"] == 3
     assert weak_penalized_entry["evidence"]["adjusted_score"] == (
@@ -1247,8 +1222,7 @@ def test_cli_records_weak_memory_conflict_warning_when_only_single_signal_is_sha
     assert weak_penalized_entry["evidence"]["ranking_adjustment_reason"] == "weak_conflict_with_current_task"
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
-    assert "memory 诊断标签：`memory_conflict_warning`" in report_text
-    assert "memory 冲突：[弱提醒]" in report_text
+    assert "memory：长期 `2` 条，suppressed `0` 条，诊断标签 `memory_conflict_warning`" in report_text
 
 
 def test_cli_uses_configured_weak_conflict_penalty_for_ranking(tmp_path: Path) -> None:
@@ -1329,10 +1303,10 @@ def test_cli_uses_configured_weak_conflict_penalty_for_ranking(tmp_path: Path) -
         for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "initial_guide")
     weak_penalized_entry = next(
         item
-        for item in context_payload["memory_context"]["long_term_entries"]
+        for item in context_payload["memory_guide"]["long_term_memory"]
         if item["evidence"]["task_type"] == "refactor"
     )
     assert weak_penalized_entry["evidence"]["ranking_penalty"] == 5
@@ -1409,8 +1383,10 @@ def test_cli_uses_configured_summary_max_length_for_long_term_memory(tmp_path: P
         for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "context_snapshot")
-    long_term_entry = context_payload["memory_context"]["long_term_entries"][0]
+    context_payload = next(event["payload"] for event in trace_events if event["event_type"] == "initial_guide")
+    long_term_entry = context_payload["memory_guide"]["long_term_memory"][0]
     assert len(long_term_entry["summary"]) == 40
     assert long_term_entry["summary"].endswith("…")
     assert long_term_entry["evidence"]["original_summary_length"] > 40
+
+

@@ -7,7 +7,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from context import ContextSnapshot
+from context import ContextSnapshot, InitialGuide
 from env_loader import load_dotenv
 
 
@@ -210,9 +210,10 @@ class ModelAdapter:
         self,
         task: str,
         task_type: str,
-        context_snapshot: ContextSnapshot | None,
-        config_data: dict[str, Any],
-        runtime_feedback: dict[str, Any] | None = None,
+        initial_guide: InitialGuide | None = None,
+        context_snapshot: ContextSnapshot | None = None,
+        config_data: dict[str, Any] | None = None,
+        **_unused_context: Any,
     ) -> ModelDecision:
         """根据任务、上下文和配置，产出一次结构化决策结果。"""
         raise NotImplementedError
@@ -255,16 +256,17 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         self,
         task: str,
         task_type: str,
-        context_snapshot: ContextSnapshot | None,
-        config_data: dict[str, Any],
-        runtime_feedback: dict[str, Any] | None = None,
+        initial_guide: InitialGuide | None = None,
+        context_snapshot: ContextSnapshot | None = None,
+        config_data: dict[str, Any] | None = None,
+        **_unused_context: Any,
     ) -> ModelDecision:
         """调用模型并把返回内容解析成稳定的 ModelDecision。"""
         request_payload = self._last_request_payload or self.prepare_request_payload(
             task=task,
             task_type=task_type,
+            initial_guide=initial_guide,
             context_snapshot=context_snapshot,
-            runtime_feedback=runtime_feedback,
         )
         response_payload = self._request_chat_completion(request_payload)
         raw_decision, raw_response_content = self._extract_decision_json(response_payload)
@@ -280,15 +282,16 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         self,
         task: str,
         task_type: str,
-        context_snapshot: ContextSnapshot | None,
-        runtime_feedback: dict[str, Any] | None = None,
+        initial_guide: InitialGuide | None = None,
+        context_snapshot: ContextSnapshot | None = None,
+        **_unused_context: Any,
     ) -> dict[str, Any]:
         """构造并缓存真实请求 payload，供 trace 和后续 decide 复用。"""
         self._last_request_payload = self._build_request_payload(
             task=task,
             task_type=task_type,
+            initial_guide=initial_guide,
             context_snapshot=context_snapshot,
-            runtime_feedback=runtime_feedback,
         )
         return dict(self._last_request_payload)
 
@@ -460,10 +463,11 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         self,
         task: str,
         task_type: str,
+        initial_guide: InitialGuide | None,
         context_snapshot: ContextSnapshot | None,
-        runtime_feedback: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """构造模型请求，只要求返回一份结构化 JSON 决策。"""
+        initial_guide_payload = initial_guide.to_dict() if initial_guide else {}
         context_payload = context_snapshot.to_dict() if context_snapshot else {}
         return {
             "model": self.model_name,
@@ -483,18 +487,17 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                 {
                     "role": "system",
                     "content": (
-                        "runtime_feedback.previous_reflect 是上一轮工具、diff、失败工具和文件读取缓存的事实压缩。"
-                        "runtime_feedback.previous_reflect.file_context_cache 会按文件保留最近五次读取结果。"
-                        "当 file_context_cache 某个文件的 cache_status=stale 时，说明这个文件在编辑后已整文件失效；"
-                        "这种旧缓存只代表你以前读过它，不能继续把其中内容当成当前可信源码。"
-                        "runtime_feedback.previous_reflect.stale_file_paths 只列出当前仍然 stale 的文件；"
-                        "如果某个文件不在 stale_file_paths 里，就不要再把它描述成当前 stale。"
-                        "runtime_feedback.previous_reflect.reread_fresh_ranges 会列出上一轮已经重读恢复为 fresh 的文件范围；"
-                        "这些范围虽然历史上 stale 过，但现在已经可以直接信任，不要再把'曾经 stale'误写成'当前 stale'。"
-                        "runtime_feedback.current_iteration 表示当前正处于第几轮求解，可用来区分早期探索和后期仍在反复确认；"
-                        "但不会提供最大轮数、剩余轮数或任何预算信息。"
-                        "runtime_feedback.previous_rationale 是上一轮模型自己给出的判断理由，可用来延续或修正上一轮思路。"
-                        "runtime_feedback.working_memory 是上一轮模型原样返回的工作记忆对象。"
+                        "initial_guide 是首轮任务、仓库召回和长期记忆指导；"
+                        "它只提供候选文件结构和推荐理由，不直接替你决定必须读取哪些正文。"
+                        "context_snapshot 是当前 plan 轮的事实快照。"
+                        "context_snapshot.working_memory 的主体是上一轮模型返回的四字段工作记忆；"
+                        "其中 last_rational 是 harness 从上一轮 rationale 额外注入的连续性线索，用来帮助你接着之前的思路推理。"
+                        "context_snapshot.fresh_context.file_snippets 是当前仍可信的文件片段，content 字段就是工具读取到的内容。"
+                        "context_snapshot.fresh_context.diffs 和 command_results 会标注 from_iteration，"
+                        "请根据当前 iteration 判断它们是否仍足够新。"
+                        "context_snapshot.stale_context 只描述当前仍 stale 的文件；"
+                        "如果某文件不在 stale_file_paths 中，就不要把它写成当前 stale。"
+                        "context_snapshot.recent_facts 提供最近工具结果、失败工具和 signals。"
                         "你需要在 rationale 中自行解释这些事实，并据此避免重复兜圈。"
                     ),
                 },
@@ -505,7 +508,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "planned_actions 只写本轮 tool_calls 实际会执行的动作；"
                         "working_memory 必须是完整对象，并且固定包含 confirmed_facts、invalidated_beliefs、completed_actions、next_risks 四个字段；"
                         "每个字段可以写成一个字符串，也可以写成字符串列表；"
-                        "下一轮会直接看到你这一轮原样返回的 runtime_feedback.working_memory；"
+                        "下一轮会在 context_snapshot.working_memory 中看到你这一轮返回的四字段对象，以及 harness 额外注入的 last_rational；"
                         "如果上一轮判断被推翻，必须在本轮主动改写对应字段，不要依赖 harness 帮你 merge、修正或补写；"
                         "凡是被当前轮代码读取结果、命令输出或 diff 直接否定的旧怀疑，必须写入 invalidated_beliefs。"
                         "working_memory 不再保留专门的 open_questions 字段，避免把未确认问题越积越多，驱动模型继续发散。"
@@ -523,21 +526,21 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         "当 read_file 或 read_file_structure_summary 返回 content_mode=\"structure_summary\" 时，说明当前只拿到了结构摘要与行号索引，若缺少关键区域，请使用 read_file_range(path,start_line,end_line) 精确补齐；read_file_range 每次只能读取 1 到 80 行，不要用它读取整个文件。"
                         "如果某个文件在上一轮编辑后被标记为 stale，不要继续依赖编辑前读取到的旧片段；"
                         "若只需要重新定位结构，先调用 read_file_structure_summary，再按行号调用 read_file_range。"
-                        "如果 runtime_feedback.previous_reflect.stale_reread_guidance 已给出 stale 文件的 recommended_sequence，默认按这个顺序执行；"
+                        "如果 context_snapshot.stale_context 已给出 recommended_sequence，默认按这个顺序执行；"
                         "也就是说，编辑后的重读优先走 read_file_structure_summary -> read_file_range，不要一上来就反复读取同一小段旧附近行号。"
-                        "如果 runtime_feedback.previous_reflect.reread_fresh_ranges 已经列出了某个文件的 safe_to_rely_ranges，优先直接使用这些已重读范围；"
-                        "除非这些范围仍然不够，否则不要仅因为文件曾经 stale 过就重复读取同一函数。"
+                        "如果 context_snapshot.fresh_context.file_snippets 已经包含最新可信片段，优先直接使用这些片段；"
+                        "除非片段范围仍然不够，否则不要仅因为文件历史上 stale 过就重复读取同一函数。"
                         "编辑规则：默认先使用 apply_patch，不要一开始就把 replace_lines 当成主编辑方式。"
                         "只有在 apply_patch 连续失败、old_text_not_found、文件存在换行/缩进/不可见字符等问题导致精确文本难以匹配，并且你已经重新读取目标范围并确认最新行号时，才使用 replace_lines。"
                         "编辑规则：如果同一文件连续多次出现 old_text_not_found，尤其接近 3 次时，优先基于最近源码行号使用 replace_lines；"
                         "不要继续猜测大段 apply_patch.old_text。"
                         "bug_fix 收口规则：如果当前 diff 已经命中任务目标修改点，并且针对任务描述的核心验证命令已经符合预期，优先进入结束判断；"
                         "不要在这种情况下继续扩展读取外围函数、补做低价值旁路确认或重新打开已经被命令验证过的主假设。"
-                        "对于 bug_fix，核心命令优先指任务描述、verify_commands、recent_tool_results 或当前轮计划里直接针对缺陷现象的命令；"
+                        "对于 bug_fix，核心命令优先指任务描述、verify_commands、context_snapshot.recent_facts.recent_tool_results 或当前轮计划里直接针对缺陷现象的命令；"
                         "如果这些核心命令已经证明主缺陷修复成立，默认下一轮应减少读取并准备让 tool_calls 为空。"
                         "请注意："
                         "任务描述描述的是待修复现象，不保证与当前轮已修改后的文件内容一致。"
-                        "当任务描述、当前代码、recent_tool_results 和 git_diff 看起来冲突时，优先相信当前轮可验证的运行时证据，而不是反复把初始任务描述当成当前代码事实。"
+                        "当任务描述、当前代码、recent facts 和 git diff 看起来冲突时，优先相信当前轮可验证的运行时证据，而不是反复把初始任务描述当成当前代码事实。"
                         "如果关键目标函数已经处于 fresh 状态，并且你已经直接读到其当前实现，"
                         "不要仅因为任务描述与当前代码冲突，就立刻扩展读取外围 helper；"
                         "先把这个冲突写入 working_memory 的 invalidated_beliefs 或直接在 rationale 中说明，"
@@ -550,8 +553,8 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                         {
                             "task": task,
                             "task_type": task_type,
+                            "initial_guide": initial_guide_payload,
                             "context_snapshot": context_payload,
-                            "runtime_feedback": runtime_feedback or {},
                             "decision_schema": {
                                 "summary": "字符串：本轮决策摘要。",
                                 "rationale": "字符串：解释为什么本轮这样安排。",

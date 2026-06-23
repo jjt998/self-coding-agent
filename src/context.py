@@ -1,6 +1,15 @@
+"""整理模型每轮能看到的上下文输入。
+
+这里刻意把上下文分成两层：
+`initial_guide` 只在 analyze 阶段生成一次，负责给模型一个首轮导航；
+`context_snapshot` 每轮 plan 前重建，负责把当前仍可信的运行事实交给模型。
+ContextBuilder 只负责整理事实和结构，不替模型决定下一步该读哪个文件。
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import json
 from pathlib import Path
 import re
 from typing import Any
@@ -9,10 +18,19 @@ from file_structure import build_structure_summary
 
 
 STRUCTURE_SUMMARY_MAX_ITEMS = 80
+SNIPPET_TEXT_LIMIT = 4000
+COMMAND_OUTPUT_LIMIT = 4000
+STALE_CONTEXT_REASON = "file_was_edited_and_previous_snippets_are_stale"
+STALE_CONTEXT_SEQUENCE = ["read_file_structure_summary", "read_file_range"]
+# stale 文件的建议放在 stale_context 顶层，因为同一轮里所有 stale 文件共享同一套重读原则。
+STALE_CONTEXT_SUGGEST = (
+    "先重新建立当前文件结构和最新行号，再按新的行号范围精读，"
+    "不要直接重复读取旧片段附近的小范围。"
+)
 
 
 def _is_text_file(path: Path) -> bool:
-    """判断文件是否适合按文本处理，避免把二进制文件拉进上下文。"""
+    """只让 UTF-8 文本文件进入召回，避免二进制或异常编码污染模型上下文。"""
     if not path.is_file():
         return False
     try:
@@ -23,9 +41,13 @@ def _is_text_file(path: Path) -> bool:
 
 
 def _extract_task_keywords(task: str) -> list[str]:
-    """从任务文本里提取最小关键词，供文件召回打分使用。"""
+    """保留完整任务文本，再拆出短关键词，用于兼顾精确匹配和宽松召回。"""
     normalized_task = task.strip()
-    parts = [part for part in re.split(r"[\s,，。；:：/\\\-]+", normalized_task) if part]
+    parts = [
+        part
+        for part in re.split(r"[\s,，。；:：?？\\/\-]+", normalized_task)
+        if part
+    ]
     keywords = [normalized_task] if normalized_task else []
     for part in parts:
         if part not in keywords:
@@ -33,188 +55,325 @@ def _extract_task_keywords(task: str) -> list[str]:
     return keywords
 
 
+def _truncate_text(value: Any, limit: int) -> str:
+    """压缩会进入模型请求的长文本，避免 diff、命令输出或片段内容挤占上下文。"""
+    text = "" if value is None else str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...[truncated]"
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    """把模型工作记忆收紧为字符串列表，丢弃不符合当前 schema 的临时形态。"""
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
 @dataclass(slots=True)
-class FileContext:
-    """表示一个被召回的仓库文件，以及为什么把它放进本次上下文。"""
+class SelectedFileGuide:
+    """首轮仓库导航里的一项候选文件，只给结构摘要和推荐理由，不提前注入正文。"""
 
     path: str
-    injection_mode: str
-    reason: str
-    injection_content: str
-    content_preview: str
     score: int
-    total_line_count: int
-    included_line_count: int
-    was_clipped: bool
+    reason: str
     structure_summary: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        """转换成便于写入 trace 和报告的字典。"""
         return asdict(self)
 
 
 @dataclass(slots=True)
-class TaskContext:
-    """保存本次任务本身的上下文。"""
+class InitialGuide:
+    """首轮导航信息，告诉模型任务、候选文件和长期记忆，但不夹带 harness 约束。"""
 
-    task: str
-    task_type: str
-    keywords: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        """转换成便于写入 trace 和报告的字典。"""
-        return asdict(self)
-
-
-@dataclass(slots=True)
-class RepoContext:
-    """保存从仓库里召回出来的文件上下文。"""
-
-    repo_root: str
-    recall_strategy: str
-    selected_files: list[FileContext] = field(default_factory=list)
-    candidate_file_count: int = 0
-    selected_file_count: int = 0
-    total_selected_lines: int = 0
-    total_original_lines: int = 0
-    clipped_file_count: int = 0
+    task: dict[str, Any]
+    repo_guide: dict[str, Any]
+    memory_guide: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
-        """转换成便于写入 trace 和报告的字典。"""
-        data = asdict(self)
-        data["selected_files"] = [file_context.to_dict() for file_context in self.selected_files]
-        return data
-
-
-@dataclass(slots=True)
-class RuntimeContext:
-    """保存本次运行中与当前阶段相关的上下文。"""
-
-    current_state: str
-    completed_states: list[str] = field(default_factory=list)
-    step_count: int = 0
-
-    def to_dict(self) -> dict[str, Any]:
-        """转换成便于写入 trace 和报告的字典。"""
-        return asdict(self)
-
-
-@dataclass(slots=True)
-class MemoryContext:
-    """保存本次分析阶段拿到的 memory 结果。"""
-
-    enabled: bool = False
-    query: str = ""
-    matched_entries: list[dict[str, Any]] = field(default_factory=list)
-    runtime_rule_entries: list[dict[str, Any]] = field(default_factory=list)
-    long_term_entries: list[dict[str, Any]] = field(default_factory=list)
-    suppressed_long_term_entries: list[dict[str, Any]] = field(default_factory=list)
-    conflict_evidence: list[dict[str, Any]] = field(default_factory=list)
-    diagnostic_labels: list[str] = field(default_factory=list)
-    source: str = "disabled"
-
-    def to_dict(self) -> dict[str, Any]:
-        """转换成便于写入 trace 和报告的字典。"""
-        return asdict(self)
+        """导出稳定 schema，避免 dataclass 内部形态泄漏到 trace 或模型请求里。"""
+        return {
+            "task": dict(self.task),
+            "repo_guide": {
+                **self.repo_guide,
+                "selected_files": [
+                    item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                    for item in self.repo_guide.get("selected_files", [])
+                ],
+            },
+            "memory_guide": {
+                "long_term_memory": list(self.memory_guide.get("long_term_memory", [])),
+                "suppressed_long_term_memory": list(
+                    self.memory_guide.get("suppressed_long_term_memory", [])
+                ),
+                "diagnostic_labels": list(self.memory_guide.get("diagnostic_labels", [])),
+            },
+        }
 
 
 @dataclass(slots=True)
 class ContextSnapshot:
-    """汇总本次运行某个阶段拿到的四层上下文。"""
+    """每轮 plan 前的运行时事实快照，承接 fresh/stale 上下文和模型工作记忆。"""
 
-    task_context: TaskContext
-    repo_context: RepoContext
-    runtime_context: RuntimeContext
-    memory_context: MemoryContext
+    iteration: int
+    task: dict[str, Any]
+    working_memory: dict[str, Any]
+    fresh_context: dict[str, Any]
+    stale_context: dict[str, Any]
+    recent_facts: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
-        """转换成便于写入 trace 和报告的字典。"""
+        """导出模型可消费的当前轮事实，并把缺失字段补成稳定空列表或空字符串。"""
         return {
-            "task_context": self.task_context.to_dict(),
-            "repo_context": self.repo_context.to_dict(),
-            "runtime_context": self.runtime_context.to_dict(),
-            "memory_context": self.memory_context.to_dict(),
+            "iteration": self.iteration,
+            "task": dict(self.task),
+            "working_memory": {
+                "confirmed_facts": list(self.working_memory.get("confirmed_facts", [])),
+                "invalidated_beliefs": list(self.working_memory.get("invalidated_beliefs", [])),
+                "completed_actions": list(self.working_memory.get("completed_actions", [])),
+                "next_risks": list(self.working_memory.get("next_risks", [])),
+                "last_rational": str(self.working_memory.get("last_rational", "")),
+            },
+            "fresh_context": {
+                "file_snippets": list(self.fresh_context.get("file_snippets", [])),
+                "diffs": list(self.fresh_context.get("diffs", [])),
+                "command_results": list(self.fresh_context.get("command_results", [])),
+            },
+            "stale_context": {
+                "stale_file_paths": list(self.stale_context.get("stale_file_paths", [])),
+                "details": list(self.stale_context.get("details", [])),
+                "reason": str(self.stale_context.get("reason", "")),
+                "recommended_sequence": list(self.stale_context.get("recommended_sequence", [])),
+                "suggest": str(self.stale_context.get("suggest", "")),
+            },
+            "recent_facts": {
+                "recent_tool_results": list(self.recent_facts.get("recent_tool_results", [])),
+                "failed_tools": list(self.recent_facts.get("failed_tools", [])),
+                "signals": list(self.recent_facts.get("signals", [])),
+            },
         }
 
 
 class ContextBuilder:
-    """根据任务和仓库内容构建当前阶段可检查的最小上下文快照。"""
+    """把仓库静态导航和运行时事实整理成模型请求里的两层上下文。
+
+    这个类是上下文边界的唯一入口：首轮用 `build_initial_guide()` 给模型导航，
+    后续每轮用 `build_context_snapshot()` 给模型最新事实。它不做语义合并，
+    也不把 runtime/max_steps 这类 harness 内部约束暴露给模型。
+    """
 
     def __init__(self, repo_root: str, strategy_config: dict[str, Any] | None = None) -> None:
-        """绑定仓库根目录，后面统一从这里做文件召回。"""
+        """固定仓库根目录和召回策略，保证不同启动目录下得到的相对路径一致。"""
         self.repo_root = Path(repo_root).resolve()
         self.strategy_config = strategy_config or {}
-        self.strategy_name = str(self.strategy_config.get("strategy", "file_recall_context")).strip() or "file_recall_context"
-        # 第一版先把裁剪规则固定成简单常量，后面更换策略时只改这里即可。
-        self.original_line_limit = 40
-        self.summary_line_limit = 8
-        self.index_line_limit = 5
+        self.strategy_name = str(self.strategy_config.get("strategy", "file_recall_context")).strip()
+        if not self.strategy_name:
+            self.strategy_name = "file_recall_context"
 
-    def build_context_snapshot(
+    def build_initial_guide(
         self,
+        *,
         task: str,
         task_type: str,
-        current_state: str,
-        completed_states: list[str],
-        step_count: int,
-        memory_query: str = "",
-        matched_memory_entries: list[dict[str, Any]] | None = None,
-        runtime_rule_entries: list[dict[str, Any]] | None = None,
         long_term_memory_entries: list[dict[str, Any]] | None = None,
         suppressed_long_term_entries: list[dict[str, Any]] | None = None,
-        memory_conflict_evidence: list[dict[str, Any]] | None = None,
         memory_diagnostic_labels: list[str] | None = None,
-    ) -> ContextSnapshot:
-        """收集任务信息、召回相关文件，并整理成四层上下文结构。"""
+    ) -> InitialGuide:
+        """生成首轮导航：抽取任务关键词、召回候选文件，并整理长期记忆提示。"""
         task_keywords = _extract_task_keywords(task)
         selected_files, candidate_file_count = self._select_repo_files(
             task_keywords=task_keywords,
             task_type=task_type,
         )
-        matched_entries = matched_memory_entries or []
-        runtime_entries = runtime_rule_entries or []
-        long_term_entries = long_term_memory_entries or []
-        suppressed_entries = suppressed_long_term_entries or []
-        conflict_evidence = memory_conflict_evidence or []
-        diagnostic_labels = memory_diagnostic_labels or []
-        return ContextSnapshot(
-            task_context=TaskContext(task=task, task_type=task_type, keywords=task_keywords),
-            repo_context=RepoContext(
-                repo_root=str(self.repo_root),
-                recall_strategy=self._describe_recall_strategy(task_type=task_type),
-                selected_files=selected_files,
-                candidate_file_count=candidate_file_count,
-                selected_file_count=len(selected_files),
-                total_selected_lines=sum(file_context.included_line_count for file_context in selected_files),
-                total_original_lines=sum(file_context.total_line_count for file_context in selected_files),
-                clipped_file_count=sum(1 for file_context in selected_files if file_context.was_clipped),
-            ),
-            runtime_context=RuntimeContext(
-                current_state=current_state,
-                completed_states=list(completed_states),
-                step_count=step_count,
-            ),
-            memory_context=MemoryContext(
-                enabled=bool(matched_entries or runtime_entries or long_term_entries),
-                query=memory_query,
-                matched_entries=matched_entries,
-                runtime_rule_entries=runtime_entries,
-                long_term_entries=long_term_entries,
-                suppressed_long_term_entries=suppressed_entries,
-                conflict_evidence=conflict_evidence,
-                diagnostic_labels=diagnostic_labels,
-                source="runtime_memory_manager"
-                if (matched_entries or runtime_entries or long_term_entries or suppressed_entries)
-                else "disabled",
-            ),
+        return InitialGuide(
+            task={
+                "text": task,
+                "task_type": task_type,
+                "keywords": task_keywords,
+            },
+            repo_guide={
+                "recall_strategy": self._describe_recall_strategy(task_type=task_type),
+                "candidate_file_count": candidate_file_count,
+                "selected_files": selected_files,
+            },
+            memory_guide={
+                "long_term_memory": list(long_term_memory_entries or []),
+                "suppressed_long_term_memory": list(suppressed_long_term_entries or []),
+                "diagnostic_labels": list(memory_diagnostic_labels or []),
+            },
         )
 
-    def _select_repo_files(self, task_keywords: list[str], task_type: str) -> tuple[list[FileContext], int]:
-        """按最小规则从仓库里挑出值得放进上下文的文件。"""
+    def build_context_snapshot(self, *, runtime_state: Any) -> ContextSnapshot:
+        """从 RuntimeState 读取当前事实，生成本轮 plan 要交给模型的运行快照。"""
+        task = str(getattr(runtime_state, "task", ""))
+        task_type = str(getattr(runtime_state, "task_type", ""))
+        reflect_content = getattr(runtime_state, "reflect_content", {}) or {}
+        return ContextSnapshot(
+            iteration=int(getattr(runtime_state, "current_iteration", 0) or 0),
+            task={
+                "text": task,
+                "task_type": task_type,
+                "keywords": self._task_keywords_from_runtime_state(runtime_state=runtime_state),
+            },
+            working_memory=self._build_working_memory(runtime_state=runtime_state),
+            fresh_context={
+                "file_snippets": self._build_file_snippets(runtime_state=runtime_state),
+                "diffs": self._build_diff_context(runtime_state=runtime_state),
+                "command_results": self._build_command_results(runtime_state=runtime_state),
+            },
+            stale_context=self._build_stale_context(runtime_state=runtime_state),
+            recent_facts={
+                "recent_tool_results": list(reflect_content.get("recent_tool_results", [])),
+                "failed_tools": list(reflect_content.get("failed_tools", [])),
+                "signals": list(reflect_content.get("signals", [])),
+            },
+        )
+
+    def _task_keywords_from_runtime_state(self, *, runtime_state: Any) -> list[str]:
+        """优先复用首轮关键词，避免后续轮次因为重新拆词导致召回口径漂移。"""
+        initial_guide = getattr(runtime_state, "initial_guide", None)
+        if initial_guide is not None and hasattr(initial_guide, "to_dict"):
+            guide_payload = initial_guide.to_dict()
+            keywords = guide_payload.get("task", {}).get("keywords", [])
+            if isinstance(keywords, list):
+                return _normalize_string_list(keywords)
+        return _extract_task_keywords(str(getattr(runtime_state, "task", "")))
+
+    def _build_working_memory(self, *, runtime_state: Any) -> dict[str, Any]:
+        """把上一轮模型维护的工作记忆放回快照，并补入上一轮显式推理理由。"""
+        raw_working_memory = getattr(runtime_state, "working_memory", {}) or {}
+        return {
+            "confirmed_facts": _normalize_string_list(raw_working_memory.get("confirmed_facts", [])),
+            "invalidated_beliefs": _normalize_string_list(raw_working_memory.get("invalidated_beliefs", [])),
+            "completed_actions": _normalize_string_list(raw_working_memory.get("completed_actions", [])),
+            "next_risks": _normalize_string_list(raw_working_memory.get("next_risks", [])),
+            "last_rational": self._last_rational_from_runtime_state(runtime_state=runtime_state),
+        }
+
+    def _last_rational_from_runtime_state(self, *, runtime_state: Any) -> str:
+        """把上一轮 rationale 注入 working_memory，帮助模型沿着之前的思路继续推理。"""
+        model_decision = getattr(runtime_state, "model_decision", None)
+        rationale = getattr(model_decision, "rationale", "")
+        return str(rationale).strip() if rationale else ""
+
+    def _build_file_snippets(self, *, runtime_state: Any) -> list[dict[str, Any]]:
+        """只暴露仍为 fresh 的已读片段，避免模型继续相信编辑前的旧源码。"""
+        file_context_cache = getattr(runtime_state, "file_context_cache", {}) or {}
+        snippets: list[dict[str, Any]] = []
+        for path, cache_entry in sorted(file_context_cache.items()):
+            if not isinstance(cache_entry, dict):
+                continue
+            if cache_entry.get("cache_status") != "fresh":
+                continue
+            for snippet in cache_entry.get("snippets", []):
+                if not isinstance(snippet, dict):
+                    continue
+                item = {
+                    "path": path,
+                    "source_tool": str(snippet.get("tool_name", "")),
+                    "read_coverage": str(snippet.get("read_coverage", "")),
+                    "content": _truncate_text(snippet.get("content_excerpt", ""), SNIPPET_TEXT_LIMIT),
+                    "freshness": "fresh",
+                }
+                structure_summary = snippet.get("structure_summary")
+                if structure_summary:
+                    item["structure_summary"] = structure_summary
+                    if not item["content"]:
+                        # 显式结构摘要也属于 fresh 上下文；没有正文时，用 JSON 形式放进 content。
+                        item["content"] = _truncate_text(
+                            json.dumps(structure_summary, ensure_ascii=False),
+                            SNIPPET_TEXT_LIMIT,
+                        )
+                snippets.append(item)
+        return snippets
+
+    def _build_diff_context(self, *, runtime_state: Any) -> list[dict[str, Any]]:
+        """整理最近 git_diff 的完整文本摘要，并标出它来自哪一轮 reflect 后的事实。"""
+        diff_context: list[dict[str, Any]] = []
+        from_iteration = self._recent_context_iteration(runtime_state=runtime_state)
+        for execution in getattr(runtime_state, "recent_tool_executions", []) or []:
+            if getattr(execution, "tool_name", "") != "git_diff":
+                continue
+            output = getattr(execution, "tool_output", {}) or {}
+            paths: list[str] = []
+            content_parts: list[str] = []
+            for diff in output.get("diffs", []):
+                if not isinstance(diff, dict):
+                    continue
+                path = str(diff.get("path", "")).strip()
+                if path:
+                    paths.append(path)
+                diff_text = str(diff.get("diff", ""))
+                if diff_text:
+                    content_parts.append(diff_text)
+            diff_context.append(
+                {
+                    "from_iteration": from_iteration,
+                    "paths": list(dict.fromkeys(paths)),
+                    "content": _truncate_text("\n".join(content_parts), SNIPPET_TEXT_LIMIT),
+                }
+            )
+        return diff_context
+
+    def _build_command_results(self, *, runtime_state: Any) -> list[dict[str, Any]]:
+        """把最近命令的返回码和输出压缩进快照，方便模型判断验证或脚本失败原因。"""
+        command_results: list[dict[str, Any]] = []
+        from_iteration = self._recent_context_iteration(runtime_state=runtime_state)
+        for execution in getattr(runtime_state, "recent_tool_executions", []) or []:
+            if getattr(execution, "tool_name", "") != "run_command":
+                continue
+            tool_input = getattr(execution, "tool_input", {}) or {}
+            output = getattr(execution, "tool_output", {}) or {}
+            command_results.append(
+                {
+                    "from_iteration": from_iteration,
+                    "command": tool_input.get("command", []),
+                    "returncode": int(output.get("returncode", 0) or 0),
+                    "stdout": _truncate_text(output.get("stdout", ""), COMMAND_OUTPUT_LIMIT),
+                    "stderr": _truncate_text(output.get("stderr", ""), COMMAND_OUTPUT_LIMIT),
+                }
+            )
+        return command_results
+
+    def _build_stale_context(self, *, runtime_state: Any) -> dict[str, Any]:
+        """列出当前仍 stale 的文件，并给出统一重读顺序，提醒模型先重建结构再精读。"""
+        file_context_cache = getattr(runtime_state, "file_context_cache", {}) or {}
+        details: list[dict[str, Any]] = []
+        for path, cache_entry in sorted(file_context_cache.items()):
+            if not isinstance(cache_entry, dict):
+                continue
+            if cache_entry.get("cache_status") != "stale":
+                continue
+            details.append(
+                {
+                    "path": path,
+                    "stale_reason": str(cache_entry.get("stale_reason", "")),
+                    "previous_covered_ranges": list(cache_entry.get("stale_covered_ranges", [])),
+                }
+            )
+        stale_file_paths = [item["path"] for item in details]
+        return {
+            "stale_file_paths": stale_file_paths,
+            "details": details,
+            "reason": STALE_CONTEXT_REASON if stale_file_paths else "",
+            "recommended_sequence": list(STALE_CONTEXT_SEQUENCE) if stale_file_paths else [],
+            "suggest": STALE_CONTEXT_SUGGEST if stale_file_paths else "",
+        }
+
+    def _recent_context_iteration(self, *, runtime_state: Any) -> int:
+        """给 diff 和命令结果标注来源轮次，让模型能自行判断这些事实是否偏旧。"""
+        reflect_content = getattr(runtime_state, "reflect_content", {}) or {}
+        if isinstance(reflect_content, dict) and reflect_content.get("iteration"):
+            return int(reflect_content.get("iteration") or 0)
+        return max(0, int(getattr(runtime_state, "current_iteration", 0) or 0) - 1)
+
+    def _select_repo_files(self, task_keywords: list[str], task_type: str) -> tuple[list[SelectedFileGuide], int]:
+        """按任务关键词和任务类型选出首轮候选文件，只取前三个，避免首轮上下文过重。"""
         if self.strategy_name == "naive_recent_context":
             return self._select_recent_repo_files()
 
-        candidate_files: list[FileContext] = []
+        candidate_files: list[SelectedFileGuide] = []
         candidate_count = 0
         for path in sorted(self.repo_root.rglob("*")):
             if not _is_text_file(path):
@@ -230,43 +389,26 @@ class ContextBuilder:
             )
             if score <= 0:
                 continue
-            injection_mode = self._choose_injection_mode(content=content, score=score)
-            injection_content, included_line_count, was_clipped = self._build_injection_content(
-                relative_path=relative_path,
-                content=content,
-                injection_mode=injection_mode,
-            )
-            structure_summary = build_structure_summary(
-                path=relative_path,
-                content=content,
-                max_items=STRUCTURE_SUMMARY_MAX_ITEMS,
-            )
             candidate_files.append(
-                FileContext(
+                SelectedFileGuide(
                     path=relative_path,
-                    injection_mode=injection_mode,
-                    reason=reason,
-                    injection_content=injection_content,
-                    content_preview=self._build_content_preview(content=content),
                     score=score,
-                    total_line_count=len(content.splitlines()),
-                    included_line_count=included_line_count,
-                    was_clipped=was_clipped,
-                    structure_summary=structure_summary,
+                    reason=reason,
+                    structure_summary=build_structure_summary(
+                        path=relative_path,
+                        content=content,
+                        max_items=STRUCTURE_SUMMARY_MAX_ITEMS,
+                    ),
                 )
             )
 
         candidate_files.sort(key=lambda item: (-item.score, item.path))
         return candidate_files[:3], candidate_count
 
-    def _select_recent_repo_files(self) -> tuple[list[FileContext], int]:
-        """按最近修改时间挑出文件，作为第一版 `naive_recent_context` 对照策略。"""
-        candidate_paths: list[Path] = []
-        for path in self.repo_root.rglob("*"):
-            if _is_text_file(path):
-                candidate_paths.append(path)
-
-        selected_files: list[FileContext] = []
+    def _select_recent_repo_files(self) -> tuple[list[SelectedFileGuide], int]:
+        """naive_recent_context 策略只按修改时间选文件，用来和任务相关召回做对照实验。"""
+        candidate_paths = [path for path in self.repo_root.rglob("*") if _is_text_file(path)]
+        selected_files: list[SelectedFileGuide] = []
         sorted_paths = sorted(
             candidate_paths,
             key=lambda item: (-item.stat().st_mtime_ns, item.relative_to(self.repo_root).as_posix()),
@@ -274,31 +416,16 @@ class ContextBuilder:
         for rank, path in enumerate(sorted_paths[:3], start=1):
             relative_path = path.relative_to(self.repo_root).as_posix()
             content = path.read_text(encoding="utf-8")
-            line_count = len(content.splitlines())
-            pseudo_score = 4 if line_count <= self.original_line_limit else 3
-            injection_mode = self._choose_injection_mode(content=content, score=pseudo_score)
-            injection_content, included_line_count, was_clipped = self._build_injection_content(
-                relative_path=relative_path,
-                content=content,
-                injection_mode=injection_mode,
-            )
-            structure_summary = build_structure_summary(
-                path=relative_path,
-                content=content,
-                max_items=STRUCTURE_SUMMARY_MAX_ITEMS,
-            )
             selected_files.append(
-                FileContext(
+                SelectedFileGuide(
                     path=relative_path,
-                    injection_mode=injection_mode,
-                    reason=f"当前使用 naive recent context，按最近修改时间选中第 {rank} 个文件。",
-                    injection_content=injection_content,
-                    content_preview=self._build_content_preview(content=content),
                     score=max(1, 4 - rank),
-                    total_line_count=line_count,
-                    included_line_count=included_line_count,
-                    was_clipped=was_clipped,
-                    structure_summary=structure_summary,
+                    reason=f"当前使用 naive recent context，按最近修改时间选中第 {rank} 个文件。",
+                    structure_summary=build_structure_summary(
+                        path=relative_path,
+                        content=content,
+                        max_items=STRUCTURE_SUMMARY_MAX_ITEMS,
+                    ),
                 )
             )
         return selected_files, len(candidate_paths)
@@ -310,10 +437,11 @@ class ContextBuilder:
         task_keywords: list[str],
         task_type: str,
     ) -> tuple[int, str]:
-        """给文件做一个简单分数，分数越高表示越值得先读。"""
+        """给单个文件打召回分数，并保留可写进 trace/report 的中文推荐理由。"""
         score = 0
         reasons: list[str] = []
         lowered_path = relative_path.lower()
+        lowered_content = content.lower()
         if "readme" in lowered_path:
             score += 1
             reasons.append("文件名像项目说明")
@@ -324,14 +452,14 @@ class ContextBuilder:
         for keyword in task_keywords:
             if keyword and keyword in relative_path:
                 score += 2
-                reasons.append(f"文件路径包含任务关键词“{keyword}”")
+                reasons.append(f"文件路径包含任务关键词 `{keyword}`")
             if keyword and keyword in content:
                 score += 3
-                reasons.append(f"文件内容包含任务关键词“{keyword}”")
+                reasons.append(f"文件内容包含任务关键词 `{keyword}`")
 
         task_type_bonus, task_type_reasons = self._score_by_task_type(
             lowered_path=lowered_path,
-            content=content,
+            lowered_content=lowered_content,
             task_type=task_type,
         )
         score += task_type_bonus
@@ -339,12 +467,17 @@ class ContextBuilder:
 
         if score == 0 and relative_path.endswith(".md"):
             score = 1
-            reasons.append("当前先保守保留一个文档文件，方便理解仓库")
+            reasons.append("保守保留一个文档文件，方便理解仓库")
 
         return score, "；".join(reasons) if reasons else "未命中召回规则"
 
-    def _score_by_task_type(self, lowered_path: str, content: str, task_type: str) -> tuple[int, list[str]]:
-        """按任务类型补充分数，让不同任务优先看到更合适的文件。"""
+    def _score_by_task_type(
+        self,
+        lowered_path: str,
+        lowered_content: str,
+        task_type: str,
+    ) -> tuple[int, list[str]]:
+        """根据任务类型补召回偏好，让 bug_fix、补测试、重构等任务先看到更可能相关的文件。"""
         reasons: list[str] = []
         score = 0
         normalized_task_type = task_type.lower()
@@ -352,46 +485,46 @@ class ContextBuilder:
         if normalized_task_type == "bug_fix":
             if lowered_path.endswith(".py"):
                 score += 2
-                reasons.append("当前任务像修 bug，先提高代码文件优先级")
+                reasons.append("bug_fix 优先相关代码文件")
             if "test" in lowered_path:
                 score += 3
-                reasons.append("当前任务像修 bug，测试文件更值得优先检查")
-            if "error" in content or "fail" in content:
+                reasons.append("bug_fix 优先测试文件")
+            if "error" in lowered_content or "fail" in lowered_content:
                 score += 2
-                reasons.append("文件内容里出现失败相关词，可能和 bug 线索有关")
+                reasons.append("文件内容出现失败相关词")
             return score, reasons
 
         if normalized_task_type == "code_understanding":
             if lowered_path.endswith(".md"):
                 score += 3
-                reasons.append("当前任务偏理解代码，说明文档优先级更高")
+                reasons.append("理解任务优先说明文档")
             if "readme" in lowered_path:
                 score += 2
-                reasons.append("当前任务偏理解代码，README 往往更适合先读")
+                reasons.append("README 通常适合先读")
             return score, reasons
 
         if normalized_task_type == "test_generation":
             if "test" in lowered_path:
                 score += 3
-                reasons.append("当前任务要补测试，测试文件优先级更高")
+                reasons.append("补测试优先现有测试文件")
             if lowered_path.endswith(".py"):
                 score += 2
-                reasons.append("当前任务要补测试，需要先看代码文件")
+                reasons.append("补测试需要先看代码文件")
             return score, reasons
 
         if normalized_task_type == "refactor":
             if lowered_path.endswith(".py"):
                 score += 3
-                reasons.append("当前任务偏重构，代码文件优先级更高")
+                reasons.append("重构优先核心代码文件")
             if "utils" in lowered_path or "helper" in lowered_path:
                 score += 1
-                reasons.append("当前任务偏重构，公共辅助文件值得先检查")
+                reasons.append("重构可优先查看公共 helper 文件")
             return score, reasons
 
         return score, reasons
 
     def _describe_recall_strategy(self, task_type: str) -> str:
-        """用一句白话说明当前任务类型使用的召回倾向。"""
+        """生成给模型和报告看的召回策略说明，帮助人回看首轮导航为什么这样选文件。"""
         if self.strategy_name == "naive_recent_context":
             return "优先最近修改的文本文件（naive_recent_context）"
 
@@ -405,51 +538,3 @@ class ContextBuilder:
         if normalized_task_type == "refactor":
             return "优先核心代码文件和公共辅助文件"
         return "按任务关键词和通用文件规则做保守召回"
-
-    def _choose_injection_mode(self, content: str, score: int) -> str:
-        """按文件长度和相关性，决定放原文、摘要还是索引说明。"""
-        line_count = len(content.splitlines())
-        if score >= 4 and line_count <= self.original_line_limit:
-            return "original"
-        if score >= 3:
-            return "summary"
-        return "index"
-
-    def _build_injection_content(
-        self,
-        relative_path: str,
-        content: str,
-        injection_mode: str,
-    ) -> tuple[str, int, bool]:
-        """根据注入方式生成真正放进上下文的内容，并记录是否裁剪。"""
-        lines = content.splitlines()
-        if injection_mode == "original":
-            selected_lines = lines[: self.original_line_limit]
-            was_clipped = len(lines) > self.original_line_limit
-            return "\n".join(selected_lines), len(selected_lines), was_clipped
-
-        if injection_mode == "summary":
-            selected_lines = [line.strip() for line in lines if line.strip()][: self.summary_line_limit]
-            summary_lines = [
-                f"文件：{relative_path}",
-                f"总行数：{len(lines)}",
-                "内容摘要：",
-            ]
-            summary_lines.extend(f"- {line}" for line in selected_lines)
-            was_clipped = len([line for line in lines if line.strip()]) > self.summary_line_limit
-            return "\n".join(summary_lines), len(selected_lines), was_clipped
-
-        index_lines = [line.strip() for line in lines if line.strip()][: self.index_line_limit]
-        index_text = "；".join(index_lines) if index_lines else "文件为空。"
-        return (
-            f"文件：{relative_path}\n总行数：{len(lines)}\n索引提示：{index_text}",
-            len(index_lines),
-            len([line for line in lines if line.strip()]) > self.index_line_limit,
-        )
-
-    def _build_content_preview(self, content: str) -> str:
-        """截一小段内容预览，方便 trace 和报告快速看懂选中文件。"""
-        preview_lines = [line.strip() for line in content.splitlines() if line.strip()][:3]
-        if not preview_lines:
-            return "文件为空。"
-        return "\n".join(preview_lines)

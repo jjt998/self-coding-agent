@@ -2,29 +2,27 @@
 
 ## 总览
 
-- 最后更新时间：2026-06-24
-- 当前激活阶段：`Phase 9.x：Context 双层输入与可读性固化`
+- 最后更新时间：2026-06-22
+- 当前激活阶段：`Phase 9.x：Verify 收敛为末尾单次裁判`
 - 当前阶段状态：`in_progress`
 
-## 最新 Phase 9.x 收口：Context 双层输入与注释固化
+## 最新 Phase 9.x 收口：Verify 改为末尾单次裁判
 
 - 当前 loop 已从 `ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize` 调整为 `ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize`。
 - `verify` 现在只会在求解阶段退出后执行一次，验证结果不再回灌给后续模型轮次。
 - 当前不再要求模型显式输出结束字段；harness 仅根据本轮 `tool_calls` 是否为空来决定是否继续求解。
 - Runtime 已新增“连续两次空 `tool_calls`”收口信号；命中后会直接退出求解阶段并进入最终验证。
 - `previous_verification` 已从模型输入中移除，`previous_reflect.verification` 也已从事实反馈中移除。
-- 当前模型输入已收敛为两层：`initial_guide` 负责首轮任务、仓库召回和长期记忆导航；`context_snapshot` 负责每轮 plan 前的 working_memory、fresh/stale 上下文、diff/command 结果和 recent_facts，其中 `working_memory.last_rational` 会承接上一轮 `rationale`。
-- 旧 `runtime_feedback` 已从生产模型请求中移除；`reflect_feedback` trace 事件已改名为 `reflect_content`，并作为 `context_snapshot.recent_facts` 的事实来源之一。
 - token diagnostics 仍会继续流入 `model_raw_response`、`model_decision`、`run_finished`、`report.md`、`summary.json`、`summary.md` 和 comparison delta；provider 缺失 `usage` 时不做本地估算。
 - 当前产品定位继续向 `bug_fix` 主赛道收敛，其它任务类型保持兼容，但不再默认依赖过程内 verify 反馈。
 - 当前已新增显式结构摘要工具 `read_file_structure_summary(path)`，让模型能先看结构、再按行号精读，而不是总从 `read_file` 间接触发大文件摘要。
 - 当前已接入运行时记忆污染治理第一版：成功编辑过的文件会把旧读取缓存整文件标记为 `stale`，后续只有重新读取后才恢复为 `fresh`。
-- `context_snapshot.stale_context` 现已补充 `stale_file_paths`、逐文件 `details`、共享 `reason`、共享 `recommended_sequence` 和共享 `suggest`，便于在 trace 中直接看出“为什么要重读该文件”。
-- stale 文件默认重读顺序已固化为“先 `read_file_structure_summary`、再 `read_file_range`”，优先减少重复读取同一小段旧附近行号。
-- `context_snapshot.fresh_context.file_snippets` 只暴露当前仍可信的片段；曾经 stale 但已重读恢复的文件应进入 fresh_context，而不是继续留在 stale_context。
+- `reflect_feedback` 现已补充 `stale_file_paths` 和最近缓存失效诊断，便于在 trace 中直接看出“为什么又读了一次这个文件”。
+- stale 文件的 `previous_reflect` 现已新增 `stale_reread_guidance`，把“先 `read_file_structure_summary`、再 `read_file_range`”固化成编辑后重读默认顺序，优先减少重复读取同一小段旧附近行号。
+- `reflect_feedback` 与 `previous_reflect` 现已新增 `reread_fresh_ranges`，专门标记“上一轮曾 stale，但本轮已经重读恢复 fresh”的可信范围，避免模型把历史 stale 状态误判成当前 stale。
+- `src/model.py` 现已补充 stale/fresh 解释规则：`stale_file_paths` 只代表当前仍失效的文件；如果某个文件已出现在 `reread_fresh_ranges` 中，默认应直接复用这些 `safe_to_rely_ranges`，而不是仅因它曾 stale 过就继续重复读取。
 - `src/model.py` 现已补充 `bug_fix` 收口规则：若当前 diff 已命中任务目标修改点，且核心验证命令已经符合预期，模型应优先准备让 `tool_calls` 收空，而不是继续扩展外围读取。
-- `src/model.py` 现已把模型返回的 `working_memory` 收紧为四字段结构：被当前轮代码读取、命令输出或 diff 直接否定的旧怀疑，只保留在 `invalidated_beliefs` 中，不再额外保留 `open_questions` 以免继续驱动模型发散；`ContextBuilder` 会在下一轮 `context_snapshot.working_memory` 中额外注入 `last_rational`。
-- `src/context.py` 已按 `docs/代码可读性规范.md` 补充白话中文注释，说明两层上下文、fresh/stale 过滤、diff/command 压缩和召回策略的设计原因。
+- `src/model.py` 现已把 `working_memory` 收紧为四字段结构：被当前轮代码读取、命令输出或 diff 直接否定的旧怀疑，只保留在 `invalidated_beliefs` 中，不再额外保留 `open_questions` 以免继续驱动模型发散。
 
 > 说明：下方按 Phase 保留历史推进记录，其中部分旧条目描述的是更早期的 loop 或 verify 形态；当前实现以上方“最新 Phase 9.x 收口”为准。
 
@@ -276,7 +274,7 @@
 ### Phase 9 本轮新增：跨轮计划与工具入参类型校验
 
 - `ModelDecision.working_memory` 当前已替代旧版累计事项列表字段，用于表达模型维护的结构化运行时记忆；`planned_actions` 明确收敛为本轮 `tool_calls` 的可读说明，不再承担跨轮任务队列职责。
-- `context_snapshot.working_memory` 当前会把上一轮模型返回的工作记忆对象回填给模型，并额外注入 `last_rational`，而不是由 harness 再做跨轮 merge。
+- `runtime_feedback.working_memory` 当前会把上一轮模型原样返回的工作记忆对象直接回填给模型，而不是由 harness 再做跨轮 merge。
 - harness 不再维护任何工作记忆历史列表；每轮只保存当前最新 working_memory，并由模型自己负责修正已失效判断。
 - OpenAI compatible 请求中的 `decision_schema` 已更新为：`tool_calls` 是唯一执行源、`planned_actions` 是本轮说明、`working_memory` 是完整结构化工作记忆对象。
 - `model_decision` trace、plan state result、finalize 摘要、stop reason details 和 report 均会展示或保留当前 working_memory。

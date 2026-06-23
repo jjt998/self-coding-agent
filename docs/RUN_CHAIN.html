@@ -431,7 +431,7 @@
         <article class="node state">
           <span class="tag">analyze</span>
           <h3>上下文构建</h3>
-          <p>根据任务关键词和 context 策略选择候选文件，注入 <code>context_snapshot</code>，并读取 runtime/long-term memory。</p>
+          <p>根据任务关键词和 context 策略选择候选文件，生成 <code>initial_guide</code>，并读取 long-term memory。</p>
         </article>
         <article class="node model">
           <span class="tag">solve loop</span>
@@ -470,7 +470,7 @@
         <article class="node reflect">
           <span class="tag">reflect</span>
           <h3>事实压缩</h3>
-          <p>每轮 act 后固定生成 <code>reflect_feedback</code>，压缩工具结果、失败工具、diff 信号和文件上下文缓存。</p>
+          <p>每轮 act 后固定生成 <code>reflect_content</code>，压缩工具结果、失败工具、diff 信号和文件上下文缓存。</p>
         </article>
         <article class="node verify">
           <span class="tag">exit check</span>
@@ -481,7 +481,7 @@
       <div class="grid-2" style="margin-top: 14px;">
         <article class="panel strong-line">
           <h3>继续下一轮的唯一事实输入</h3>
-          <p>第二轮及以后，模型只通过 <code>runtime_feedback.previous_reflect</code>、<code>runtime_feedback.working_memory</code>、<code>runtime_feedback.current_iteration</code> 和可选 <code>previous_rationale</code> 看到上一轮事实。</p>
+          <p>每轮 plan 前都会把 <code>initial_guide</code> 与最新 <code>context_snapshot</code> 一起交给模型；第二轮及以后，重点由 <code>context_snapshot.working_memory</code>、<code>context_snapshot.fresh_context</code>、<code>context_snapshot.stale_context</code> 和 <code>context_snapshot.recent_facts</code> 承载运行事实。</p>
         </article>
         <article class="panel strong-line warning-line">
           <h3>不再存在的反馈</h3>
@@ -511,7 +511,7 @@
           </tr>
           <tr>
             <td><code>rationale</code></td>
-            <td>模型显式给出的判断理由，可作为下一轮 <code>previous_rationale</code> 回填。</td>
+            <td>模型显式给出的判断理由；下一轮会由 harness 注入到 <code>context_snapshot.working_memory.last_rational</code>。</td>
             <td>否</td>
           </tr>
           <tr>
@@ -521,7 +521,7 @@
           </tr>
           <tr>
             <td><code>working_memory</code></td>
-            <td>固定四字段：<code>confirmed_facts</code>、<code>invalidated_beliefs</code>、<code>completed_actions</code>、<code>next_risks</code>；不再保留 <code>open_questions</code>。</td>
+            <td>模型返回固定四字段：<code>confirmed_facts</code>、<code>invalidated_beliefs</code>、<code>completed_actions</code>、<code>next_risks</code>；输入快照中会额外带有 <code>last_rational</code>。</td>
             <td>否</td>
           </tr>
           <tr>
@@ -554,45 +554,60 @@
     </section>
 
     <section>
-      <h2>runtime_feedback 形状</h2>
+      <h2>initial_guide / context_snapshot 形状</h2>
       <p class="section-lead">
-        <code>runtime_feedback</code> 是跨轮反馈的边界。它传事实，不替模型合并语义，也不再夹带最终验证结果。
+        <code>initial_guide</code> 是首轮任务、仓库召回和长期记忆指导；<code>context_snapshot</code> 是每轮 plan 前重建的运行时事实快照。
       </p>
       <div class="grid-3">
         <article class="panel reflect">
-          <h3><code>previous_reflect</code></h3>
-          <p>包含 <code>observation</code>、<code>signals</code>、<code>failed_tools</code>、<code>recent_tool_results</code>、<code>file_context_cache</code>、<code>stale_file_paths</code>、<code>stale_reread_guidance</code>、<code>reread_fresh_ranges</code> 和最近失效记录。</p>
+          <h3><code>initial_guide</code></h3>
+          <p>包含 <code>task</code>、<code>repo_guide</code> 和 <code>memory_guide</code>。其中 <code>selected_files</code> 只暴露结构摘要和推荐理由，不再注入不可控 summary。</p>
         </article>
         <article class="panel model">
-          <h3><code>working_memory</code></h3>
-          <p>上一轮模型原样返回的四字段工作记忆。模型如果推翻了旧判断，需要自己写入 <code>invalidated_beliefs</code>。</p>
+          <h3><code>context_snapshot.working_memory</code></h3>
+          <p>上一轮模型返回的四字段工作记忆，加上 harness 从上一轮 <code>rationale</code> 注入的 <code>last_rational</code>。模型如果推翻了旧判断，需要自己写入 <code>invalidated_beliefs</code>。</p>
         </article>
         <article class="panel state">
-          <h3><code>current_iteration</code></h3>
-          <p>当前求解轮次。它帮助模型区分早期探索和后期收口，但 harness 不暴露“剩余预算”作为自由发挥空间。</p>
+          <h3><code>fresh / stale / recent</code></h3>
+          <p><code>fresh_context</code> 放仍可信的片段、diff 和命令结果；<code>stale_context</code> 提醒哪些旧片段需重读；<code>recent_facts</code> 放最近工具结果、失败工具和 signals。</p>
         </article>
       </div>
       <div style="margin-top: 14px;">
         <pre><code>{
-  "runtime_feedback": {
-    "current_iteration": 2,
-    "previous_reflect": {
-      "observation": {"summary": "上一轮工具事实摘要"},
-      "signals": ["failed_tool_observed"],
-      "failed_tools": [],
-      "recent_tool_results": [],
-      "file_context_cache": {},
-      "stale_file_paths": [],
-      "stale_reread_guidance": [],
-      "reread_fresh_ranges": []
+  "initial_guide": {
+    "task": {"text": "...", "task_type": "bug_fix", "keywords": []},
+    "repo_guide": {
+      "recall_strategy": "优先测试文件和相关代码文件",
+      "candidate_file_count": 42,
+      "selected_files": [
+        {"path": "src/foo.py", "score": 5, "reason": "...", "structure_summary": []}
+      ]
     },
+    "memory_guide": {
+      "long_term_memory": [],
+      "suppressed_long_term_memory": [],
+      "diagnostic_labels": []
+    }
+  },
+  "context_snapshot": {
+    "iteration": 2,
+    "task": {"text": "...", "task_type": "bug_fix", "keywords": []},
     "working_memory": {
       "confirmed_facts": [],
       "invalidated_beliefs": [],
       "completed_actions": [],
-      "next_risks": []
+      "next_risks": [],
+      "last_rational": "上一轮模型给出的判断理由"
     },
-    "previous_rationale": "上一轮模型显式理由，可选"
+    "fresh_context": {"file_snippets": [], "diffs": [], "command_results": []},
+    "stale_context": {
+      "stale_file_paths": [],
+      "details": [],
+      "reason": "file_was_edited_and_previous_snippets_are_stale",
+      "recommended_sequence": ["read_file_structure_summary", "read_file_range"],
+      "suggest": "先重新建立当前文件结构和最新行号，再按新的行号范围精读。"
+    },
+    "recent_facts": {"recent_tool_results": [], "failed_tools": [], "signals": []}
   }
 }</code></pre>
       </div>
@@ -617,7 +632,7 @@
         <article class="node state">
           <span class="tag">select</span>
           <h3>选择文件</h3>
-          <p>按分数和路径排序，写入 <code>repo_context.selected_files</code>；注入形态可能是全文、摘要或索引。</p>
+          <p>按分数和路径排序，写入 <code>initial_guide.repo_guide.selected_files</code>；首轮只提供 <code>structure_summary</code> 和推荐理由，具体内容由模型后续主动读取。</p>
         </article>
         <article class="node tool">
           <span class="tag">large file</span>
@@ -709,7 +724,9 @@
             <li><code>model_raw_response</code></li>
             <li><code>model_decision</code></li>
             <li><code>tool_result</code></li>
-            <li><code>reflect_feedback</code></li>
+            <li><code>initial_guide</code></li>
+            <li><code>context_snapshot_prepared</code></li>
+            <li><code>reflect_content</code></li>
             <li><code>verification_result</code></li>
           </ul>
         </article>

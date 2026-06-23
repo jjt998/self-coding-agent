@@ -34,6 +34,7 @@ def build_live_trace_snapshot(
     event_type_counts: dict[str, int] = {}
     iteration_blocks: dict[int, dict[str, Any]] = {}
     global_events: list[dict[str, Any]] = []
+    initial_guide_payload: dict[str, Any] | None = None
     context_snapshot_payload: dict[str, Any] | None = None
     verification_payload: dict[str, Any] | None = None
     finalize_payload: dict[str, Any] | None = None
@@ -47,7 +48,9 @@ def build_live_trace_snapshot(
         last_timestamp = timestamp or last_timestamp
         event_type_counts[event_type] = event_type_counts.get(event_type, 0) + 1
 
-        if event_type == "context_snapshot" and isinstance(payload, dict):
+        if event_type == "initial_guide" and isinstance(payload, dict):
+            initial_guide_payload = payload
+        elif event_type == "context_snapshot_prepared" and isinstance(payload, dict):
             context_snapshot_payload = payload
         elif event_type == "verification_result" and isinstance(payload, dict):
             verification_payload = payload
@@ -77,7 +80,8 @@ def build_live_trace_snapshot(
                 "model_decision_failed": None,
                 "tool_called": [],
                 "tool_result": [],
-                "reflect_feedback": None,
+                "context_snapshot_prepared": None,
+                "reflect_content": None,
                 "state_results": [],
                 "event_count": 0,
             },
@@ -96,10 +100,15 @@ def build_live_trace_snapshot(
             block["tool_called"].append(payload)
         elif event_type == "tool_result":
             block["tool_result"].append(payload)
-        elif event_type == "reflect_feedback":
-            block["reflect_feedback"] = payload
+        elif event_type == "context_snapshot_prepared":
+            block["context_snapshot_prepared"] = payload
+        elif event_type == "reflect_content":
+            block["reflect_content"] = payload
         elif event_type == "state_result":
             block["state_results"].append(payload)
+
+    for block in iteration_blocks.values():
+        _fill_model_decision_last_rational(block)
 
     iteration_items = [
         {
@@ -131,6 +140,7 @@ def build_live_trace_snapshot(
         "event_count": len(trace_events),
         "event_type_counts": event_type_counts,
         "current_iteration": current_iteration,
+        "initial_guide": initial_guide_payload,
         "context_snapshot": context_snapshot_payload,
         "verification_result": verification_payload,
         "finalize_summary": finalize_payload,
@@ -143,6 +153,33 @@ def build_live_trace_snapshot(
         "report_text": report_text,
         "final_diff_text": final_diff_text,
     }
+
+
+def _fill_model_decision_last_rational(block: dict[str, Any]) -> None:
+    """让 live viewer 的 model_decision 展示同轮输入快照里的上一轮 rationale。"""
+    decision_payload = block.get("model_decision")
+    context_snapshot = block.get("context_snapshot_prepared")
+    if not isinstance(decision_payload, dict) or not isinstance(context_snapshot, dict):
+        return
+
+    snapshot_working_memory = context_snapshot.get("working_memory", {})
+    if not isinstance(snapshot_working_memory, dict):
+        return
+    last_rational = str(snapshot_working_memory.get("last_rational", "")).strip()
+    if not last_rational:
+        return
+
+    decision_working_memory = decision_payload.get("working_memory", {})
+    if not isinstance(decision_working_memory, dict):
+        decision_working_memory = {}
+    if decision_working_memory.get("last_rational"):
+        return
+
+    patched_decision = dict(decision_payload)
+    patched_working_memory = dict(decision_working_memory)
+    patched_working_memory["last_rational"] = last_rational
+    patched_decision["working_memory"] = patched_working_memory
+    block["model_decision"] = patched_decision
 
 
 def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
@@ -512,6 +549,7 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
         ["invalidated_beliefs", "invalidated_beliefs"],
         ["completed_actions", "completed_actions"],
         ["next_risks", "next_risks"],
+        ["last_rational", "last_rational"],
       ];
       return fieldPairs.map(([fieldName, label]) => `
         <div class="kv-row"><strong>${{escapeHtml(label)}}</strong><div>${{escapeHtml(workingMemoryFieldPreview(normalized[fieldName]))}}</div></div>
@@ -605,29 +643,30 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
     }}
 
     function buildRequestOverview(userPayload, requestPayload) {{
+      const initialGuide = userPayload?.initial_guide || {{}};
       const contextSnapshot = userPayload?.context_snapshot || {{}};
-      const repoContext = contextSnapshot.repo_context || {{}};
-      const memoryContext = contextSnapshot.memory_context || {{}};
-      const runtimeFeedback = userPayload?.runtime_feedback || {{}};
-      const reflect = runtimeFeedback.previous_reflect || {{}};
-      const stalePaths = Array.isArray(reflect.stale_file_paths) ? reflect.stale_file_paths : [];
-      const workingMemory = normalizeWorkingMemory(runtimeFeedback.working_memory);
+      const repoGuide = initialGuide.repo_guide || {{}};
+      const memoryGuide = initialGuide.memory_guide || {{}};
+      const staleContext = contextSnapshot.stale_context || {{}};
+      const stalePaths = Array.isArray(staleContext.stale_file_paths) ? staleContext.stale_file_paths : [];
+      const workingMemory = normalizeWorkingMemory(contextSnapshot.working_memory);
+      const selectedFiles = Array.isArray(repoGuide.selected_files) ? repoGuide.selected_files : [];
       return [
         ["model", requestPayload?.model || ""],
-        ["selected_file_count", repoContext.selected_file_count ?? 0],
-        ["runtime_rule_count", Array.isArray(memoryContext.runtime_rule_entries) ? memoryContext.runtime_rule_entries.length : 0],
-        ["long_term_count", Array.isArray(memoryContext.long_term_entries) ? memoryContext.long_term_entries.length : 0],
+        ["snapshot_iteration", contextSnapshot.iteration ?? 0],
+        ["selected_file_count", selectedFiles.length],
+        ["long_term_count", Array.isArray(memoryGuide.long_term_memory) ? memoryGuide.long_term_memory.length : 0],
+        ["suppressed_long_term_count", Array.isArray(memoryGuide.suppressed_long_term_memory) ? memoryGuide.suppressed_long_term_memory.length : 0],
         ["stale_file_paths", stalePaths.length ? stalePaths.join(", ") : "无"],
         ["working_memory_filled_fields", countFilledWorkingMemoryFields(workingMemory)],
-        ["previous_rationale", runtimeFeedback.previous_rationale || "无"],
       ];
     }}
 
     function renderRequestDetails(requestPayload, userPayload, iterationIndex) {{
       const overviewRows = buildRequestOverview(userPayload, requestPayload);
       const messages = requestPayload?.messages || [];
+      const initialGuide = userPayload?.initial_guide || {{}};
       const contextSnapshot = userPayload?.context_snapshot || {{}};
-      const runtimeFeedback = userPayload?.runtime_feedback || {{}};
       const toolSchema = userPayload?.tool_schema || {{}};
       return `
         <div class="kv">
@@ -643,12 +682,12 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
           <div class="details-body"><pre>${{escapeHtml(safeJson(messages))}}</pre></div>
         </details>
         <details>
-          <summary>context_snapshot</summary>
-          <div class="details-body"><pre>${{escapeHtml(safeJson(contextSnapshot))}}</pre></div>
+          <summary>initial_guide</summary>
+          <div class="details-body"><pre>${{escapeHtml(safeJson(initialGuide))}}</pre></div>
         </details>
         <details>
-          <summary>runtime_feedback</summary>
-          <div class="details-body"><pre>${{escapeHtml(safeJson(runtimeFeedback))}}</pre></div>
+          <summary>context_snapshot</summary>
+          <div class="details-body"><pre>${{escapeHtml(safeJson(contextSnapshot))}}</pre></div>
         </details>
         <details>
           <summary>tool_schema</summary>
@@ -700,8 +739,8 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
     function renderToolSummary(iteration, iterationIndex) {{
       const toolCalled = Array.isArray(iteration.tool_called) ? iteration.tool_called : [];
       const toolResults = Array.isArray(iteration.tool_result) ? iteration.tool_result : [];
-      const reflectFeedback = iteration.reflect_feedback;
-      if (!toolCalled.length && !toolResults.length && !reflectFeedback) {{
+      const reflectContent = iteration.reflect_content;
+      if (!toolCalled.length && !toolResults.length && !reflectContent) {{
         return '<div class="empty">本轮还没有工具执行结果。</div>';
       }}
       return `
@@ -731,13 +770,13 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
               `).join("")
             }}
             ${{
-              reflectFeedback
+              reflectContent
                 ? `
                   <div class="tool-item">
-                    <div><strong>reflect_feedback</strong></div>
-                    <div class="subtle">${{escapeHtml((reflectFeedback.signals || []).join(", ") || "无 signals")}}</div>
+                    <div><strong>reflect_content</strong></div>
+                    <div class="subtle">${{escapeHtml((reflectContent.signals || []).join(", ") || "无 signals")}}</div>
                     <div class="actions">
-                      <button data-detail-kind="reflect_feedback" data-iteration-index="${{iterationIndex}}">查看 reflect JSON</button>
+                      <button data-detail-kind="reflect_content" data-iteration-index="${{iterationIndex}}">查看 reflect JSON</button>
                     </div>
                   </div>
                 `
@@ -838,10 +877,10 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
               setDetail(`第 ${{iteration.iteration}} 轮 tool_result`, toolItem);
             }});
         }});
-        root
-          .querySelector(`[data-detail-kind="reflect_feedback"][data-iteration-index="${{iterationIndex}}"]`)
-          ?.addEventListener("click", () => {{
-            setDetail(`第 ${{iteration.iteration}} 轮 reflect_feedback`, iteration.reflect_feedback || {{}});
+          root
+            .querySelector(`[data-detail-kind="reflect_content"][data-iteration-index="${{iterationIndex}}"]`)
+            ?.addEventListener("click", () => {{
+            setDetail(`第 ${{iteration.iteration}} 轮 reflect_content`, iteration.reflect_content || {{}});
           }});
       }});
     }}

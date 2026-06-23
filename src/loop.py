@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
+import inspect
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
-from context import ContextBuilder, ContextSnapshot
+from context import ContextBuilder, ContextSnapshot, InitialGuide
 from config import RunSettings
 from memory import RuntimeMemoryManager
 from model import (
@@ -74,12 +75,13 @@ class RuntimeState:
     reflect_trigger_reason: str = ""
     reflect_count: int = 0
     reflect_trigger_reasons: list[str] = field(default_factory=list)
-    reflect_feedback: dict[str, Any] = field(default_factory=dict)
-    reflect_feedback_history: list[dict[str, Any]] = field(default_factory=list)
+    reflect_content: dict[str, Any] = field(default_factory=dict)
+    reflect_content_history: list[dict[str, Any]] = field(default_factory=list)
     current_iteration: int = 0
     iteration_count: int = 0
     max_steps: int = 4
     solve_loop_exit_reason: str = ""
+    initial_guide: InitialGuide | None = None
     context_snapshot: ContextSnapshot | None = None
     model_decision: ModelDecision | None = None
     model_decisions: list[ModelDecision] = field(default_factory=list)
@@ -304,7 +306,7 @@ class LoopOrchestrator:
             "verification_failure": self._build_verification_failure_details(runtime_state=runtime_state),
             "changed_files": runtime_state.changed_files,
             "failed_tool_count": runtime_state.failed_tool_count,
-            "reflect_feedback": dict(runtime_state.reflect_feedback),
+            "reflect_content": dict(runtime_state.reflect_content),
             "working_memory": deepcopy(runtime_state.working_memory),
             "token_usage": dict(runtime_state.token_usage),
         }
@@ -384,48 +386,15 @@ class LoopOrchestrator:
         )
         runtime_state.current_state = to_state.value
 
-    def _build_runtime_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """下一轮传入轻量轮次、事实型 reflect 反馈和上一轮原样 working_memory。"""
-        if runtime_state.current_iteration <= 1 and not runtime_state.reflect_feedback:
-            return {}
-        runtime_feedback = {
-            "current_iteration": runtime_state.current_iteration,
-            "previous_reflect": self._build_previous_reflect(runtime_state=runtime_state),
-            "working_memory": deepcopy(runtime_state.working_memory),
-        }
-        if runtime_state.model_decision and runtime_state.model_decision.rationale:
-            runtime_feedback["previous_rationale"] = runtime_state.model_decision.rationale
-        return runtime_feedback
-
-    def _build_previous_reflect(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """返回上一轮 reflect 事实，并移除旧的 verification 字段。"""
-        if not runtime_state.reflect_feedback:
-            return {}
-        feedback = deepcopy(runtime_state.reflect_feedback)
-        feedback.pop("iteration", None)
-        feedback.pop("verification", None)
-        observation = feedback.get("observation")
-        if isinstance(observation, dict):
-            sanitized_observation = dict(observation)
-            sanitized_observation.pop("iteration", None)
-            feedback["observation"] = sanitized_observation
-        return feedback
-
-    def _summarize_reflect_feedback_for_trace(self, runtime_feedback: dict[str, Any]) -> dict[str, Any]:
-        """给 trace 保留高信号 reflect 摘要，不再包含 verification 子段。"""
-        reflect_feedback = runtime_feedback.get("previous_reflect", {})
-        if not isinstance(reflect_feedback, dict) or not reflect_feedback:
-            return {}
-        observation = reflect_feedback.get("observation", {})
-        if not isinstance(observation, dict):
-            observation = {}
-        return {
-            "trigger": reflect_feedback.get("trigger", ""),
-            "signals": list(reflect_feedback.get("signals", [])),
-            "changed_files": list(observation.get("changed_files", [])),
-            "failed_tool_count": observation.get("failed_tool_count", 0),
-            "stale_file_paths": list(reflect_feedback.get("stale_file_paths", [])),
-        }
+    def _filter_callable_kwargs(self, callable_obj: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+        try:
+            signature = inspect.signature(callable_obj)
+        except (TypeError, ValueError):
+            return dict(kwargs)
+        if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
+            return dict(kwargs)
+        accepted_names = set(signature.parameters)
+        return {name: value for name, value in kwargs.items() if name in accepted_names}
 
     def _summarize_tool_execution(
         self,
@@ -733,7 +702,11 @@ class LoopOrchestrator:
                 memory_manager=memory_manager,
             )
         if state is AgentState.PLAN:
-            return self._run_plan(runtime_state=runtime_state, config_data=config_data)
+            return self._run_plan(
+                runtime_state=runtime_state,
+                config_data=config_data,
+                context_builder=context_builder,
+            )
         if state is AgentState.ACT:
             return self._run_act(runtime_state=runtime_state, tool_runner=tool_runner)
         if state is AgentState.REFLECT:
@@ -837,47 +810,52 @@ class LoopOrchestrator:
                 )
             )
 
-        runtime_state.context_snapshot = context_builder.build_context_snapshot(
+        runtime_state.initial_guide = context_builder.build_initial_guide(
             task=runtime_state.task,
             task_type=runtime_state.task_type,
-            current_state=runtime_state.current_state,
-            completed_states=runtime_state.completed_states,
-            step_count=runtime_state.step_count,
-            memory_query=memory_query,
-            matched_memory_entries=matched_memory_entries,
-            runtime_rule_entries=runtime_rule_entries,
             long_term_memory_entries=long_term_entries,
             suppressed_long_term_entries=suppressed_long_term_entries,
-            memory_conflict_evidence=memory_search_result.conflict_evidence,
             memory_diagnostic_labels=memory_search_result.diagnostic_labels,
         )
         self.trace_writer.write_event(
             TraceEvent(
-                event_type="context_snapshot",
-                payload=runtime_state.context_snapshot.to_dict(),
+                event_type="initial_guide",
+                payload=runtime_state.initial_guide.to_dict(),
             )
         )
         return {
             "summary": "Initial task analysis completed.",
             "task_type": runtime_state.task_type,
-            "selected_context_files": [
-                file_context.to_dict()
-                for file_context in runtime_state.context_snapshot.repo_context.selected_files
-            ],
+            "selected_context_files": runtime_state.initial_guide.to_dict()["repo_guide"]["selected_files"],
         }
 
-    def _run_plan(self, runtime_state: RuntimeState, config_data: dict[str, Any]) -> dict[str, Any]:
+    def _run_plan(
+        self,
+        runtime_state: RuntimeState,
+        config_data: dict[str, Any],
+        context_builder: ContextBuilder,
+    ) -> dict[str, Any]:
         """生成一轮模型决策，并把这一轮 working_memory 原样落进运行时状态。"""
         model_adapter = build_model_adapter(config_data=config_data)
-        runtime_feedback = self._build_runtime_feedback(runtime_state=runtime_state)
-        reflect_feedback_summary = self._summarize_reflect_feedback_for_trace(runtime_feedback=runtime_feedback)
+        runtime_state.context_snapshot = context_builder.build_context_snapshot(runtime_state=runtime_state)
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="context_snapshot_prepared",
+                payload=runtime_state.context_snapshot.to_dict(),
+            )
+        )
         prepare_request_payload = getattr(model_adapter, "prepare_request_payload", None)
         if callable(prepare_request_payload):
             request_payload = prepare_request_payload(
-                task=runtime_state.task,
-                task_type=runtime_state.task_type,
-                context_snapshot=runtime_state.context_snapshot,
-                runtime_feedback=runtime_feedback,
+                **self._filter_callable_kwargs(
+                    prepare_request_payload,
+                    {
+                        "task": runtime_state.task,
+                        "task_type": runtime_state.task_type,
+                        "initial_guide": runtime_state.initial_guide,
+                        "context_snapshot": runtime_state.context_snapshot,
+                    },
+                )
             )
             self.trace_writer.write_event(
                 TraceEvent(
@@ -891,11 +869,16 @@ class LoopOrchestrator:
                 )
             )
         runtime_state.model_decision = model_adapter.decide(
-            task=runtime_state.task,
-            task_type=runtime_state.task_type,
-            context_snapshot=runtime_state.context_snapshot,
-            config_data=config_data,
-            runtime_feedback=runtime_feedback,
+            **self._filter_callable_kwargs(
+                model_adapter.decide,
+                {
+                    "task": runtime_state.task,
+                    "task_type": runtime_state.task_type,
+                    "initial_guide": runtime_state.initial_guide,
+                    "context_snapshot": runtime_state.context_snapshot,
+                    "config_data": config_data,
+                },
+            )
         )
         self._accumulate_token_usage(runtime_state=runtime_state, model_decision=runtime_state.model_decision)
         self.trace_writer.write_event(
@@ -932,8 +915,8 @@ class LoopOrchestrator:
                 payload={
                     **runtime_state.model_decision.to_dict(),
                     "iteration": runtime_state.current_iteration,
-                    "has_reflect_feedback": bool(reflect_feedback_summary),
-                    "reflect_feedback_summary": reflect_feedback_summary,
+                    "has_context_snapshot": runtime_state.context_snapshot is not None,
+                    "has_reflect_content": bool(runtime_state.reflect_content),
                     "run_token_usage": dict(runtime_state.token_usage),
                 },
             )
@@ -965,11 +948,11 @@ class LoopOrchestrator:
 
     def _run_reflect(self, runtime_state: RuntimeState) -> dict[str, Any]:
         """为下一轮 plan 生成事实型反馈。"""
-        reflect_feedback = self._build_reflect_feedback(runtime_state=runtime_state)
-        runtime_state.reflect_feedback = reflect_feedback
-        runtime_state.reflect_feedback_history.append(reflect_feedback)
-        self.trace_writer.write_event(TraceEvent(event_type="reflect_feedback", payload=reflect_feedback))
-        return reflect_feedback
+        reflect_content = self._build_reflect_content(runtime_state=runtime_state)
+        runtime_state.reflect_content = reflect_content
+        runtime_state.reflect_content_history.append(reflect_content)
+        self.trace_writer.write_event(TraceEvent(event_type="reflect_content", payload=reflect_content))
+        return reflect_content
 
     def _run_verify(
         self,
@@ -1332,7 +1315,7 @@ class LoopOrchestrator:
             rule_types.append("verify_rule")
         return rule_types
 
-    def _build_reflect_feedback(self, runtime_state: RuntimeState) -> dict[str, Any]:
+    def _build_reflect_content(self, runtime_state: RuntimeState) -> dict[str, Any]:
         """构造纯事实型 reflect 反馈，不再附带 verification 子段。"""
         self._update_file_context_cache(runtime_state=runtime_state)
         observation = self._build_tool_fact_observation(runtime_state=runtime_state)

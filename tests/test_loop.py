@@ -84,24 +84,43 @@ def _fake_model_response(tool_calls: list[dict] | None = None, usage: dict | Non
     )
 
 
-def _constraint_aware_rationale(runtime_feedback: dict | None, *, repeat_reason: bool = True) -> str:
-    """为测试 fake 模型生成会读取事实型 reflect 的说明文本。"""
-    reflect_feedback = (runtime_feedback or {}).get("previous_reflect", {})
-    if not reflect_feedback:
+def _snapshot_payload(context_snapshot) -> dict:
+    if context_snapshot is None:
+        return {}
+    if hasattr(context_snapshot, "to_dict"):
+        return context_snapshot.to_dict()
+    if isinstance(context_snapshot, dict):
+        return context_snapshot
+    return {}
+
+
+def _cross_round_payload(context_snapshot) -> dict:
+    payload = _snapshot_payload(context_snapshot)
+    if int(payload.get("iteration", 0) or 0) <= 1:
+        return {}
+    return payload
+
+
+def _constraint_aware_rationale(context_snapshot, *, repeat_reason: bool = True) -> str:
+    """为测试 fake 模型生成会读取 context_snapshot 事实的说明文本。"""
+    snapshot_payload = _cross_round_payload(context_snapshot)
+    if not snapshot_payload:
         return "首轮执行常规计划。"
+    recent_facts = snapshot_payload.get("recent_facts", {})
+    working_memory = snapshot_payload.get("working_memory", {})
     parts = [
-        " ".join(str(item) for item in reflect_feedback.get("signals", [])),
+        " ".join(str(item) for item in recent_facts.get("signals", [])),
         " ".join(
             str(item)
             for item in (
-                (runtime_feedback or {}).get("working_memory", {}).get("completed_actions", [])
-                if isinstance((runtime_feedback or {}).get("working_memory", {}).get("completed_actions", []), list)
-                else [str((runtime_feedback or {}).get("working_memory", {}).get("completed_actions", ""))]
+                working_memory.get("completed_actions", [])
+                if isinstance(working_memory.get("completed_actions", []), list)
+                else [str(working_memory.get("completed_actions", ""))]
             )
         ),
     ]
     suffix = "，再次重复相同工具序列是因为测试需要保持同一工具计划。" if repeat_reason else ""
-    return "读取 previous_reflect 事实：" + " ".join(item for item in parts if item).strip() + suffix
+    return "读取 context_snapshot 事实：" + " ".join(item for item in parts if item).strip() + suffix
 
 
 def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path: Path, monkeypatch) -> None:
@@ -113,8 +132,8 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
         provider = "openai_compatible"
         model_name = "fake-verify-reflect-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            rationale = _constraint_aware_rationale(runtime_feedback)
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            rationale = _constraint_aware_rationale(context_snapshot)
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -292,7 +311,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert raw_response_payload["token_usage"]["total_tokens"] == 50
     assert json.loads(raw_response_payload["content"])["planned_actions"] == ["执行模型工具计划"]
     assert not any(event["event_type"] == "progress_observed" for event in trace_events)
-    reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback")
+    reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_content")
     assert reflect_payload["observation"]["changed_files"] == ["run_evidence.md"]
     assert reflect_payload["observation"]["failed_tool_count"] == 0
     ingest_payload = next(event["payload"] for event in trace_events if event["event_type"] == "task_ingested")
@@ -356,7 +375,7 @@ def test_loop_verification_uses_system_diff_snapshot_instead_of_model_git_diff(
         provider = "openai_compatible"
         model_name = "fake-system-diff-snapshot-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+        def decide(self, *, task, task_type, context_snapshot, config_data):
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -428,8 +447,8 @@ def test_default_reflect_records_read_only_round_without_no_diff_signal(tmp_path
         provider = "openai_compatible"
         model_name = "fake-no-progress-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            rationale = _constraint_aware_rationale(runtime_feedback, repeat_reason=True)
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            rationale = _constraint_aware_rationale(context_snapshot, repeat_reason=True)
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -488,7 +507,7 @@ def test_default_reflect_records_read_only_round_without_no_diff_signal(tmp_path
         if line.strip()
     ]
     assert not any(event["event_type"] == "progress_observed" for event in trace_events)
-    reflect_payloads = [event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback"]
+    reflect_payloads = [event["payload"] for event in trace_events if event["event_type"] == "reflect_content"]
     assert reflect_payloads[0]["trigger"] == "after_act"
     assert reflect_payloads[0]["signals"] == []
     assert reflect_payloads[0]["observation"]["changed_files"] == []
@@ -521,7 +540,7 @@ def test_loop_normalizes_common_tool_input_aliases(tmp_path: Path, monkeypatch) 
         provider = "openai_compatible"
         model_name = "fake-alias-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+        def decide(self, *, task, task_type, context_snapshot, config_data):
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -570,7 +589,7 @@ def test_loop_stops_with_model_error_when_tool_input_has_extra_field(
         provider = "openai_compatible"
         model_name = "fake-invalid-tool-schema-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+        def decide(self, *, task, task_type, context_snapshot, config_data):
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -625,7 +644,7 @@ def test_loop_accepts_string_run_command_from_model(tmp_path: Path, monkeypatch)
         provider = "openai_compatible"
         model_name = "fake-string-command-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+        def decide(self, *, task, task_type, context_snapshot, config_data):
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -673,8 +692,8 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
         provider = "openai_compatible"
         model_name = "fake-replan-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect"))
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            has_reflect_content = bool(_cross_round_payload(context_snapshot))
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -683,13 +702,13 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
                 rationale=(
                     "回应 verification_failed、fake_verify 和 fix_failing_verification_checks 后重规划，"
                     "再次重复相同工具序列是因为需要覆盖同一文件并重新生成 diff。"
-                    if has_reflect_feedback
+                    if has_reflect_content
                     else "首轮执行常规计划。"
                 ),
                 planned_actions=[
                     (
                         "修复 verification_failed / fake_verify / fix_failing_verification_checks 后重新验证"
-                        if has_reflect_feedback
+                        if has_reflect_content
                         else "执行首轮工具计划"
                     )
                 ],
@@ -767,7 +786,7 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
     assert run_finished_payload["stop_reason"]["details"]["reflect_count"] == 2
 
 
-def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> None:
+def test_second_plan_receives_context_snapshot(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
@@ -777,9 +796,9 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
         provider = "openai_compatible"
         model_name = "fake-feedback-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
-            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect"))
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
+            has_reflect_content = bool(_cross_round_payload(context_snapshot))
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -788,13 +807,13 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
                 rationale=(
                     "回应 verification_failed、fake_verify 和 fix_failing_verification_checks，"
                     "再次使用相同工具序列是因为需要覆盖同一文件并重新生成 diff。"
-                    if has_reflect_feedback
+                    if has_reflect_content
                     else "test feedback"
                 ),
                 planned_actions=[
                     (
                         "处理 verification_failed / fake_verify / fix_failing_verification_checks 后执行反馈测试工具计划"
-                        if has_reflect_feedback
+                        if has_reflect_content
                         else "执行反馈测试工具计划"
                     )
                 ],
@@ -842,32 +861,27 @@ def test_second_plan_receives_runtime_feedback(tmp_path: Path, monkeypatch) -> N
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert len(feedbacks) == 2
     assert feedbacks[0] == {}
-    assert "iteration" not in feedbacks[1]
+    assert feedbacks[1]["iteration"] == 2
     assert "remaining_iterations" not in feedbacks[1]
     assert "max_steps" not in feedbacks[1]
-    assert "iteration" not in feedbacks[1]["previous_reflect"]
-    assert "iteration" not in feedbacks[1]["previous_reflect"]["observation"]
-    assert feedbacks[1]["previous_reflect"]["trigger"] == "after_act"
-    assert "verification" not in feedbacks[1]["previous_reflect"]
-    assert feedbacks[1]["previous_reflect"]["recent_tool_results"][0]["tool_name"] == "apply_patch"
+    assert feedbacks[1]["recent_facts"]["recent_tool_results"][0]["tool_name"] == "apply_patch"
 
     trace_events = [
         json.loads(line)
         for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_feedback")
+    reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_content")
     assert reflect_payload["trigger"] == "after_act"
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
-    assert model_decision_payloads[0]["has_reflect_feedback"] is False
-    assert model_decision_payloads[1]["has_reflect_feedback"] is True
-    assert model_decision_payloads[1]["reflect_feedback_summary"]["failed_tool_count"] == 0
+    assert model_decision_payloads[0]["has_reflect_content"] is False
+    assert model_decision_payloads[1]["has_reflect_content"] is True
     raw_response_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_raw_response"]
     assert [payload["iteration"] for payload in raw_response_payloads] == [1, 2]
     assert all(payload["parsed_ok"] is True for payload in raw_response_payloads)
 
 
-def test_runtime_feedback_includes_read_file_excerpt_after_old_text_not_found(
+def test_context_snapshot_includes_read_file_excerpt_after_old_text_not_found(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -896,9 +910,9 @@ def test_runtime_feedback_includes_read_file_excerpt_after_old_text_not_found(
         provider = "openai_compatible"
         model_name = "fake-old-text-feedback-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
-            has_feedback = bool(runtime_feedback)
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
+            has_feedback = bool(_cross_round_payload(context_snapshot))
             if has_feedback:
                 rationale = (
                     "回应 verification_failed、fake_verify、fix_failing_verification_checks、"
@@ -980,9 +994,9 @@ def test_runtime_feedback_includes_read_file_excerpt_after_old_text_not_found(
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert len(feedbacks) == 2
     second_feedback = feedbacks[1]
-    previous_reflect = second_feedback["previous_reflect"]
+    recent_facts = second_feedback["recent_facts"]
     read_summary = next(
-        item for item in previous_reflect["recent_tool_results"] if item["tool_name"] == "read_file"
+        item for item in recent_facts["recent_tool_results"] if item["tool_name"] == "read_file"
     )
     assert read_summary["path"] == "todo_app.py"
     assert read_summary["line_count"] == 9
@@ -992,7 +1006,7 @@ def test_runtime_feedback_includes_read_file_excerpt_after_old_text_not_found(
     assert 'status = "todo" if task.get("done") else "done"' in read_summary["content_excerpt"]
 
     patch_summary = next(
-        item for item in previous_reflect["recent_tool_results"] if item["tool_name"] == "apply_patch"
+        item for item in recent_facts["recent_tool_results"] if item["tool_name"] == "apply_patch"
     )
     assert patch_summary["path"] == "todo_app.py"
     assert patch_summary["error"] == "old_text_not_found"
@@ -1000,13 +1014,13 @@ def test_runtime_feedback_includes_read_file_excerpt_after_old_text_not_found(
     assert 'status = "done" if task.get("done") else "todo"' in patch_summary["new_text_excerpt"]
 
     assert "previous_reflect_feedback" not in second_feedback
-    assert "replan_constraints" not in previous_reflect
-    failed_tool = previous_reflect["failed_tools"][0]
+    assert "replan_constraints" not in recent_facts
+    failed_tool = recent_facts["failed_tools"][0]
     assert failed_tool["error"] == "old_text_not_found"
     assert failed_tool["failed_old_text_excerpt"] == patch_summary["failed_old_text_excerpt"]
 
 
-def test_runtime_feedback_includes_full_small_read_file_content(
+def test_context_snapshot_includes_full_small_read_file_content(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1019,9 +1033,9 @@ def test_runtime_feedback_includes_full_small_read_file_content(
         provider = "openai_compatible"
         model_name = "fake-small-read-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
-            if runtime_feedback:
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
+            if _cross_round_payload(context_snapshot):
                 return ModelDecision(
                     provider=self.provider,
                     model_name=self.model_name,
@@ -1069,7 +1083,7 @@ def test_runtime_feedback_includes_full_small_read_file_content(
 
     loop_module.LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=_model_config())
 
-    read_summary = feedbacks[1]["previous_reflect"]["recent_tool_results"][0]
+    read_summary = feedbacks[1]["recent_facts"]["recent_tool_results"][0]
     assert read_summary["tool_name"] == "read_file"
     assert read_summary["content_mode"] == "full"
     assert read_summary["content_truncated"] is False
@@ -1078,7 +1092,7 @@ def test_runtime_feedback_includes_full_small_read_file_content(
     assert read_summary["excerpt_reason"] == "full_file"
 
 
-def test_runtime_feedback_includes_full_git_diff_content(
+def test_context_snapshot_includes_full_git_diff_content(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1091,9 +1105,9 @@ def test_runtime_feedback_includes_full_git_diff_content(
         provider = "openai_compatible"
         model_name = "fake-full-git-diff-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
-            if runtime_feedback:
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
+            if _cross_round_payload(context_snapshot):
                 return ModelDecision(
                     provider=self.provider,
                     model_name=self.model_name,
@@ -1143,7 +1157,7 @@ def test_runtime_feedback_includes_full_git_diff_content(
 
     loop_module.LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=_model_config())
 
-    recent_tool_results = feedbacks[1]["previous_reflect"]["recent_tool_results"]
+    recent_tool_results = feedbacks[1]["recent_facts"]["recent_tool_results"]
     git_diff_summary = next(item for item in recent_tool_results if item["tool_name"] == "git_diff")
     assert git_diff_summary["changed_file_count"] == 1
     assert git_diff_summary["changed_files"] == ["small.py"]
@@ -1155,7 +1169,7 @@ def test_runtime_feedback_includes_full_git_diff_content(
     ]
 
 
-def test_runtime_feedback_includes_run_command_stderr_and_python_traceback_summary(
+def test_context_snapshot_includes_run_command_stderr_and_python_traceback_summary(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1168,9 +1182,9 @@ def test_runtime_feedback_includes_run_command_stderr_and_python_traceback_summa
         provider = "openai_compatible"
         model_name = "fake-run-command-traceback-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
-            if runtime_feedback:
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
+            if _cross_round_payload(context_snapshot):
                 return ModelDecision(
                     provider=self.provider,
                     model_name=self.model_name,
@@ -1222,9 +1236,9 @@ def test_runtime_feedback_includes_run_command_stderr_and_python_traceback_summa
         config_data={**_model_config(), "runtime": {"max_steps": 2}},
     )
 
-    previous_reflect = feedbacks[1]["previous_reflect"]
-    failed_tool = previous_reflect["failed_tools"][0]
-    recent_result = previous_reflect["recent_tool_results"][0]
+    recent_facts = feedbacks[1]["recent_facts"]
+    failed_tool = recent_facts["failed_tools"][0]
+    recent_result = recent_facts["recent_tool_results"][0]
     assert failed_tool["tool_name"] == "run_command"
     assert failed_tool["returncode"] != 0
     assert "Traceback" in failed_tool["stderr_excerpt"]
@@ -1237,7 +1251,7 @@ def test_runtime_feedback_includes_run_command_stderr_and_python_traceback_summa
     assert recent_result["failing_symbol"] == "owner_ok"
 
 
-def test_runtime_feedback_includes_large_read_file_structure_summary(
+def test_context_snapshot_includes_large_read_file_structure_summary(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1252,9 +1266,9 @@ def test_runtime_feedback_includes_large_read_file_structure_summary(
         provider = "openai_compatible"
         model_name = "fake-large-read-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
-            if runtime_feedback:
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
+            if _cross_round_payload(context_snapshot):
                 return ModelDecision(
                     provider=self.provider,
                     model_name=self.model_name,
@@ -1307,7 +1321,7 @@ def test_runtime_feedback_includes_large_read_file_structure_summary(
 
     loop_module.LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=_model_config())
 
-    read_summary = feedbacks[1]["previous_reflect"]["recent_tool_results"][0]
+    read_summary = feedbacks[1]["recent_facts"]["recent_tool_results"][0]
     assert read_summary["tool_name"] == "read_file"
     assert read_summary["content_mode"] == "structure_summary"
     assert read_summary["content_truncated"] is True
@@ -1318,7 +1332,7 @@ def test_runtime_feedback_includes_large_read_file_structure_summary(
     assert read_summary["content_excerpt"] == ""
 
 
-def test_runtime_feedback_includes_explicit_structure_summary_tool_result(
+def test_context_snapshot_includes_explicit_structure_summary_tool_result(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1343,9 +1357,9 @@ def test_runtime_feedback_includes_explicit_structure_summary_tool_result(
         provider = "openai_compatible"
         model_name = "fake-explicit-structure-summary-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
-            if runtime_feedback:
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
+            if _cross_round_payload(context_snapshot):
                 return ModelDecision(
                     provider=self.provider,
                     model_name=self.model_name,
@@ -1389,7 +1403,7 @@ def test_runtime_feedback_includes_explicit_structure_summary_tool_result(
 
     loop_module.LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=_model_config())
 
-    read_summary = feedbacks[1]["previous_reflect"]["recent_tool_results"][0]
+    read_summary = feedbacks[1]["recent_facts"]["recent_tool_results"][0]
     assert read_summary["tool_name"] == "read_file_structure_summary"
     assert read_summary["content_mode"] == "structure_summary"
     assert read_summary["excerpt_reason"] == "explicit_structure_summary"
@@ -1397,7 +1411,7 @@ def test_runtime_feedback_includes_explicit_structure_summary_tool_result(
     assert any(item["name"] == "handle_task" and item["line_number"] == 4 for item in read_summary["structure_summary"])
 
 
-def test_runtime_feedback_includes_range_and_replace_lines_results(
+def test_context_snapshot_includes_range_and_replace_lines_results(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1410,9 +1424,9 @@ def test_runtime_feedback_includes_range_and_replace_lines_results(
         provider = "openai_compatible"
         model_name = "fake-range-edit-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
-            if runtime_feedback:
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
+            if _cross_round_payload(context_snapshot):
                 return ModelDecision(
                     provider=self.provider,
                     model_name=self.model_name,
@@ -1470,7 +1484,7 @@ def test_runtime_feedback_includes_range_and_replace_lines_results(
 
     loop_module.LoopOrchestrator(trace_writer=trace_writer).run(settings=settings, config_data=_model_config())
 
-    recent_tool_results = feedbacks[1]["previous_reflect"]["recent_tool_results"]
+    recent_tool_results = feedbacks[1]["recent_facts"]["recent_tool_results"]
     range_summary = next(item for item in recent_tool_results if item["tool_name"] == "read_file_range")
     replace_summary = next(item for item in recent_tool_results if item["tool_name"] == "replace_lines")
     assert range_summary["content_mode"] == "range"
@@ -1483,7 +1497,7 @@ def test_runtime_feedback_includes_range_and_replace_lines_results(
     assert replace_summary["line_count_after"] == 3
 
 
-def test_runtime_feedback_keeps_last_five_file_context_snippets(
+def test_context_snapshot_keeps_last_five_file_context_snippets(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1497,8 +1511,8 @@ def test_runtime_feedback_keeps_last_five_file_context_snippets(
         provider = "openai_compatible"
         model_name = "fake-file-context-cache-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
             call_index = len(feedbacks) - 1
             start_line, end_line = read_ranges[min(call_index, len(read_ranges) - 1)]
             return ModelDecision(
@@ -1546,16 +1560,22 @@ def test_runtime_feedback_keeps_last_five_file_context_snippets(
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.VERIFICATION_FAILED
     assert len(feedbacks) == 6
-    final_cache = runtime_state.reflect_feedback["file_context_cache"]["app.py"]
+    final_cache = runtime_state.reflect_content["file_context_cache"]["app.py"]
     assert final_cache["covered_ranges"] == ["6-10", "11-15", "16-20", "21-25", "26-30"]
     assert len(final_cache["snippets"]) == 5
     assert final_cache["snippets"][0]["content_excerpt"].startswith("line 6")
     assert final_cache["snippets"][-1]["content_excerpt"].startswith("line 26")
-    previous_cache = feedbacks[-1]["previous_reflect"]["file_context_cache"]["app.py"]
-    assert previous_cache["covered_ranges"] == ["1-5", "6-10", "11-15", "16-20", "21-25"]
+    previous_snippets = feedbacks[-1]["fresh_context"]["file_snippets"]
+    assert [snippet["read_coverage"] for snippet in previous_snippets] == [
+        "1-5",
+        "6-10",
+        "11-15",
+        "16-20",
+        "21-25",
+    ]
 
 
-def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshes_after_reread(
+def test_context_snapshot_marks_file_context_cache_stale_after_edit_and_refreshes_after_reread(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1568,8 +1588,8 @@ def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshe
         provider = "openai_compatible"
         model_name = "fake-stale-cache-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
             round_index = len(feedbacks)
             if round_index == 1:
                 return ModelDecision(
@@ -1643,48 +1663,39 @@ def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshe
         config_data={"runtime": {"max_steps": 4}, **_model_config()},
     )
 
-    stale_cache = feedbacks[2]["previous_reflect"]["file_context_cache"]["app.py"]
-    assert stale_cache["cache_status"] == "stale"
-    assert stale_cache["stale_reason"] == "edited_by_replace_lines"
-    assert stale_cache["snippets"] == []
-    assert stale_cache["stale_snippet_count"] == 1
-    assert stale_cache["stale_covered_ranges"] == ["1-3"]
-    assert feedbacks[2]["previous_reflect"]["stale_file_paths"] == ["app.py"]
-    stale_guidance = feedbacks[2]["previous_reflect"]["stale_reread_guidance"]
-    assert stale_guidance == [
+    stale_context = feedbacks[2]["stale_context"]
+    assert stale_context["stale_file_paths"] == ["app.py"]
+    assert stale_context["details"] == [
         {
             "path": "app.py",
-            "reason": "file_was_edited_and_previous_snippets_are_stale",
-            "recommended_sequence": ["read_file_structure_summary", "read_file_range"],
-            "why": "先重新建立当前文件结构和最新行号，再按新的行号范围精读，不要直接重复读取旧片段附近的小范围。",
             "stale_reason": "edited_by_replace_lines",
             "previous_covered_ranges": ["1-3"],
         }
     ]
-    assert feedbacks[2]["previous_reflect"]["recent_file_context_invalidations"][0]["path"] == "app.py"
-    reread_feedback = feedbacks[3]["previous_reflect"]
-    assert reread_feedback["stale_file_paths"] == []
-    assert reread_feedback["stale_reread_guidance"] == []
-    assert reread_feedback["reread_fresh_ranges"] == [
+    assert stale_context["reason"] == "file_was_edited_and_previous_snippets_are_stale"
+    assert stale_context["recommended_sequence"] == ["read_file_structure_summary", "read_file_range"]
+    assert "最新行号" in stale_context["suggest"]
+    reread_feedback = feedbacks[3]
+    assert reread_feedback["stale_context"]["stale_file_paths"] == []
+    assert reread_feedback["stale_context"]["recommended_sequence"] == []
+    assert reread_feedback["fresh_context"]["file_snippets"] == [
         {
             "path": "app.py",
-            "cache_status": "fresh",
-            "became_fresh_after_reread": True,
-            "last_invalidated_iteration": 2,
-            "last_refreshed_iteration": 3,
-            "safe_to_rely_ranges": ["1-3"],
-            "why": "这个文件前一轮或更早曾因编辑失效，但这些范围已经按当前源码重新读取，可直接作为当前可信上下文使用。",
+            "source_tool": "read_file",
+            "read_coverage": "1-3",
+            "content": "one\nTWO\nthree\n",
+            "freshness": "fresh",
         }
     ]
 
-    fresh_cache = runtime_state.reflect_feedback["file_context_cache"]["app.py"]
+    fresh_cache = runtime_state.reflect_content["file_context_cache"]["app.py"]
     assert fresh_cache["cache_status"] == "fresh"
     assert fresh_cache["stale_reason"] == ""
     assert fresh_cache["covered_ranges"] == ["1-3"]
     assert fresh_cache["snippets"][0]["content_excerpt"] == "one\nTWO\nthree\n"
-    assert runtime_state.reflect_feedback["stale_file_paths"] == []
-    assert runtime_state.reflect_feedback["stale_reread_guidance"] == []
-    assert runtime_state.reflect_feedback["reread_fresh_ranges"] == [
+    assert runtime_state.reflect_content["stale_file_paths"] == []
+    assert runtime_state.reflect_content["stale_reread_guidance"] == []
+    assert runtime_state.reflect_content["reread_fresh_ranges"] == [
         {
             "path": "app.py",
             "cache_status": "fresh",
@@ -1697,7 +1708,7 @@ def test_runtime_feedback_marks_file_context_cache_stale_after_edit_and_refreshe
     ]
 
 
-def _run_factual_reflect_feedback_case(
+def _run_factual_reflect_content_case(
     tmp_path: Path,
     monkeypatch,
     *,
@@ -1713,9 +1724,9 @@ def _run_factual_reflect_feedback_case(
         provider = "openai_compatible"
         model_name = "fake-reflect-constraint-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            has_reflect_feedback = bool((runtime_feedback or {}).get("previous_reflect"))
-            if has_reflect_feedback:
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            has_reflect_content = bool(_cross_round_payload(context_snapshot))
+            if has_reflect_content:
                 tool_calls = [
                     PlannedToolCall(
                         tool_name="apply_patch",
@@ -1791,8 +1802,8 @@ def _run_factual_reflect_feedback_case(
     return runtime_state, trace_events
 
 
-def test_second_plan_continues_with_factual_reflect_feedback(tmp_path: Path, monkeypatch) -> None:
-    runtime_state, trace_events = _run_factual_reflect_feedback_case(
+def test_second_plan_continues_with_factual_reflect_content(tmp_path: Path, monkeypatch) -> None:
+    runtime_state, trace_events = _run_factual_reflect_content_case(
         tmp_path,
         monkeypatch,
         second_rationale="忽略上一轮失败，直接继续。",
@@ -1803,12 +1814,12 @@ def test_second_plan_continues_with_factual_reflect_feedback(tmp_path: Path, mon
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
-    assert model_decision_payloads[1]["has_reflect_feedback"] is True
+    assert model_decision_payloads[1]["has_reflect_content"] is True
     assert "reflect_constraints_acknowledged" not in model_decision_payloads[1]
 
 
 def test_second_plan_does_not_emit_repeated_sequence_constraint_event(tmp_path: Path, monkeypatch) -> None:
-    runtime_state, trace_events = _run_factual_reflect_feedback_case(
+    runtime_state, trace_events = _run_factual_reflect_content_case(
         tmp_path,
         monkeypatch,
         second_rationale="回应 verification_failed、fake_verify 和 fix_failing_verification_checks。",
@@ -1822,7 +1833,7 @@ def test_second_plan_does_not_emit_repeated_sequence_constraint_event(tmp_path: 
 
 
 def test_second_plan_can_repeat_tool_sequence_without_harness_hard_constraint(tmp_path: Path, monkeypatch) -> None:
-    runtime_state, trace_events = _run_factual_reflect_feedback_case(
+    runtime_state, trace_events = _run_factual_reflect_content_case(
         tmp_path,
         monkeypatch,
         second_rationale=(
@@ -1836,7 +1847,7 @@ def test_second_plan_can_repeat_tool_sequence_without_harness_hard_constraint(tm
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
-    assert model_decision_payloads[1]["has_reflect_feedback"] is True
+    assert model_decision_payloads[1]["has_reflect_content"] is True
     assert "reflect_constraints_acknowledged" not in model_decision_payloads[1]
 
 
@@ -1970,7 +1981,7 @@ def test_loop_aggregates_token_usage_across_iterations_and_marks_missing_usage(
         provider = "openai_compatible"
         model_name = "fake-token-usage-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+        def decide(self, *, task, task_type, context_snapshot, config_data):
             decide_call["count"] += 1
             token_usage = (
                 ModelTokenUsage(prompt_tokens=30, completion_tokens=12, total_tokens=42, available=True)
@@ -2117,14 +2128,14 @@ def test_second_plan_receives_working_memory_from_previous_round(tmp_path: Path,
         provider = "openai_compatible"
         model_name = "fake-cross-round-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
                 task_type=task_type,
                 summary="fake decision",
-                rationale=_constraint_aware_rationale(runtime_feedback),
+                rationale=_constraint_aware_rationale(context_snapshot),
                 planned_actions=["本轮执行可观察文件修改"],
                 working_memory=_working_memory(completed_actions=["已写入 run_evidence.md", "已查看当前 diff"]),
                 tool_calls=[
@@ -2171,10 +2182,8 @@ def test_second_plan_receives_working_memory_from_previous_round(tmp_path: Path,
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert feedbacks[0] == {}
-    assert feedbacks[1]["current_iteration"] == 2
-    assert feedbacks[1]["working_memory"] == _working_memory(
-        completed_actions=["已写入 run_evidence.md", "已查看当前 diff"]
-    )
+    assert feedbacks[1]["iteration"] == 2
+    assert feedbacks[1]["working_memory"]["completed_actions"] == ["已写入 run_evidence.md", "已查看当前 diff"]
     trace_events = [
         json.loads(line)
         for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
@@ -2196,9 +2205,9 @@ def test_second_plan_receives_previous_rationale(tmp_path: Path, monkeypatch) ->
         provider = "openai_compatible"
         model_name = "fake-previous-rationale-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
-            feedbacks.append(runtime_feedback or {})
-            if not runtime_feedback:
+        def decide(self, *, task, task_type, context_snapshot, config_data):
+            feedbacks.append(_cross_round_payload(context_snapshot))
+            if not _cross_round_payload(context_snapshot):
                 return ModelDecision(
                     provider=self.provider,
                     model_name=self.model_name,
@@ -2250,8 +2259,9 @@ def test_second_plan_receives_previous_rationale(tmp_path: Path, monkeypatch) ->
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert feedbacks[0] == {}
-    assert feedbacks[1]["previous_rationale"] == "先读取 README，再决定是否修改文件。"
-    assert feedbacks[1]["working_memory"] == _working_memory(completed_actions=["已读取 README.md"])
+    assert "previous_rationale" not in feedbacks[1]
+    assert "先读取 README" in feedbacks[1]["working_memory"]["last_rational"]
+    assert feedbacks[1]["working_memory"]["completed_actions"] == ["已读取 README.md"]
 
 
 def test_working_memory_is_replaced_by_latest_model_output(tmp_path: Path, monkeypatch) -> None:
@@ -2303,7 +2313,7 @@ def test_working_memory_is_replaced_by_latest_model_output(tmp_path: Path, monke
         provider = "openai_compatible"
         model_name = "fake-done-list-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+        def decide(self, *, task, task_type, context_snapshot, config_data):
             return next(decisions)
 
     def fake_verification(*, settings, tool_executions):
@@ -2346,7 +2356,7 @@ def test_loop_exits_when_model_returns_no_planned_tool_calls(tmp_path: Path, mon
         provider = "openai_compatible"
         model_name = "fake-empty-tool-call-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+        def decide(self, *, task, task_type, context_snapshot, config_data):
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -2434,7 +2444,8 @@ def test_loop_injects_refactor_runtime_rule_into_context_snapshot(tmp_path: Path
         provider = "openai_compatible"
         model_name = "fake-refactor-runtime-rule-model"
 
-        def decide(self, *, task, task_type, context_snapshot, config_data, runtime_feedback=None):
+        def decide(self, *, task, task_type, context_snapshot, config_data, initial_guide=None):
+            captured["initial_guide"] = initial_guide.to_dict()
             captured["context_snapshot"] = context_snapshot.to_dict()
             return ModelDecision(
                 provider=self.provider,
@@ -2476,8 +2487,11 @@ def test_loop_injects_refactor_runtime_rule_into_context_snapshot(tmp_path: Path
 
     assert runtime_state.verification_result is not None
     assert runtime_state.verification_result.passed is True
-    runtime_rule_entries = captured["context_snapshot"]["memory_context"]["runtime_rule_entries"]
-    compat_rule = next(item for item in runtime_rule_entries if item["title"] == "兼容式重构优先原则")
-    assert "未验证通过前不要删除旧函数" in compat_rule["summary"]
-    assert "默认允许保留旧函数" in compat_rule["summary"]
+    memory_guide = captured["initial_guide"]["memory_guide"]
+    assert "runtime_rules" not in memory_guide
+    assert "runtime_rule_entries" not in memory_guide
+    assert captured["context_snapshot"]["iteration"] == 1
+
+
+
 

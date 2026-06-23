@@ -2,11 +2,11 @@
 
 ## 最后更新时间
 
-- 日期：2026-06-24
+- 日期：2026-06-22
 
 ## 当前阶段
 
-- `Phase 9.x：Context 双层输入与可读性固化`
+- `Phase 9.x：Verify 收敛为末尾单次裁判`
 
 ## 当前情况
 
@@ -15,18 +15,18 @@
 - 当前求解阶段的默认退出信号已收敛为：本轮 `tool_calls` 为空、达到 `runtime.max_steps`、或遇到 `model_error / setup_failed / internal_error`。
 - 当前不再要求模型显式输出结束字段；harness 仅根据本轮 `tool_calls` 是否为空来决定是否继续求解。
 - `trace.jsonl` 会继续记录 `solve_loop_exit_detected`、单次 `verification_result`，以及 `run_finished.stop_reason.details.solve_loop_exit_reason`。
-- 后续模型轮次现在接收 `initial_guide` 与每轮重建的 `context_snapshot`；`context_snapshot.working_memory` 会把上一轮模型返回的四字段结构化工作记忆回灌给下一轮，并额外注入 `last_rational` 承接上一轮 `rationale`；旧跨轮反馈字段、`previous_verification` 与 `previous_reflect.verification` 已从链路中移除。
+- 后续模型轮次现在只接收事实型 `runtime_feedback.previous_reflect`、`runtime_feedback.working_memory` 和 `previous_rationale`；`working_memory` 会把上一轮模型原样返回的结构化工作记忆直接回灌给下一轮，不再经过 harness merge 或语义修正；`previous_verification` 与 `previous_reflect.verification` 已从链路中移除。
 - `reflect` 仍保留在 loop 内，但职责已收敛为事实压缩：最近工具结果、失败工具、文件读取缓存、diff 状态、变更文件和轻量 `signals`，不再承担“响应 verify failure”职责。
 - 当前单任务 run 仍保留 token diagnostics：聚合 `prompt_tokens`、`completion_tokens`、`total_tokens`、`request_count`、`missing_usage_count` 和 `complete`；provider 缺少 `usage` 时不做本地估算，而是保留为“不完整但真实”。
 - 当前 harness 的默认主赛道已进一步收敛到 `bug_fix`；`refactor`、`test_generation`、`code_understanding` 仍兼容，但默认不再依赖 loop 内 verify 反馈。
 - 当前已新增显式结构摘要工具 `read_file_structure_summary(path)`，用于只读取指定文件的结构摘要；`.py` 文件会继续暴露 `class` / `def` 的起始行号，供后续 `read_file_range` 精读。
 - 当前已落地运行时记忆污染治理第一版：文件一旦被 `apply_patch` 或 `replace_lines` 成功编辑，旧读取缓存会按整文件标记为 `stale`；只有后续重新读取后才恢复为 `fresh`。
-- 当前 `reflect_feedback` 已改名为 `reflect_content`；后续轮次通过 `context_snapshot.fresh_context` 与 `context_snapshot.stale_context` 区分当前可信片段和已失效片段。
-- 当前 stale 文件信息统一放在 `context_snapshot.stale_context`：`details` 记录每个文件的失效原因和旧覆盖范围，`reason`、`recommended_sequence`、`suggest` 作为所有 stale 文件共享的重读原则。
-- 当前 `context_snapshot.stale_context.stale_file_paths` 的语义已收紧为“当前仍处于 stale 的文件列表”；如果某个文件已经完成重读恢复为 `fresh`，它应进入 `fresh_context.file_snippets` 而不是继续留在 stale 列表里。
-- 当前 `ContextBuilder` 已补充白话中文注释，说明 `initial_guide`、`context_snapshot`、fresh/stale 文件片段、diff/command 压缩和召回策略的边界，符合 `docs/代码可读性规范.md` 的注释要求。
+- 当前 `reflect_feedback` 与后续轮次的 `runtime_feedback.previous_reflect` 已能显式区分 `fresh` / `stale` 文件缓存，并保留最近一次缓存失效原因与失效发生轮次，帮助分析“为什么又重读了该文件”。
+- 当前 stale 文件已新增 `stale_reread_guidance`：默认建议模型在编辑后先调用 `read_file_structure_summary` 重新建立结构和最新行号，再调用 `read_file_range` 精读关键片段，避免反复读取同一小段旧附近行号。
+- 当前 `runtime_feedback.previous_reflect.stale_file_paths` 的语义已收紧为“当前仍处于 stale 的文件列表”；如果某个文件已经在上一轮完成重读恢复为 `fresh`，它不应继续出现在这里。
+- 当前 `runtime_feedback.previous_reflect.reread_fresh_ranges` 已新增“编辑后已重读恢复 fresh 的可信范围”摘要，显式告诉模型哪些范围虽然历史上 stale 过，但现在已经可以直接作为当前源码上下文使用，减少把“曾经 stale”误写成“当前 stale”的摇摆。
 - 当前 `bug_fix` 提示词已补充收口规则：一旦当前 diff 已命中任务目标修改点，且针对任务描述的核心验证命令已经符合预期，模型应优先准备结束求解，而不是继续扩展读取外围函数。
-- 当前模型返回的 `working_memory` 已收紧为更偏收口的四字段结构：`confirmed_facts`、`invalidated_beliefs`、`completed_actions`、`next_risks`；`context_snapshot.working_memory` 会额外带有 harness 注入的 `last_rational`；不再保留 `open_questions`，避免模型围绕“待确认问题”继续发散读取。
+- 当前 `working_memory` 已收紧为更偏收口的四字段结构：`confirmed_facts`、`invalidated_beliefs`、`completed_actions`、`next_risks`；不再保留 `open_questions`，避免模型围绕“待确认问题”继续发散读取。
 
 > 说明：下面保留了 Phase 8/Phase 9 早期推进记录，其中部分段落描述的是历史状态；当前行为以上方最新条目为准。
 
@@ -240,9 +240,9 @@
 
 - 模型决策 JSON 中的 `working_memory` 已升级为结构化运行时记忆对象，固定包含 `confirmed_facts`、`invalidated_beliefs`、`completed_actions`、`next_risks` 四个字段；每个字段允许 `str | list[str]`。
 - 当前 `working_memory` 只作为模型自维护的记忆文档；是否继续 loop 仍只看 `tool_calls` 是否为空。
-- 下一轮 `context_snapshot.working_memory` 会把上一轮模型返回的工作记忆对象回填给模型，并额外注入 `last_rational`；如果上一轮判断被推翻，需要由模型自己改写对应字段，而不是依赖 harness 自动补写。
-- harness 不再合并上一轮 done list 与本轮返回结果；每轮只保存模型最新返回的四字段工作记忆，再由 `ContextBuilder` 在下一轮快照中补入 `last_rational`。
-- `model_decision` trace、plan state result、`finalize_summary` 和 `run_finished.stop_reason.details` 均会保留当前模型返回的 `working_memory`；报告的“模型返回摘要”仍按四类模型自维护工作记忆展示。
+- 下一轮 `runtime_feedback.working_memory` 会把上一轮模型原样返回的工作记忆对象直接回填给模型；如果上一轮判断被推翻，需要由模型自己改写对应字段，而不是依赖 harness 自动补写。
+- harness 会在运行时合并上一轮 done list 与本轮返回结果；即使模型本轮漏写历史事项，也不会把已完成记录直接丢掉。
+- `model_decision` trace、plan state result、`finalize_summary` 和 `run_finished.stop_reason.details` 均会保留当前 `working_memory`；报告的“模型返回摘要”也会按五类工作记忆展示。
 - OpenAI compatible 请求中的结构化 `decision_schema` 已明确：`tool_calls` 是唯一执行源、`planned_actions` 是本轮说明、`working_memory` 是模型维护的结构化工作记忆，而不是 harness 维护的累计 done list。
 - 工具入参校验从“字段名/必填项”扩展到类型校验，覆盖 `string`、`integer`、`null`、`array` 以及数组元素类型；例如 `apply_patch.new_text = null` 会以 `ModelResponseError` / `model_error` 收口。
 - `CoreToolRunner.apply_patch()` 增加防御式输入检查，即使绕过模型校验传入非法值，也会返回结构化 `invalid_tool_input`，不再抛出 `TypeError` traceback。

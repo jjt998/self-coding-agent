@@ -86,20 +86,22 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 - `失败诊断`：setup、model、verify、max steps 等失败摘要。
 - `Token 消耗`：单任务模型请求数、缺失 usage 请求数、`prompt_tokens`、`completion_tokens`、`total_tokens`。
 - `进展观察`：是否观察到文件变更、变更文件数、失败工具数。
-- `反思反馈`：最近一次 reflect trigger、失败检查、建议关注点。
+- `反思事实摘要`：最近一次 `reflect_content` 压缩出的工具结果、失败工具、diff 信号和文件缓存状态。
+- `上下文摘要`：`initial_guide` 的候选文件和 `context_snapshot` 的 fresh/stale/recent_facts 概览。
 - `模型返回摘要`：最近一次模型显式返回的 summary、rationale、planned_actions、working_memory 和 tool_calls；其中 `working_memory` 会按四类结构化工作记忆展示。
 - `验证结果`：每条验证检查是否通过。
 
-`trace.jsonl` 是结构化事件流，适合脚本分析和定位细节。排查模型为什么只读文件、不修改文件或没有响应 reflect feedback 时，优先查看：
+`trace.jsonl` 是结构化事件流，适合脚本分析和定位细节。排查模型为什么只读文件、不修改文件或没有响应运行时事实时，优先查看：
 
 - `model_raw_response`：模型显式返回的原始 `choices[0].message.content`。
 - `model_decision`：解析后的结构化决策，最适合看本轮 `tool_calls`、`working_memory`、`rationale` 和 token usage。
+- `model_request_prepared`：模型请求，其中 user payload 会包含 `initial_guide` 和本轮 `context_snapshot`。
 - `run_finished`：单任务最终聚合字段，包括 stop reason 和任务级 `token_usage`。
 
 字段定位说明：
 - `tool_calls` 是唯一会被 `act` 阶段实际执行的工具调用。
 - `planned_actions` 只描述本轮 `tool_calls` 实际会做的事情，不作为跨轮任务队列。
-- `working_memory` 记录上一轮模型原样返回的结构化工作记忆；下一轮模型会通过 `runtime_feedback.working_memory` 直接看到这份对象。
+- `working_memory` 记录上一轮模型返回的结构化工作记忆；下一轮模型会通过 `context_snapshot.working_memory` 看到这份对象，并额外看到 harness 注入的 `last_rational`。
 - `working_memory` 由模型自己维护；若上一轮判断失效，需要模型在本轮主动改写字段，harness 不负责 merge 或补写。
 - `tool_input` 会按 `tool_schema` 校验字段名和类型，类型不匹配会以 `model_error` 收口，不会继续进入工具层 traceback。
 
@@ -112,7 +114,7 @@ token 指标只统计 provider 返回的模型 usage，不统计工具调用或�
 - `read_file_structure_summary`：显式只读结构摘要。适合先看 `.py` 文件里的 `class` / `def` 起始行号，或先看 Markdown / 文本文件的标题分节。
 - `read_file_range`：在已经拿到行号后，再按闭区间精读关键区域。
 
-当前运行时还会把已读文件缓存进 `runtime_feedback.previous_reflect.file_context_cache`。需要注意：
+当前运行时还会把已读文件缓存进 `context_snapshot.fresh_context.file_snippets` 或 `context_snapshot.stale_context`。需要注意：
 
 - `cache_status = fresh`：这份读取结果仍可直接参考。
 - `cache_status = stale`：这个文件在编辑后已整文件失效，旧片段只表示“以前读过”，不能继续当成当前可信源码。
@@ -445,7 +447,7 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
 - CLI 单次运行暂不支持直接传入 `verify_commands` / `verify_rules`。
 - 默认 `runtime.max_steps = 2`，暂不开放更高预算。
 - `runtime.max_steps` 只由 harness 内部使用；模型请求不会看到当前轮数、剩余轮数或最大轮数。
-- 第二轮及后续模型只通过 `runtime_feedback.previous_reflect` 接收上一轮事实压缩，并通过 `runtime_feedback.working_memory` 接收上一轮原样工作记忆。
+- 第二轮及后续模型会同时收到首轮 `initial_guide` 和本轮 `context_snapshot`；跨轮事实重点看 `context_snapshot.working_memory`、`fresh_context`、`stale_context` 和 `recent_facts`，其中 `context_snapshot.working_memory.last_rational` 用来承接上一轮 `rationale`。
 - 读取缓存治理当前只做第一版“文件级全失效”：文件一旦被编辑，旧读取缓存整文件失效，不做行号偏移修补。
 - 回归测试不依赖真实外网模型，使用 fake model 环境。
 

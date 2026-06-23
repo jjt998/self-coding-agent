@@ -400,7 +400,7 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
     # 先把这次 run 里最关键的几个事件摘出来，后面的指标都从这里往下推导。
     verification_payload = _find_last_payload(trace_events, "verification_result")
     run_finished_payload = _find_last_payload(trace_events, "run_finished")
-    context_snapshot_payload = _find_last_payload(trace_events, "context_snapshot")
+    initial_guide_payload = _find_last_payload(trace_events, "initial_guide")
 
     verification_checks = verification_payload.get("checks", []) if verification_payload else []
     failing_checks = [
@@ -409,7 +409,7 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
         if not bool(check.get("passed")) and str(check.get("name", "")).strip()
     ]
     diagnostic_labels = _normalize_string_list(
-        (((context_snapshot_payload or {}).get("memory_context", {})).get("diagnostic_labels", []))
+        (((initial_guide_payload or {}).get("memory_guide", {})).get("diagnostic_labels", []))
     )
     stop_reason_dict = (run_finished_payload or {}).get("stop_reason", {})
     stop_reason = str(stop_reason_dict.get("code", "unknown")).strip() or "unknown"

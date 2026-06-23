@@ -13,10 +13,10 @@
 - 反思事实压缩：每轮 `act` 后固定进入 `reflect`，记录工具结果、失败工具、diff 信号、文件上下文缓存、stale/fresh 状态和轻量 signals；不再携带验证结果。
 - 任务级验证：支持 `verify_commands` 和结构化 `verify_rules`；未配置任务级验证时会以 `missing_task_verification` 失败，不再回退到演示型检查。
 - 结构化失败收口：支持 `setup_failed`、`verification_failed`、`model_error` 等 stop reason；达到求解预算时会记录 `solve_loop_exit_reason=max_steps_reached`，最终 stop reason 仍由末尾验证结果决定。
-- Reflect feedback 事实输入：下一轮模型接收 `runtime_feedback.previous_reflect`、`runtime_feedback.working_memory`、`runtime_feedback.current_iteration` 和可选 `previous_rationale`，由 LLM 自行解释事实并重规划；链路中不再传递 `previous_verification`。
+- 两层上下文事实输入：`initial_guide` 在 analyze 阶段生成首轮任务、仓库召回和长期记忆指导；每轮 plan 前重新生成 `context_snapshot`，包含 working_memory、fresh/stale 文件上下文、diff/command 结果和 recent_facts；链路中不再传递旧跨轮反馈字段或 `previous_verification`。
 - 真实 loop 内核扫尾：当前代码不再保留 Phase 3 固定工具序列辅助函数，测试样例默认产物改为 `run_evidence.md`。
 - 模型返回日志：每次 plan 会在 `trace.jsonl` 写入 `model_raw_response`，记录模型显式返回的 JSON content，便于排查工具计划和 rationale。
-- 结构化工作记忆：模型响应必须携带 `working_memory`，固定包含 `confirmed_facts`、`invalidated_beliefs`、`completed_actions`、`next_risks` 四个字段；`planned_actions` 只描述本轮 `tool_calls` 实际会执行的动作。
+- 结构化工作记忆：模型响应必须携带 `working_memory`，固定包含 `confirmed_facts`、`invalidated_beliefs`、`completed_actions`、`next_risks` 四个字段；下一轮 `context_snapshot.working_memory` 会额外注入 `last_rational`，用于承接上一轮 `rationale`；`planned_actions` 只描述本轮 `tool_calls` 实际会执行的动作。
 - 工具入参校验：模型返回的 `tool_input` 会按 `tool_schema` 校验字段名和类型，例如 `apply_patch.new_text = null` 会收口为 `model_error`，不再进入工具层 traceback。
 - eval batch：批量运行任务并生成聚合 `summary.json` / `summary.md`。
 - strategy comparison：对同一批任务执行多套配置并输出 delta。
@@ -146,7 +146,7 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
 - 测试环境可使用 `SELF_CODING_AGENT_FAKE_MODEL_RESPONSE` 注入假响应，仍需设置测试用 API key 环境变量。
 - 排查模型为什么只读文件、不修改文件或没有响应 reflect feedback 时，优先查看 `trace.jsonl` 中的 `model_raw_response` 和 `model_decision`。前者是模型显式返回的原始 JSON content，后者是解析后的结构化决策。
 - `model_decision` 必须包含 `summary`、`rationale`、`planned_actions`、`working_memory`、`tool_calls`；其中只有 `tool_calls` 会被 `act` 阶段实际执行。
-- `model_decision.planned_actions` 是本轮可读计划说明，不是跨轮任务队列；跨轮记忆应写入四字段 `working_memory`，下一轮会通过 `runtime_feedback.working_memory` 原样回填给模型。
+- `model_decision.planned_actions` 是本轮可读计划说明，不是跨轮任务队列；跨轮记忆应写入模型自维护的四字段 `working_memory`，下一轮会通过 `context_snapshot.working_memory` 回填给模型，并附带 harness 从上一轮 `rationale` 注入的 `last_rational`。
 - 工具 schema 会同时约束字段名和字段类型；非法字段、缺少必填字段或类型不匹配会进入 `ModelResponseError`，并在 details 中暴露 `field_path`、`tool_name`、`expected_type`、`actual_type` 等安全摘要。
 - 更完整的模型配置、eval task、report 和 comparison 使用说明见 `docs/USAGE_GUIDE.md`。
 

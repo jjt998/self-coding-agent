@@ -302,7 +302,7 @@ model_decision:
 
 - `tool_calls` 是唯一执行源，`act` 阶段只按这个数组调用工具。
 - `planned_actions` 是本轮可读计划说明，不是跨轮任务队列，也不驱动执行。
-- `working_memory` 当前承载模型维护的结构化运行时记忆；下一轮会通过 `runtime_feedback.working_memory` 原样回填给模型，帮助模型延续事实、已推翻判断、已完成动作和风险判断。
+- `working_memory` 当前承载模型维护的结构化运行时记忆；下一轮会通过 `context_snapshot.working_memory` 回填给模型，帮助模型延续事实、已推翻判断、已完成动作和风险判断，并由 harness 额外注入 `last_rational` 承接上一轮 `rationale`。
 - harness 不会再自动 merge 或补写 working_memory；如果上一轮判断失效，必须由模型在本轮主动改写对应字段。
 - `raw_response_content` 只写入本地 trace，用于排查模型显式返回内容，不包含 provider 隐藏推理链。
 - `normalization_notes` 记录展示字段的宽容归一化，例如缺失 `planned_actions` 时从 `tool_calls` 派生说明。
@@ -390,56 +390,35 @@ final verify failed -> finalize(verification_failed)
 ### 7.5 模型可见预算
 
 - `runtime.max_steps` 仍由 harness 内部控制最大求解轮数。
-- 模型请求里的 `runtime_feedback` 不暴露当前轮数、剩余轮数或最大轮数。
+- 模型请求里的 `context_snapshot` 只暴露当前 iteration，不暴露剩余轮数或最大轮数。
 - trace、report、stop reason 可继续记录轮数信息，供本地审计和诊断使用。
 
 ## 8. Context 架构
 
-### 8.1 Context 分层
+### 8.1 Context 双层输入
 
-- `task_context`
-- `repo_context`
-- `runtime_context`
-- `memory_context`
+当前实现由 `ContextBuilder` 统一生成两层上下文：
+
+- `initial_guide`：analyze 阶段只生成一次，包含任务文本/类型/关键词、仓库召回策略、候选文件结构摘要、长期记忆和被抑制的长期记忆。
+- `context_snapshot`：每轮 `plan` 前重新生成，包含当前 iteration、任务关键词、模型工作记忆、fresh 文件片段、diff、命令结果、stale 文件提示和最近工具事实。
 
 ### 8.2 各层语义
 
-`task_context`
+`initial_guide`
 
-- 任务目标
-- 成功标准
-- 约束条件
-- 禁止事项
-- 预算
-- 任务类型
+- `task`：任务文本、任务类型和关键词。
+- `repo_guide`：召回策略、候选文件数量、`selected_files`。候选文件只提供 `structure_summary` 和推荐理由，不提前注入不可控 summary。
+- `memory_guide`：`long_term_memory`、`suppressed_long_term_memory` 和 `diagnostic_labels`，用于提醒模型哪些长期经验可参考、哪些经验被判定为冲突。
 
-`repo_context`
+`context_snapshot`
 
-- repo map
-- 关键模块
-- 构建和测试命令
-- 候选文件
-- 与任务相关的代码事实
+- `working_memory`：上一轮模型维护的四字段工作记忆，加上 harness 从上一轮 `rationale` 注入的 `last_rational`；harness 不再自动 merge 或补写判断。
+- `fresh_context.file_snippets`：当前仍可信的已读文件片段，`content` 就是工具读取后压缩出的内容。
+- `fresh_context.diffs` / `fresh_context.command_results`：最近 diff 和命令事实，带 `from_iteration`，方便模型判断是否需要重查。
+- `stale_context`：当前仍 stale 的文件列表、失效细节和统一重读建议；默认顺序是先 `read_file_structure_summary`，再 `read_file_range`。
+- `recent_facts`：由 `reflect_content` 压缩出的最近工具结果、失败工具和 signals。
 
-`runtime_context`
-
-- 当前计划
-- 最近工具调用
-- 关键观察
-- 当前 diff 摘要
-- 已尝试路径
-- 当前活跃假设
-
-当前实现里，进入第二轮及后续 `plan` 的跨轮输入由 `runtime_feedback` 承载：
-
-- `previous_reflect`：上一轮事实反馈，包含 observation、signals、failed_tools、recent_tool_results、`file_context_cache`、`stale_file_paths` 和最近缓存失效诊断。
-- `working_memory`：上一轮模型原样返回的结构化工作记忆对象。
-
-这些字段共同组成下一轮模型的“运行上下文窗口”。其中 `previous_reflect.recent_tool_results`、`previous_reflect.file_context_cache` 和 `working_memory` 是为了减少模型在第二轮继续猜测源码，或忘记已经确认/推翻过的判断；窗口中不会包含当前第几轮、还剩几轮或最大轮数。
-
-`memory_context`
-
-- 被选中的稳定长期记忆
+这两层共同组成模型输入的“上下文窗口”。`initial_guide` 负责首轮导航，`context_snapshot` 负责运行时事实；链路中不再传递旧跨轮反馈字段。
 
 ### 8.3 注入策略
 

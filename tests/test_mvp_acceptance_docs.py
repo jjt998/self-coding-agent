@@ -72,7 +72,7 @@ def test_harness_improvement_log_and_run_chain_cover_feedback_evidence() -> None
         "实际反馈",
         "是否固化",
         "old_text_not_found",
-        "runtime_feedback.recent_tool_results",
+        "context_snapshot.recent_facts.recent_tool_results",
     ]:
         assert expected in log_text
 

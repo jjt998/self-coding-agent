@@ -7,7 +7,7 @@ from urllib.error import HTTPError, URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from context import ContextBuilder
+from context import ContextBuilder, ContextSnapshot
 from memory import RuntimeMemoryManager
 import model as model_module
 from model import (
@@ -164,7 +164,9 @@ def test_openai_compatible_adapter_parses_valid_http_response(monkeypatch) -> No
     assert adapter.get_last_request_payload()["model"] == "demo-model"
     assert adapter.get_last_request_payload()["messages"] == captured["body"]["messages"]
     user_payload = json.loads(captured["body"]["messages"][-1]["content"])
-    assert user_payload["runtime_feedback"] == {}
+    assert user_payload["initial_guide"] == {}
+    assert user_payload["context_snapshot"] == {}
+    assert "runtime_feedback" not in user_payload
     assert user_payload["tool_schema"]["read_file"]["required"] == ["path"]
     assert user_payload["tool_schema"]["read_file"]["optional"] == []
     assert user_payload["tool_schema"]["read_file_structure_summary"]["required"] == ["path"]
@@ -215,7 +217,7 @@ def test_openai_compatible_adapter_extracts_token_usage_when_provider_returns_us
     assert decision.to_dict()["token_usage"]["total_tokens"] == 120
 
 
-def test_openai_compatible_adapter_includes_runtime_feedback(monkeypatch) -> None:
+def test_openai_compatible_adapter_includes_context_snapshot_working_memory(monkeypatch) -> None:
     captured = {}
 
     def fake_urlopen(request, timeout):
@@ -233,28 +235,35 @@ def test_openai_compatible_adapter_includes_runtime_feedback(monkeypatch) -> Non
         timeout_seconds=7,
     )
 
+    snapshot = ContextSnapshot(
+        iteration=2,
+        task={"text": "检查 Demo", "task_type": "general", "keywords": ["检查 Demo", "Demo"]},
+        working_memory=_working_memory(completed_actions=["已读取 README.md"]),
+        fresh_context={"file_snippets": [], "diffs": [], "command_results": []},
+        stale_context={
+            "stale_file_paths": [],
+            "details": [],
+            "reason": "",
+            "recommended_sequence": [],
+            "suggest": "",
+        },
+        recent_facts={"recent_tool_results": [], "failed_tools": [], "signals": []},
+    )
     adapter.decide(
         task="检查 Demo",
         task_type="general",
-        context_snapshot=None,
+        context_snapshot=snapshot,
         config_data={},
-        runtime_feedback={
-            "current_iteration": 2,
-            "previous_rationale": "上一轮先读 README，再确认修改点。",
-            "working_memory": _working_memory(completed_actions=["已读取 README.md"]),
-        },
     )
 
     user_payload = json.loads(captured["body"]["messages"][-1]["content"])
-    assert user_payload["runtime_feedback"] == {
-        "current_iteration": 2,
-        "previous_rationale": "上一轮先读 README，再确认修改点。",
-        "working_memory": _working_memory(completed_actions=["已读取 README.md"]),
-    }
+    assert user_payload["context_snapshot"]["iteration"] == 2
+    assert user_payload["context_snapshot"]["working_memory"] == snapshot.to_dict()["working_memory"]
+    assert "runtime_feedback" not in user_payload
     assert "tool_schema" in user_payload
 
 
-def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch) -> None:
+def test_openai_compatible_adapter_includes_factual_context_snapshot(monkeypatch) -> None:
     captured = {}
 
     def fake_urlopen(request, timeout):
@@ -272,41 +281,64 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
         timeout_seconds=7,
     )
 
-    runtime_feedback = {
-        "previous_reflect": {
-            "trigger": "after_act",
-            "signals": ["failed_tool_observed"],
-            "failed_tools": [{"tool_name": "apply_patch", "error": "old_text_not_found"}],
-        },
-        "working_memory": _working_memory(
+    snapshot = ContextSnapshot(
+        iteration=2,
+        task={"text": "Demo", "task_type": "general", "keywords": ["Demo"]},
+        working_memory=_working_memory(
             completed_actions=["已修复失败 patch", "已运行验证命令"],
             next_risks="还未重新验证新 patch。",
         ),
-    }
+        fresh_context={
+            "file_snippets": [
+                {
+                    "path": "app.py",
+                    "source_tool": "read_file_range",
+                    "read_coverage": "1-10",
+                    "content": "def demo():\n    return True",
+                    "freshness": "fresh",
+                }
+            ],
+            "diffs": [{"from_iteration": 1, "paths": ["app.py"], "content": "diff --git a/app.py b/app.py"}],
+            "command_results": [],
+        },
+        stale_context={
+            "stale_file_paths": ["app.py"],
+            "details": [
+                {
+                    "path": "app.py",
+                    "stale_reason": "edited_by_apply_patch",
+                    "previous_covered_ranges": ["1-10"],
+                }
+            ],
+            "reason": "file_was_edited_and_previous_snippets_are_stale",
+            "recommended_sequence": ["read_file_structure_summary", "read_file_range"],
+            "suggest": "先重新建立当前文件结构和最新行号，再按新的行号范围精读，不要直接重复读取旧片段附近的小范围。",
+        },
+        recent_facts={
+            "recent_tool_results": [{"tool_name": "apply_patch", "ok": False, "error": "old_text_not_found"}],
+            "failed_tools": [{"tool_name": "apply_patch", "error": "old_text_not_found"}],
+            "signals": ["failed_tool_observed"],
+        },
+    )
     adapter.decide(
         task="Demo",
         task_type="general",
-        context_snapshot=None,
+        context_snapshot=snapshot,
         config_data={},
-        runtime_feedback=runtime_feedback,
     )
 
     user_payload = json.loads(captured["body"]["messages"][-1]["content"])
-    assert user_payload["runtime_feedback"] == runtime_feedback
+    assert user_payload["context_snapshot"] == snapshot.to_dict()
+    assert "runtime_feedback" not in user_payload
     prompt_text = "\n".join(message["content"] for message in captured["body"]["messages"] if message["role"] == "system")
-    assert "runtime_feedback.previous_reflect" in prompt_text
-    assert "runtime_feedback.previous_rationale" in prompt_text
-    assert "file_context_cache" in prompt_text
-    assert "最近五次读取结果" in prompt_text
-    assert "cache_status=stale" in prompt_text
-    assert "stale_file_paths 只列出当前仍然 stale 的文件" in prompt_text
-    assert "reread_fresh_ranges" in prompt_text
-    assert "safe_to_rely_ranges" in prompt_text
-    assert "runtime_feedback.current_iteration" in prompt_text
-    assert "当前正处于第几轮求解" in prompt_text
-    assert "不会提供最大轮数、剩余轮数或任何预算信息" in prompt_text
-    assert "runtime_feedback.working_memory" in prompt_text
+    assert "context_snapshot.working_memory" in prompt_text
+    assert "context_snapshot.fresh_context.file_snippets" in prompt_text
+    assert "from_iteration" in prompt_text
+    assert "context_snapshot.stale_context" in prompt_text
+    assert "stale_file_paths" in prompt_text
+    assert "context_snapshot.recent_facts" in prompt_text
     assert "working_memory" in prompt_text
+    assert "last_rational" in prompt_text
     assert "任务描述描述的是待修复现象，不保证与当前轮已修改后的文件内容一致" in prompt_text
     assert "优先相信当前轮可验证的运行时证据" in prompt_text
     assert "如果关键目标函数已经处于 fresh 状态" in prompt_text
@@ -339,16 +371,16 @@ def test_openai_compatible_adapter_includes_factual_reflect_feedback(monkeypatch
     assert "apply_patch 连续失败" in prompt_text
     assert "old_text_not_found" in prompt_text
     assert "重新读取目标范围并确认最新行号" in prompt_text
-    assert "stale_reread_guidance" in prompt_text
     assert "recommended_sequence" in prompt_text
     assert "read_file_structure_summary -> read_file_range" in prompt_text
-    assert "不要仅因为文件曾经 stale 过就重复读取同一函数" in prompt_text
+    assert "不要仅因为文件历史上 stale 过就重复读取同一函数" in prompt_text
+    assert "runtime_feedback" not in prompt_text
     assert "previous_reflect_feedback" not in prompt_text
     assert "replan_constraints" not in prompt_text
     assert "avoid_exact_tool_sequence" not in prompt_text
 
 
-def test_openai_compatible_adapter_includes_refactor_runtime_rule_in_context_snapshot(monkeypatch, tmp_path: Path) -> None:
+def test_openai_compatible_adapter_does_not_expose_runtime_rules_in_initial_guide(monkeypatch, tmp_path: Path) -> None:
     captured = {}
 
     def fake_urlopen(request, timeout):
@@ -387,21 +419,11 @@ def test_openai_compatible_adapter_includes_refactor_runtime_rule_in_context_sna
         task="重构 task_board/query_engine.py，共享 filter-and-sort helper",
         task_type="refactor",
     )
-    snapshot = ContextBuilder(repo_root=str(repo_root)).build_context_snapshot(
+    guide = ContextBuilder(repo_root=str(repo_root)).build_initial_guide(
         task="重构 task_board/query_engine.py，共享 filter-and-sort helper",
         task_type="refactor",
-        current_state="analyze",
-        completed_states=[],
-        step_count=1,
-        memory_query=memory_manager.build_query(
-            task="重构 task_board/query_engine.py，共享 filter-and-sort helper",
-            task_type="refactor",
-        ),
-        matched_memory_entries=[entry.to_dict() for entry in memory_search.all_entries()],
-        runtime_rule_entries=[entry.to_dict() for entry in memory_search.runtime_rule_entries],
         long_term_memory_entries=[entry.to_dict() for entry in memory_search.long_term_entries],
         suppressed_long_term_entries=list(memory_search.suppressed_long_term_entries),
-        memory_conflict_evidence=list(memory_search.conflict_evidence),
         memory_diagnostic_labels=list(memory_search.diagnostic_labels),
     )
 
@@ -419,15 +441,21 @@ def test_openai_compatible_adapter_includes_refactor_runtime_rule_in_context_sna
     adapter.decide(
         task="重构 task_board/query_engine.py，共享 filter-and-sort helper",
         task_type="refactor",
-        context_snapshot=snapshot,
+        initial_guide=guide,
+        context_snapshot=None,
         config_data={},
     )
 
     user_payload = json.loads(captured["body"]["messages"][-1]["content"])
-    runtime_rule_entries = user_payload["context_snapshot"]["memory_context"]["runtime_rule_entries"]
-    compat_rule = next(item for item in runtime_rule_entries if item["title"] == "兼容式重构优先原则")
-    assert "未验证通过前不要删除旧函数" in compat_rule["summary"]
-    assert "默认允许保留旧函数" in compat_rule["summary"]
+    memory_guide = user_payload["initial_guide"]["memory_guide"]
+    assert "runtime_rules" not in memory_guide
+    assert "runtime_rule_entries" not in memory_guide
+    assert set(memory_guide) == {
+        "long_term_memory",
+        "suppressed_long_term_memory",
+        "diagnostic_labels",
+    }
+    assert user_payload["context_snapshot"] == {}
 
 
 def test_openai_compatible_adapter_rejects_tool_input_fields_not_declared_in_schema(monkeypatch) -> None:

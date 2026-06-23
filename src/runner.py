@@ -1036,6 +1036,7 @@ def _build_phase_4_report(
     verification_result = runtime_state.verification_result
     verification_status = "通过" if verification_result and verification_result.passed else "未通过"
     verification_summary = verification_result.summary if verification_result else "尚未生成验证结果。"
+    initial_guide = runtime_state.initial_guide
     context_snapshot = runtime_state.context_snapshot
     observation_summary = runtime_state.observation_summary or "尚未生成反思事实摘要。"
     changed_file_lines = [
@@ -1044,14 +1045,14 @@ def _build_phase_4_report(
     ]
     changed_files_summary = "\n".join(changed_file_lines) if changed_file_lines else "- 暂无变更文件。"
 
-    reflect_feedback = runtime_state.reflect_feedback
-    if reflect_feedback:
-        observation = reflect_feedback.get("observation", {})
+    reflect_content = runtime_state.reflect_content
+    if reflect_content:
+        observation = reflect_content.get("observation", {})
         if not isinstance(observation, dict):
             observation = {}
-        signals = reflect_feedback.get("signals", [])
-        failed_tools = reflect_feedback.get("failed_tools", [])
-        recent_tool_results = reflect_feedback.get("recent_tool_results", [])
+        signals = reflect_content.get("signals", [])
+        failed_tools = reflect_content.get("failed_tools", [])
+        recent_tool_results = reflect_content.get("recent_tool_results", [])
         recent_tool_lines: list[str] = []
         if isinstance(recent_tool_results, list):
             for item in recent_tool_results[-5:]:
@@ -1062,8 +1063,8 @@ def _build_phase_4_report(
                     if field_name in item:
                         parts.append(f"{field_name}={item.get(field_name)}")
                 recent_tool_lines.append("; ".join(parts))
-        reflect_feedback_summary = (
-            f"- trigger: `{reflect_feedback.get('trigger', 'unknown')}`\n"
+        reflect_content_summary = (
+            f"- trigger: `{reflect_content.get('trigger', 'unknown')}`\n"
             f"- signals: `{', '.join(str(item) for item in signals) or 'none'}`\n"
             f"- changed files: `{', '.join(str(item) for item in observation.get('changed_files', [])) or 'none'}`\n"
             f"- failed tool count: `{observation.get('failed_tool_count', 0)}`\n"
@@ -1071,7 +1072,7 @@ def _build_phase_4_report(
             f"- recent tool results: `{ ' | '.join(recent_tool_lines) if recent_tool_lines else 'none' }`"
         )
     else:
-        reflect_feedback_summary = "- 未生成反思反馈。"
+        reflect_content_summary = "- 未生成 reflect_content。"
 
     model_decision = runtime_state.model_decision
     if model_decision:
@@ -1142,65 +1143,52 @@ def _build_phase_4_report(
     )
 
     context_lines = []
-    if context_snapshot:
-        context_lines.append(f"- 任务关键词：`{', '.join(context_snapshot.task_context.keywords)}`")
-        context_lines.append(f"- 召回倾向：{context_snapshot.repo_context.recall_strategy}")
-        context_lines.append(
-            f"- 扫描到的文本文件数：`{context_snapshot.repo_context.candidate_file_count}`"
-        )
-        context_lines.append(
-            f"- 选中文件数：`{context_snapshot.repo_context.selected_file_count}`，"
-            f"保留总行数：`{context_snapshot.repo_context.total_selected_lines}`，"
-            f"原始总行数：`{context_snapshot.repo_context.total_original_lines}`，"
-            f"发生裁剪的文件数：`{context_snapshot.repo_context.clipped_file_count}`"
-        )
-        if context_snapshot.repo_context.selected_files:
-            for file_context in context_snapshot.repo_context.selected_files:
-                clip_text = "是" if file_context.was_clipped else "否"
+    if initial_guide:
+        guide_payload = initial_guide.to_dict()
+        task_guide = guide_payload.get("task", {})
+        repo_guide = guide_payload.get("repo_guide", {})
+        memory_guide = guide_payload.get("memory_guide", {})
+        selected_files = repo_guide.get("selected_files", [])
+        context_lines.append(f"- initial_guide 任务关键词：`{', '.join(task_guide.get('keywords', []))}`")
+        context_lines.append(f"- 召回倾向：{repo_guide.get('recall_strategy', '')}")
+        context_lines.append(f"- 扫描到的文本文件数：`{repo_guide.get('candidate_file_count', 0)}`")
+        context_lines.append(f"- 选中文件数：`{len(selected_files)}`")
+        if selected_files:
+            for file_context in selected_files:
+                structure_count = len(file_context.get("structure_summary", []))
                 context_lines.append(
-                    f"- `{file_context.path}`：以 `{file_context.injection_mode}` 方式放入上下文，"
-                    f"保留 `{file_context.included_line_count}` 行，总行数 `{file_context.total_line_count}`，"
-                    f"是否裁剪：{clip_text}。原因：{file_context.reason}"
+                    f"- `{file_context.get('path', '')}`：score=`{file_context.get('score', 0)}`，"
+                    f"结构条目 `{structure_count}`。原因：{file_context.get('reason', '')}"
                 )
         else:
-            context_lines.append("- 本次没有选中文件进入上下文。")
-        memory_status = "已启用" if context_snapshot.memory_context.enabled else "未启用"
+            context_lines.append("- initial_guide 没有选中文件。")
+        diagnostic_labels = memory_guide.get("diagnostic_labels", [])
         context_lines.append(
-            f"- memory：{memory_status}。来源：`{context_snapshot.memory_context.source}`。"
-            f"查询词：`{context_snapshot.memory_context.query or '无'}`。"
-            f"命中条数：`{len(context_snapshot.memory_context.matched_entries)}`"
+            f"- memory：长期 `{len(memory_guide.get('long_term_memory', []))}` 条，"
+            f"suppressed `{len(memory_guide.get('suppressed_long_term_memory', []))}` 条，"
+            f"诊断标签 `{', '.join(diagnostic_labels) if diagnostic_labels else '无'}`"
+        )
+
+    if context_snapshot:
+        snapshot_payload = context_snapshot.to_dict()
+        fresh_context = snapshot_payload.get("fresh_context", {})
+        stale_context = snapshot_payload.get("stale_context", {})
+        recent_facts = snapshot_payload.get("recent_facts", {})
+        context_lines.append(f"- context_snapshot iteration：`{snapshot_payload.get('iteration', 0)}`")
+        context_lines.append(
+            f"- fresh_context：文件片段 `{len(fresh_context.get('file_snippets', []))}`，"
+            f"diff `{len(fresh_context.get('diffs', []))}`，"
+            f"command `{len(fresh_context.get('command_results', []))}`"
         )
         context_lines.append(
-            f"- memory 明细：运行时规则 "
-            f"`{len(context_snapshot.memory_context.runtime_rule_entries)}` 条，"
-            f"长期 memory "
-            f"`{len(context_snapshot.memory_context.long_term_entries)}` 条，"
-            f"被抑制的长期 memory "
-            f"`{len(context_snapshot.memory_context.suppressed_long_term_entries)}` 条，"
-            f"conflict evidence "
-            f"`{len(context_snapshot.memory_context.conflict_evidence)}` 条"
+            f"- stale_context：`{', '.join(stale_context.get('stale_file_paths', [])) or '无'}`"
         )
-        diagnostic_labels = context_snapshot.memory_context.diagnostic_labels
         context_lines.append(
-            f"- memory 诊断标签：`{', '.join(diagnostic_labels) if diagnostic_labels else '无'}`"
+            f"- recent_facts：最近工具 `{len(recent_facts.get('recent_tool_results', []))}`，"
+            f"失败工具 `{len(recent_facts.get('failed_tools', []))}`，"
+            f"signals `{', '.join(recent_facts.get('signals', [])) or '无'}`"
         )
-        if context_snapshot.memory_context.conflict_evidence:
-            for item in context_snapshot.memory_context.conflict_evidence:
-                severity_text = "强冲突" if item.get("severity") == "strong" else "弱提醒"
-                context_lines.append(
-                    f"- memory 冲突：[{severity_text}] {item['summary']}。"
-                    f"任务类型：`{', '.join(item.get('task_types', [])) or '未知'}`。"
-                    f"共享关键词：`{', '.join(item.get('shared_keywords', [])) or '无'}`。"
-                    f"共享文件：`{', '.join(item.get('shared_file_paths', [])) or '无'}`"
-                )
-        if context_snapshot.memory_context.suppressed_long_term_entries:
-            for item in context_snapshot.memory_context.suppressed_long_term_entries:
-                context_lines.append(
-                    f"- memory 注入抑制：`{item.get('title', '未命名长期 memory')}`。"
-                    f"任务类型：`{item.get('task_type', '未知')}`。"
-                    f"原因：`{item.get('reason', '未知')}`"
-                )
-    context_summary = "\n".join(context_lines) if context_lines else "- 尚未生成上下文快照。"
+    context_summary = "\n".join(context_lines) if context_lines else "- 尚未生成 initial_guide/context_snapshot。"
 
     return (
         f"# 运行报告\n\n"
@@ -1227,7 +1215,7 @@ def _build_phase_4_report(
         f"- 事实摘要：{observation_summary}\n"
         f"{changed_files_summary}\n"
         f"\n## 反思反馈\n\n"
-        f"{reflect_feedback_summary}\n"
+        f"{reflect_content_summary}\n"
         f"\n## 模型返回摘要\n\n"
         f"{model_response_summary}\n"
         f"\n## Token 消耗\n\n"
@@ -1264,10 +1252,13 @@ def _write_long_term_memory_if_needed(settings: RunSettings, runtime_state: Runt
             reason="本次 run 未通过验证，按当前规则不写入长期 memory。",
         )
 
-    context_snapshot = runtime_state.context_snapshot
+    initial_guide = runtime_state.initial_guide
     selected_paths = []
-    if context_snapshot:
-        selected_paths = [file_context.path for file_context in context_snapshot.repo_context.selected_files]
+    if initial_guide:
+        selected_paths = [
+            item.get("path", "")
+            for item in initial_guide.to_dict().get("repo_guide", {}).get("selected_files", [])
+        ]
     normalized_selected_paths = _normalize_file_paths(selected_paths)
     task_keywords = _extract_keywords(settings.task)
     summary_keywords = _extract_keywords(verification_result.summary)
@@ -1303,10 +1294,13 @@ def _build_memory_entry_written_payload(settings: RunSettings, runtime_state: Ru
     if not verification_result:
         return {}
 
-    context_snapshot = runtime_state.context_snapshot
+    initial_guide = runtime_state.initial_guide
     selected_paths: list[str] = []
-    if context_snapshot:
-        selected_paths = [file_context.path for file_context in context_snapshot.repo_context.selected_files]
+    if initial_guide:
+        selected_paths = [
+            item.get("path", "")
+            for item in initial_guide.to_dict().get("repo_guide", {}).get("selected_files", [])
+        ]
 
     return LongTermMemoryEntry(
         run_id=settings.run_id,

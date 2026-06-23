@@ -159,7 +159,7 @@ AI 应按以下顺序执行：
 - 大文件摘要不足，模型需要具体范围。
 - 跨轮已读取片段没有被保留。
 
-任务可围绕 `context_snapshot`、`read_file`、`read_file_range`、`file_context_cache`、`previous_reflect.recent_tool_results` 生成。
+任务可围绕 `initial_guide`、`context_snapshot`、`read_file`、`read_file_range`、`context_snapshot.fresh_context.file_snippets`、`context_snapshot.stale_context` 和 `context_snapshot.recent_facts.recent_tool_results` 生成。
 
 ### 工具调用与编辑可靠性
 
@@ -205,7 +205,7 @@ AI 应按以下顺序执行：
 - sample batch 不够真实。
 - sandbox 输出难以复盘。
 
-任务可围绕 `model_raw_response`、`model_decision`、`reflect_feedback`、`report.md`、`summary.json`、`summary.md`、`docs/RUN_CHAIN.html` 生成。
+任务可围绕 `model_raw_response`、`model_decision`、`reflect_content`、`context_snapshot_prepared`、`report.md`、`summary.json`、`summary.md`、`docs/RUN_CHAIN.html` 生成。
 
 ## 任务排序建议
 
@@ -297,7 +297,7 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli `
 以下只是候选，不是必须执行。新会话应结合最新 run 再取舍：
 
 1. 大文件上下文策略真实 run 复盘：验证 `structure_summary`、`read_file_range`、`file_context_cache` 是否减少重复读文件和 `old_text_not_found`。
-2. `run_command` 反馈增强：把关键 stdout/stderr、返回码、命令失败原因压缩进 `previous_reflect`，避免模型重复运行无效命令。
+2. `run_command` 反馈增强：把关键 stdout/stderr、返回码、命令失败原因压缩进 `context_snapshot.fresh_context.command_results` 和 `recent_facts.failed_tools`，避免模型重复运行无效命令。
 3. Trace 可读性工具：生成按事件折叠的本地 HTML/Markdown trace viewer，降低人工复盘成本。
 4. Verify rule 下一批扩展：围绕真实 demo 任务补充更贴近代码行为的断言，但不滥加规则类型。
 5. Sandbox 与实验任务治理：让 demo task、preserved sandbox、实验输出更容易复用和清理。
