@@ -13,8 +13,8 @@
   "context": {
     "strategy": "file_recall_context"
   },
-  "reflect": {
-    "strategy": "low_progress_plus_verify_reflect"
+  "observe": {
+    "strategy": "after_act_observe"
   },
   "memory": {
     "enabled": true,
@@ -22,3 +22,4 @@
     "summary_max_length": 80
   }
 }
+

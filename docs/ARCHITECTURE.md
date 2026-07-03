@@ -92,7 +92,7 @@ Orchestrator 是顶层应用服务，不应包含 provider 级模型细节，也
 - 定义允许的状态转移。
 - 定义什么时候调用模型。
 - 定义什么时候执行工具。
-- 定义什么时候 verify 和 reflect。
+- 定义什么时候 verify 和 observe。
 
 MVP 阶段 loop 是固定 baseline，不是第一批主要实验变量。
 
@@ -357,14 +357,14 @@ memory_entry:
 - `analyze`：理解任务，并识别初始 repo 线索。
 - `plan`：在第一次行动前产出阶段性执行计划。
 - `act`：调用工具或执行修改。
-- `reflect`：每轮 `act` 后固定执行，保真压缩工具结果、diff 事实、失败工具和轻量 signals。
+- `observe`：每轮 `act` 后固定执行，保真压缩工具结果、diff 事实、失败工具和轻量 signals。
 - `verify`：运行验证检查。
 - `finalize`：输出最终状态、报告和可写入的 memory。
 
 ### 7.2 状态转移规则
 
 ```text
-ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize
+ingest -> analyze -> (plan -> act -> observe)* -> verify -> finalize
 
 solve loop exit -> verify
 final verify passed -> finalize(completed)
@@ -375,16 +375,16 @@ final verify failed -> finalize(verification_failed)
 
 - 第一次 `act` 前必须先经过 `plan`。
 - 除非任务类型明确允许，否则 `finalize` 之前必须至少有一次 verify。
-- `reflect` 是每一轮 `act` 后的固定事实压缩步骤。
+- `observe` 是每一轮 `act` 后的固定事实压缩步骤。
 - 每次工具调用都必须增加 `tool_call_count`。
 - 每次状态转移都必须写入 trace event。
 
-### 7.4 Reflect 事实压缩
+### 7.4 Observe 事实压缩
 
 - harness 负责保真地压缩事实，LLM 负责解释事实并重规划。
-- 如果本轮有修改类工具且最新 `git_diff.changed_file_count == 0`，reflect 记录 `no_diff_after_edit_attempt`。
+- 如果本轮有修改类工具且最新 `git_diff.changed_file_count == 0`，observe 记录 `no_diff_after_edit_attempt`。
 - 如果本轮只有读取、搜索或其它信息收集工具，不产生 no-diff signal。
-- 下一轮模型不会再收到 `previous_verification` 或 `previous_reflect.verification`；最终验证只作为末尾裁判结果保留在 trace、report 和 eval 聚合里。
+- 下一轮模型不会再收到旧式过程内 verification 反馈；最终验证只作为末尾裁判结果保留在 trace、report 和 eval 聚合里。
 - `file_context_cache` 现在会区分 `fresh` 与 `stale`：文件一旦被 `apply_patch` 或 `replace_lines` 成功编辑，旧读取缓存按整文件失效；只有后续重新读取后才会恢复为 `fresh`。
 
 ### 7.5 模型可见预算
@@ -416,7 +416,7 @@ final verify failed -> finalize(verification_failed)
 - `fresh_context.file_snippets`：当前仍可信的已读文件片段，`content` 就是工具读取后压缩出的内容。
 - `fresh_context.diffs` / `fresh_context.command_results`：最近 diff 和命令事实，带 `from_iteration`，方便模型判断是否需要重查。
 - `stale_context`：当前仍 stale 的文件列表、失效细节和统一重读建议；默认顺序是先 `read_file_structure_summary`，再 `read_file_range`。
-- `recent_facts`：由 `reflect_content` 压缩出的最近工具结果、失败工具和 signals。
+- `recent_facts`：由 `observe_content` 压缩出的最近工具结果、失败工具和 signals。
 
 这两层共同组成模型输入的“上下文窗口”。`initial_guide` 负责首轮导航，`context_snapshot` 负责运行时事实；链路中不再传递旧跨轮反馈字段。
 
@@ -665,7 +665,7 @@ Trace 使用 JSONL，一行一个事件。
 - `memory_written`
 - `patch_applied`
 - `verify_completed`
-- `reflect_completed`
+- `observe_content`
 - `state_result`
 - `state_transitioned`
 - `run_finished`
@@ -740,7 +740,7 @@ Eval task spec 使用 YAML 或 JSON。
 - steps
 - tool calls
 - verify count
-- reflect count
+- observe count
 - duration
 
 诊断指标：
@@ -840,4 +840,5 @@ MVP 阶段不需要复杂存储后端，JSONL 和本地文件已经足够。
 - 如果把可读计划说明、工作记忆和真实工具执行混为一谈，模型可能“文字上看起来很忙、实际只读文件”；当前通过 `planned_actions`、`working_memory`、`tool_calls` 三字段拆分降低这个风险。
 
 MVP 架构选择故意偏保守，目标是在保证后续扩展点的同时，降低这些风险。
+
 

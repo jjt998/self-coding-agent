@@ -56,3 +56,4 @@ def test_live_trace_snapshot_fills_model_decision_last_rational_from_context_sna
 
     working_memory = snapshot["iterations"][0]["model_decision"]["working_memory"]
     assert working_memory["last_rational"] == "上一轮先读取 README，再决定是否修改。"
+

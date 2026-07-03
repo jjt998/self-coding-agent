@@ -173,7 +173,7 @@ AI 应按以下顺序执行：
 
 任务可围绕 `TOOL_SCHEMAS`、工具入参校验、`ToolExecution` 结构化失败、`replace_lines`、`run_command` 摘要生成。
 
-### Reflect 与重规划
+### Observe 与重规划
 
 适合在真实 run 中出现以下问题时生成：
 
@@ -205,7 +205,7 @@ AI 应按以下顺序执行：
 - sample batch 不够真实。
 - sandbox 输出难以复盘。
 
-任务可围绕 `model_raw_response`、`model_decision`、`reflect_content`、`context_snapshot_prepared`、`report.md`、`summary.json`、`summary.md`、`docs/RUN_CHAIN.html` 生成。
+任务可围绕 `model_raw_response`、`model_decision`、`observe_content`、`context_snapshot_prepared`、`report.md`、`summary.json`、`summary.md`、`docs/RUN_CHAIN.html` 生成。
 
 ## 任务排序建议
 
@@ -306,4 +306,5 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli `
 ## 一句话准则
 
 下一批任务不是从功能清单里“挑一个好看的”，而是从真实 run 的失败证据里提炼一个能被测试和文档固化的 harness 改进闭环。
+
 

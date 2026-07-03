@@ -8,13 +8,13 @@
 
 ## 最新 Phase 9.x 收口：Context 双层输入与注释固化
 
-- 当前 loop 已从 `ingest -> analyze -> (plan -> act -> reflect -> verify)* -> finalize` 调整为 `ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize`。
+- 当前 loop 已从 `ingest -> analyze -> (plan -> act -> observe -> verify)* -> finalize` 调整为 `ingest -> analyze -> (plan -> act -> observe)* -> verify -> finalize`。
 - `verify` 现在只会在求解阶段退出后执行一次，验证结果不再回灌给后续模型轮次。
 - 当前不再要求模型显式输出结束字段；harness 仅根据本轮 `tool_calls` 是否为空来决定是否继续求解。
 - Runtime 已新增“连续两次空 `tool_calls`”收口信号；命中后会直接退出求解阶段并进入最终验证。
-- `previous_verification` 已从模型输入中移除，`previous_reflect.verification` 也已从事实反馈中移除。
+- `previous_verification` 已从模型输入中移除，过程内 verification 反馈也已从事实输入中移除。
 - 当前模型输入已收敛为两层：`initial_guide` 负责首轮任务、仓库召回和长期记忆导航；`context_snapshot` 负责每轮 plan 前的 working_memory、fresh/stale 上下文、diff/command 结果和 recent_facts，其中 `working_memory.last_rational` 会承接上一轮 `rationale`。
-- 旧 `runtime_feedback` 已从生产模型请求中移除；`reflect_feedback` trace 事件已改名为 `reflect_content`，并作为 `context_snapshot.recent_facts` 的事实来源之一。
+- 旧 `runtime_feedback` 已从生产模型请求中移除；`observe_feedback` trace 事件已改名为 `observe_content`，并作为 `context_snapshot.recent_facts` 的事实来源之一。
 - token diagnostics 仍会继续流入 `model_raw_response`、`model_decision`、`run_finished`、`report.md`、`summary.json`、`summary.md` 和 comparison delta；provider 缺失 `usage` 时不做本地估算。
 - 当前产品定位继续向 `bug_fix` 主赛道收敛，其它任务类型保持兼容，但不再默认依赖过程内 verify 反馈。
 - 当前已新增显式结构摘要工具 `read_file_structure_summary(path)`，让模型能先看结构、再按行号精读，而不是总从 `read_file` 间接触发大文件摘要。
@@ -37,7 +37,7 @@
 ## Phase 2：最小 Agent Loop
 
 - 状态：`completed`
-- 结果：已完成显式状态机 loop、stop reason、基础 reflect 插入链路。
+- 结果：已完成显式状态机 loop、stop reason、基础 observe 插入链路。
 
 ## Phase 3：核心工具
 
@@ -71,9 +71,9 @@
   - comparison runner 与 CLI `--compare-strategies`
   - `memory_off` / `structured_memory_on`
   - `naive_recent_context` / `file_recall_context`
-  - `verify_failure_only_reflect` / `low_progress_plus_verify_reflect`
+  - `verify_failure_only_observe` / `after_act_observe`
   - comparison summary 基础 delta
-  - failure taxonomy / taxonomy tags / verification failure / reflect reason 聚合 delta
+  - failure taxonomy / taxonomy tags / verification failure / observe reason 聚合 delta
   - task-level delta 展开
   - task delta 中的代表性运行指针：
     - `baseline_run_id`
@@ -131,19 +131,19 @@
   - 本轮已按测试环境规范使用 `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe` 完成回归：`tests/test_loop.py tests/test_model.py` 为 `12 passed`，`tests/test_cli.py tests/test_eval.py tests/test_verify.py` 为 `23 passed`，全量 `pytest -q` 为 `40 passed`
   - `src/loop.py` 已将 `observe` 从固定 no-progress stub 替换为真实工具结果观察：`git_diff` 有变更或 `apply_patch` 成功都会被视为有进展
   - 当前 `progress_observed` trace 会记录 `progress_made`、`changed_files`、`successful_tools`、`failed_tools`、`failed_tool_count`
-  - 默认 `low_progress_plus_verify_reflect` 现在只在 `observe` 后没有真实进展时触发 `no_progress_after_observe`
+  - 默认 `after_act_observe` 现在只在 `observe` 后没有真实进展时触发 `no_progress_after_observe`
   - `run_finished.stop_reason.details` 和运行报告已补充进展观察信息，报告新增 `## 进展观察` 小节
-  - 本轮测试已补充覆盖：有进展不触发默认 reflect、无进展触发默认 reflect、CLI 报告包含进展观察
-  - `src/loop.py` 已从单轮执行升级为最小多轮求解，当前流程为 `ingest -> analyze -> (plan -> act -> observe -> verify/reflect)* -> finalize`
+  - 本轮测试已补充覆盖：有进展不触发默认 observe、无进展触发默认 observe、CLI 报告包含进展观察
+  - `src/loop.py` 已从单轮执行升级为最小多轮求解，当前流程为 `ingest -> analyze -> (plan -> act -> observe -> verify/observe)* -> finalize`
   - `runtime.max_steps` 现在解释为最大求解轮数，所有现有策略配置已统一从 `1` 调整为 `2`
-  - 验证失败且仍有预算时会触发 reflect 后重新 plan；达到最大轮数仍失败时以 `stop_reason.code = max_steps_reached` 收口
-  - 第二轮及以后模型 plan 会收到 `runtime_feedback`，包含上一轮观察、最近工具摘要和验证结果
-  - `run_finished.stop_reason.details` 和报告已补充 `max_steps`、`iteration_count`、`reflect_count`、`reflect_trigger_reasons`
+  - 验证失败且仍有预算时会触发 observe 后重新 plan；达到最大轮数仍失败时以 `stop_reason.code = max_steps_reached` 收口
+  - 第二轮及以后模型 plan 会收到 `context_snapshot`，其中包含上一轮观察、最近工具摘要和失败工具摘要
+  - `run_finished.stop_reason.details` 和报告已补充 `max_steps`、`iteration_count`、`observe_count`、`observe_trigger_reasons`
   - 回归测试新增覆盖：单轮成功、多轮失败后成功、无进展后重规划、达到最大轮数失败、第二轮 runtime feedback、模型错误路径
 - 下一步实现顺序建议：
   1. 继续扩展 `verify_rules`，优先补 JSON / diff / 多文件聚合类验证语义。
   2. 把 setup / verify 失败都收口为结构化 stop reason 与更稳定的 failure taxonomy。
-  3. 继续把 reflect 从占位记录替换成能辅助重规划的真实反思链路。
+  3. 继续把 observe 从占位记录替换成能辅助重规划的真实观察链路。
 
 ## 下一步
 
@@ -165,7 +165,7 @@
   - 旧片段内容不再继续暴露为可直接复用源码
   - 只保留 `stale_reason`、`last_invalidated_step`、`stale_snippet_count`、`stale_covered_ranges` 等诊断字段
   - 后续重新读取同文件后，缓存恢复为 `fresh`
-- `reflect_feedback` 与后续轮次 `runtime_feedback.previous_reflect` 已补充：
+- `observe_content` 与后续轮次 `context_snapshot.recent_facts` 已补充：
   - `file_context_cache[*].cache_status`
   - `file_context_cache[*].stale_reason`
   - `stale_file_paths`
@@ -184,51 +184,51 @@
 ### Phase 9 下一步
 
 1. 把 setup / verify 失败收口成结构化 stop reason 和更稳定的 failure taxonomy。
-2. 继续把 `reflect` 从占位记录替换成能辅助重规划的真实反思链路。
+2. 继续把 `observe` 从占位记录替换成能辅助重规划的真实观察链路。
 3. 继续根据真实 eval 任务补更高阶的验证规则。
 
-### Phase 9 本轮新增：结构化失败收口与 reflect feedback
+### Phase 9 本轮新增：结构化失败收口与 observe content
 
 - setup 失败已收口为 `stop_reason.code = setup_failed`，并在 details 中保留失败 setup command 的 returncode、stdout、stderr、cwd。
 - verify 最终失败已收口为 `stop_reason.code = verification_failed`，并继续进入 `finalize` 生成完整 report。
 - `run_finished.stop_reason.details.verification_failure` 已包含 failing checks、failed verify commands、failed rule types、verification mode、command/rule 数量。
 - eval outcome / failure taxonomy 已扩展：`failed_setup`、`setup:command_returncode`、`verification:verify_command_returncode`、`verification:verify_rule:<check>`。
-- reflect 阶段已生成 `reflect_feedback` trace，并把结构化反馈写入下一轮 `runtime_feedback.previous_reflect_feedback`。
+- observe 阶段已生成 `observe_content` trace，并把结构化事实写入下一轮 `context_snapshot.recent_facts`。
 - `eval_tasks/sample_batch.json` 已改为可读 UTF-8，并给两个任务加入真实 `verify_commands` 与结构化 `verify_rules` 示例。
 
 ### Phase 9 下一步更新
 
-1. 继续把 reflect feedback 接入更明确的模型重规划提示，减少重复失败计划。
+1. 继续提升 `observe_content` 的事实压缩质量，减少重复失败计划。
 2. 用升级后的 sample batch 做 eval/comparison smoke，校验报告可读性和 taxonomy 聚合。
 3. 根据真实任务需求继续补 regex、JSON key/length、diff text 等验证规则。
-### Phase 9 本轮新增：reflect feedback 驱动重规划
+### Phase 9 本轮新增：observe content 驱动上下文快照
 
-- `reflect_feedback` 不再只是记录型反馈；最新一次反馈会被整理为 `replan_constraints` 并传入下一轮 `runtime_feedback.previous_reflect_feedback`。
-- `replan_constraints` 当前覆盖失败原因、必须处理的关注点、失败检查名、失败工具摘要、建议工具和需要避免原样重复的上一轮工具序列。
-- `model_decision` trace 新增 `has_reflect_feedback` 与 `reflect_feedback_summary`，便于 eval/comparison 回看第二轮 plan 是否拿到了反思证据。
-- OpenAI compatible prompt 已明确要求模型在重规划时回应 `previous_reflect_feedback`，并避免无解释地重复完全相同的失败工具计划。
-- 报告新增 `## 反思反馈` 小节；本轮边界仍保持不开放更高 `runtime.max_steps`、不新增 CLI 单次 verify 参数、不扩展新 verify rule。
+- `observe_content` 不再只是记录型事件；最新一次观察会被整理进下一轮 `context_snapshot.recent_facts`。
+- `recent_facts` 当前覆盖最近工具结果、失败工具摘要和轻量 signals，供模型自行判断下一步是否需要重读、重试或收口。
+- `model_decision` trace 保留上下文可见性字段，便于 eval/comparison 回看第二轮 plan 是否拿到了观察证据。
+- OpenAI compatible prompt 依赖 `context_snapshot` 传递重规划证据，不再注入旧式 observe feedback。
+- 报告展示 observe 次数和触发原因；本轮边界仍保持不开放更高 `runtime.max_steps`、不新增 CLI 单次 verify 参数、不扩展新 verify rule。
 ### Phase 9 本轮新增：第四批 verify_rules
 
 - `src/verify.py` 新增命令输出 regex 规则：`command_stdout_matches_regex`、`command_stderr_matches_regex`。
 - `src/verify.py` 新增 JSON 结构规则：`json_path_exists`、`json_array_length_equals`、`json_array_length_at_least`、`json_array_length_at_most`、`json_object_key_exists`。
 - `src/verify.py` 新增 diff 文本规则：`diff_contains_text`、`diff_not_contains_text`，规则只读取已有 `git_diff` 工具结果。
 - `src/eval_runner.py` 的 `_normalize_verify_rules()` 已保留新增字段：`regex`、`expected_length`、`min_length`、`max_length`、`key`。
-- 本轮边界保持不变：不改 loop，不改 reflect/model，不改 CLI 单次 verify 参数，不开放更高 `runtime.max_steps`。
+- 本轮边界保持不变：不改 loop，不改 observe/model，不改 CLI 单次 verify 参数，不开放更高 `runtime.max_steps`。
 
 ### Phase 9 本轮新增：真实状态处理骨架
 
 - `src/loop.py` 已移除 `_run_stub_state` 作为状态执行入口，改为 `_run_state` 分发到独立 per-state handler。
 - `ingest` 阶段补齐真实任务输入证据，`state_result.result` 与新增 `task_ingested` trace 均包含 repo/workspace/verify/setup/model/config 摘要。
-- `finalize` 阶段补齐真实收尾证据，`state_result.result` 与新增 `finalize_summary` trace 均包含验证、进展、reflect、轮数、工具调用和模型决策统计。
-- 本轮是 loop 内核结构化重构，保持 plan/act/observe/reflect/verify 既有行为不变，不新增 CLI 参数，不扩展 `verify_rules`，不调整 `runtime.max_steps=2`。
+- `finalize` 阶段补齐真实收尾证据，`state_result.result` 与新增 `finalize_summary` trace 均包含验证、进展、observe、轮数、工具调用和模型决策统计。
+- 本轮是 loop 内核结构化重构，保持 plan/act/observe/observe/verify 既有行为不变，不新增 CLI 参数，不扩展 `verify_rules`，不调整 `runtime.max_steps=2`。
 
 ### Phase 9 本轮新增：移除演示型 verify 回退
 
 - `build_phase_4_verification()` 现在只接受显式任务级验证配置，不再自动回退到 `agent_notes.md` 演示检查。
 - `verify_rules` 已可在没有 `verify_commands` 时独立运行，适合表达纯文件、JSON、diff、多文件聚合等结构化完成条件。
 - 缺少 `verify_commands` 与 `verify_rules` 时会稳定失败为 `missing_task_verification`，便于 eval/comparison 识别任务不可判定。
-- 本轮保持边界：不新增规则类型，不开放 CLI 单次 verify 参数，不修改 reflect/model prompt，不调整最大求解轮数。
+- 本轮保持边界：不新增规则类型，不开放 CLI 单次 verify 参数，不修改 observe/model prompt，不调整最大求解轮数。
 
 ### Phase 9 本轮新增：缺失任务级验证一等诊断
 
@@ -237,12 +237,12 @@
 - run 报告会在验证结果小节提示缺少 `verify_commands` / `verify_rules`，避免用户把任务不可判定误读为普通内容验证失败。
 - comparison delta 不需要新增结构，沿用现有 `failure_taxonomy_counts_delta` 与 `failure_taxonomy_tag_counts_delta` 即可聚合该失败模式。
 
-### Phase 9 本轮新增：Reflect Feedback 强制驱动重规划
+### Phase 9 本轮新增：Observe Feedback 强制驱动重规划
 
-- `previous_reflect_feedback.replan_constraints` 已从模型提示升级为 plan 后硬校验，模型必须可追踪地回应失败原因、失败检查和必须处理的关注点。
-- 未回应 reflect 约束、或无解释重复上一轮失败工具序列时，会抛出 `ModelResponseError`，并沿用 plan 阶段 `model_error` 停止路径。
-- `model_decision` trace 保留 `has_reflect_feedback` 与 `reflect_feedback_summary`，并新增 `reflect_constraints_acknowledged` 表示重规划约束已通过校验。
-- OpenAI compatible prompt 已改为中文硬约束说明；本轮不修改 `runtime.max_steps=2`，不新增 `verify_rules`，不开放 CLI 单次 verify 参数。
+- 旧式 `previous_observe_feedback.replan_constraints` 已移除，plan 后不再做 observe 硬约束校验。
+- 模型是否回应上一轮事实由 `rationale`、`planned_actions`、`working_memory` 和后续工具行为共同体现，不再通过 harness 强制匹配失败约束字段。
+- `model_decision` trace 保留上下文可见性字段，帮助确认 `context_snapshot` 已随请求进入模型。
+- OpenAI compatible prompt 继续说明 `context_snapshot` 的使用方式；本轮不修改 `runtime.max_steps=2`，不新增 `verify_rules`，不开放 CLI 单次 verify 参数。
 
 ### Phase 9 本轮新增：Eval/Comparison Smoke 与失败诊断统一
 
@@ -289,3 +289,4 @@
 - 已接入 `model_request_prepared` trace 事件，记录每轮真实 `request_payload`。
 - 已新增 `live_trace_view.html`、`live_trace_snapshot.json` 和 `live_trace_snapshot.js`，实时 viewer 按轮次展示右侧 Harness request、左侧结构化 `model_decision`。
 - 现有 `trace_view.html` 保留为原始事件调试视图，新 live viewer 负责 run 过程观察。
+

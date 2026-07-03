@@ -11,7 +11,7 @@ def _fake_model_response() -> str:
     decision = {
         "summary": "已生成测试模型决策。",
         "rationale": (
-            "测试环境固定返回真实 loop 测试计划；如存在 reflect 反馈，则回应 "
+            "测试环境固定返回真实 loop 测试计划；如存在 observe 反馈，则回应 "
             "verification_failed、missing_task_verification、task_verification_configured、"
             "verify_command_1、no_progress_after_observe、produce_observable_file_change、"
             "fix_failing_verification_checks；再次重复相同工具序列是因为 subprocess "
@@ -63,3 +63,4 @@ def fake_model_environment(monkeypatch) -> None:
     """默认让测试使用可审计的假模型响应；功能代码仍要求 API key 存在。"""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", _fake_model_response())
+

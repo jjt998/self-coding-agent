@@ -48,7 +48,7 @@ def test_mvp_acceptance_freezes_commands_boundaries_and_backlog() -> None:
         "D:\\jt\\ANACONDA\\envs_dirs\\learn-claude-code\\python.exe",
         "-m pytest -q",
         "--eval-task-file eval_tasks\\sample_batch.json",
-        "--compare-strategies default,verify_failure_only_reflect",
+        "--compare-strategies default,verify_failure_only_observe",
         "summary.json",
         "summary.md",
         "task_deltas",
@@ -84,3 +84,4 @@ def test_harness_improvement_log_and_run_chain_cover_feedback_evidence() -> None
         "失败的 old_text 摘要",
     ]:
         assert expected in run_chain
+

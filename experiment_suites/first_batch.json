@@ -13,10 +13,10 @@
       "question": "structured memory 是否能减少重复探索。"
     },
     {
-      "name": "reflect_strategy_first_batch",
+      "name": "observe_strategy_first_batch",
       "task_file": "../eval_tasks/sample_batch.json",
-      "strategies": ["default", "verify_failure_only_reflect"],
-      "question": "更保守的 reflect 触发是否能减少额外过程开销。"
+      "strategies": ["default", "verify_failure_only_observe"],
+      "question": "不同 observe 配置是否会影响额外过程开销。"
     }
   ]
 }

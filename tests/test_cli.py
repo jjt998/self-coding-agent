@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -71,7 +71,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
         for event in trace_events
         if event["event_type"] == "state_transitioned"
     ]
-    assert transition_targets[:5] == ["ingest", "analyze", "plan", "act", "reflect"]
+    assert transition_targets[:5] == ["ingest", "analyze", "plan", "act", "observe"]
     assert transition_targets[-1] == "finalize"
     assert transition_targets.count("plan") >= 2
     assert transition_targets.count("verify") == 1
@@ -119,11 +119,11 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert tool_results[4]["tool_output"]["changed_file_count"] == 1
     assert "run_evidence.md" in tool_results[4]["tool_output"]["diffs"][0]["path"]
 
-    reflect_events = [event["payload"] for event in trace_events if event["event_type"] == "reflect_content"]
-    assert len(reflect_events) >= 2
-    assert reflect_events[0]["trigger"] == "after_act"
-    assert reflect_events[0]["observation"]["changed_files"] == ["run_evidence.md"]
-    assert reflect_events[0]["observation"]["failed_tool_count"] == 0
+    observe_events = [event["payload"] for event in trace_events if event["event_type"] == "observe_content"]
+    assert len(observe_events) >= 2
+    assert observe_events[0]["trigger"] == "after_act"
+    assert observe_events[0]["observation"]["changed_files"] == ["run_evidence.md"]
+    assert observe_events[0]["observation"]["failed_tool_count"] == 0
 
     verification_events = [event["payload"] for event in trace_events if event["event_type"] == "verification_result"]
     assert len(verification_events) == 1
@@ -187,7 +187,7 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert "原始返回：见 `trace.jsonl` 中的 `model_raw_response` 事件。" in report_text
     assert "usage 完整性：`不完整`" in report_text
     assert "缺失 usage 请求数：" in report_text
-    assert "reflect：已触发" in report_text
+    assert "observe：已触发" in report_text
     assert "## 反思事实摘要" in report_text
     assert "变更文件数：`1`" in report_text
     assert "失败工具数：`0`" in report_text
@@ -576,7 +576,7 @@ def test_cli_runs_sample_batch_and_comparison_smoke(tmp_path: Path) -> None:
     assert eval_summary["failure_taxonomy_tag_counts"] == {}
     eval_summary_text = (output_root / "eval-sample_batch" / "summary.md").read_text(encoding="utf-8")
     assert "## Failure Taxonomy" in eval_summary_text
-    assert "## Reflect 原因" in eval_summary_text
+    assert "## Observe 原因" in eval_summary_text
 
     comparison_output_root = tmp_path / "comparison_runs"
     comparison_command = [
@@ -586,7 +586,7 @@ def test_cli_runs_sample_batch_and_comparison_smoke(tmp_path: Path) -> None:
         "--eval-task-file",
         str(Path.cwd() / "eval_tasks" / "sample_batch.json"),
         "--compare-strategies",
-        "default,verify_failure_only_reflect",
+        "default,verify_failure_only_observe",
         "--repo-root",
         str(repo_root),
         "--output-root",
@@ -601,7 +601,7 @@ def test_cli_runs_sample_batch_and_comparison_smoke(tmp_path: Path) -> None:
     delta = comparison_summary["deltas"][0]
     assert "failure_taxonomy_counts_delta" in delta
     assert "failure_taxonomy_tag_counts_delta" in delta
-    assert "reflect_trigger_reason_counts_delta" in delta
+    assert "observe_trigger_reason_counts_delta" in delta
     assert comparison_summary["task_deltas"]
 
 
@@ -737,12 +737,12 @@ def test_cli_uses_task_type_specific_recall_strategy_for_bug_fix(tmp_path: Path)
     assert "写入状态：未写入" in report_text
 
 
-def test_cli_verify_failure_only_reflects_when_verification_is_missing(tmp_path: Path) -> None:
+def test_cli_verify_failure_only_observes_when_verification_is_missing(tmp_path: Path) -> None:
     output_root = tmp_path / "runs"
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text(
-        "# 项目说明\n\n这里用于验证 reflect 触发策略。\n",
+        "# 项目说明\n\n这里用于验证 observe 触发策略。\n",
         encoding="utf-8",
     )
     (repo_root / "app.py").write_text(
@@ -755,13 +755,13 @@ def test_cli_verify_failure_only_reflects_when_verification_is_missing(tmp_path:
         "-m",
         "cli",
         "--task",
-        "检查 reflect 策略",
+        "检查 observe 策略",
         "--repo-root",
         str(repo_root),
         "--output-root",
         str(output_root),
         "--config-name",
-        "verify_failure_only_reflect",
+        "verify_failure_only_observe",
     ]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path.cwd() / "src")
@@ -780,19 +780,19 @@ def test_cli_verify_failure_only_reflects_when_verification_is_missing(tmp_path:
         for event in trace_events
         if event["event_type"] == "state_transitioned"
     ]
-    assert transition_targets[:5] == ["ingest", "analyze", "plan", "act", "reflect"]
+    assert transition_targets[:5] == ["ingest", "analyze", "plan", "act", "observe"]
     assert transition_targets[-2:] == ["verify", "finalize"]
     assert transition_targets.count("verify") == 1
-    assert transition_targets.count("reflect") >= 1
+    assert transition_targets.count("observe") >= 1
 
     verification_payload = next(event["payload"] for event in trace_events if event["event_type"] == "verification_result")
     assert verification_payload["details"]["verification_mode"] == "missing_task_verification"
     run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
-    assert run_finished_payload["stop_reason"]["details"]["reflect_triggered"] is True
-    assert run_finished_payload["stop_reason"]["details"]["reflect_trigger_reason"] == "after_act"
+    assert run_finished_payload["stop_reason"]["details"]["observe_triggered"] is True
+    assert run_finished_payload["stop_reason"]["details"]["observe_trigger_reason"] == "after_act"
 
     report_text = (run_dir / "report.md").read_text(encoding="utf-8")
-    assert "reflect：已触发" in report_text
+    assert "observe：已触发" in report_text
     assert "任务未配置 `verify_commands` 或 `verify_rules`" in report_text
 
 
@@ -1388,5 +1388,6 @@ def test_cli_uses_configured_summary_max_length_for_long_term_memory(tmp_path: P
     assert len(long_term_entry["summary"]) == 40
     assert long_term_entry["summary"].endswith("…")
     assert long_term_entry["evidence"]["original_summary_length"] > 40
+
 
 

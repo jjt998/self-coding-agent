@@ -1032,7 +1032,7 @@ def _build_phase_4_report(
             )
     failure_diagnostic_summary = "\n".join(failure_diagnostic_lines)
     completed_states = " -> ".join(runtime_state.completed_states)
-    reflect_status = "已触发" if runtime_state.reflect_triggered else "未触发"
+    observe_status = "已触发" if runtime_state.observe_triggered else "未触发"
     verification_result = runtime_state.verification_result
     verification_status = "通过" if verification_result and verification_result.passed else "未通过"
     verification_summary = verification_result.summary if verification_result else "尚未生成验证结果。"
@@ -1045,14 +1045,14 @@ def _build_phase_4_report(
     ]
     changed_files_summary = "\n".join(changed_file_lines) if changed_file_lines else "- 暂无变更文件。"
 
-    reflect_content = runtime_state.reflect_content
-    if reflect_content:
-        observation = reflect_content.get("observation", {})
+    observe_content = runtime_state.observe_content
+    if observe_content:
+        observation = observe_content.get("observation", {})
         if not isinstance(observation, dict):
             observation = {}
-        signals = reflect_content.get("signals", [])
-        failed_tools = reflect_content.get("failed_tools", [])
-        recent_tool_results = reflect_content.get("recent_tool_results", [])
+        signals = observe_content.get("signals", [])
+        failed_tools = observe_content.get("failed_tools", [])
+        recent_tool_results = observe_content.get("recent_tool_results", [])
         recent_tool_lines: list[str] = []
         if isinstance(recent_tool_results, list):
             for item in recent_tool_results[-5:]:
@@ -1063,8 +1063,8 @@ def _build_phase_4_report(
                     if field_name in item:
                         parts.append(f"{field_name}={item.get(field_name)}")
                 recent_tool_lines.append("; ".join(parts))
-        reflect_content_summary = (
-            f"- trigger: `{reflect_content.get('trigger', 'unknown')}`\n"
+        observe_content_summary = (
+            f"- trigger: `{observe_content.get('trigger', 'unknown')}`\n"
             f"- signals: `{', '.join(str(item) for item in signals) or 'none'}`\n"
             f"- changed files: `{', '.join(str(item) for item in observation.get('changed_files', [])) or 'none'}`\n"
             f"- failed tool count: `{observation.get('failed_tool_count', 0)}`\n"
@@ -1072,7 +1072,7 @@ def _build_phase_4_report(
             f"- recent tool results: `{ ' | '.join(recent_tool_lines) if recent_tool_lines else 'none' }`"
         )
     else:
-        reflect_content_summary = "- 未生成 reflect_content。"
+        observe_content_summary = "- 未生成 observe_content。"
 
     model_decision = runtime_state.model_decision
     if model_decision:
@@ -1203,8 +1203,8 @@ def _build_phase_4_report(
         f"- 总步数：`{runtime_state.step_count}`\n"
         f"- 最大求解轮数：`{runtime_state.max_steps}`\n"
         f"- 实际求解轮数：`{runtime_state.iteration_count}`\n"
-        f"- reflect：{reflect_status}\n"
-        f"- reflect 次数：`{runtime_state.reflect_count}`\n"
+        f"- observe：{observe_status}\n"
+        f"- observe 次数：`{runtime_state.observe_count}`\n"
         f"- stop reason：`{stop_reason_code}`\n"
         f"- stop reason 说明：{stop_reason_text}\n"
         f"\n## 失败诊断\n\n"
@@ -1215,7 +1215,7 @@ def _build_phase_4_report(
         f"- 事实摘要：{observation_summary}\n"
         f"{changed_files_summary}\n"
         f"\n## 反思反馈\n\n"
-        f"{reflect_content_summary}\n"
+        f"{observe_content_summary}\n"
         f"\n## 模型返回摘要\n\n"
         f"{model_response_summary}\n"
         f"\n## Token 消耗\n\n"
@@ -1349,3 +1349,4 @@ def _build_phase_4_report(
         f"- 最终验证是否通过：`{'true' if final_verification_passed else 'false'}`\n"
     )
     return base_report + appendix
+

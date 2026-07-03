@@ -1,6 +1,6 @@
 # self-coding-agent
 
-`self-coding-agent` 是一个用于学习和研究 coding agent harness 的本地实验项目。它的重点不是做一个完整 IDE Agent，而是把“模型决策、工具执行、事实反思、最终验证、评测、策略对比”这些环节拆成可追踪、可复现、可实验的最小闭环。
+`self-coding-agent` 是一个用于学习和研究 coding agent harness 的本地实验项目。它的重点不是做一个完整 IDE Agent，而是把“模型决策、工具执行、事实观察、最终验证、评测、策略对比”这些环节拆成可追踪、可复现、可实验的最小闭环。
 
 当前项目处于 `Phase 9：真实任务最小闭环`。核心目标是逐步把早期 stub loop 替换成可用于真实代码任务的最小求解链路。
 
@@ -8,9 +8,9 @@
 
 - 单次任务运行：生成 `trace.jsonl`、`report.md`、`config_snapshot.json` 等运行产物。
 - OpenAI 兼容模型决策层：配置只支持 `openai_compatible`，默认使用 DeepSeek 的 OpenAI-compatible endpoint 和 `DEEPSEEK_API_KEY`。
-- 最小多轮 loop：默认配置 `runtime.max_steps = 15`，流程为 `ingest -> analyze -> (plan -> act -> reflect)* -> verify -> finalize`；`verify` 只在求解阶段退出后执行一次。
+- 最小多轮 loop：默认配置 `runtime.max_steps = 15`，流程为 `ingest -> analyze -> (plan -> act -> observe)* -> verify -> finalize`；`verify` 只在求解阶段退出后执行一次。
 - 核心工具：`search_text`、`read_file`、`read_file_structure_summary`、`read_file_range`、`apply_patch`、`replace_lines`、`run_command`、`git_diff`。
-- 反思事实压缩：每轮 `act` 后固定进入 `reflect`，记录工具结果、失败工具、diff 信号、文件上下文缓存、stale/fresh 状态和轻量 signals；不再携带验证结果。
+- 观察事实压缩：每轮 `act` 后固定进入 `observe`，记录工具结果、失败工具、diff 信号、文件上下文缓存、stale/fresh 状态和轻量 signals；不再携带验证结果。
 - 任务级验证：支持 `verify_commands` 和结构化 `verify_rules`；未配置任务级验证时会以 `missing_task_verification` 失败，不再回退到演示型检查。
 - 结构化失败收口：支持 `setup_failed`、`verification_failed`、`model_error` 等 stop reason；达到求解预算时会记录 `solve_loop_exit_reason=max_steps_reached`，最终 stop reason 仍由末尾验证结果决定。
 - 两层上下文事实输入：`initial_guide` 在 analyze 阶段生成首轮任务、仓库召回和长期记忆指导；每轮 plan 前重新生成 `context_snapshot`，包含 working_memory、fresh/stale 文件上下文、diff/command 结果和 recent_facts；链路中不再传递旧跨轮反馈字段或 `previous_verification`。
@@ -81,7 +81,7 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
 ```powershell
 & 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
   --eval-task-file eval_tasks\sample_batch.json `
-  --compare-strategies default,memory_off,verify_failure_only_reflect `
+  --compare-strategies default,memory_off,verify_failure_only_observe `
   --repo-root . `
   --output-root runs
 ```
@@ -115,8 +115,8 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
   "context": {
     "strategy": "file_recall_context"
   },
-  "reflect": {
-    "strategy": "low_progress_plus_verify_reflect"
+  "observe": {
+    "strategy": "after_act_observe"
   },
   "memory": {
     "enabled": true,
@@ -131,11 +131,11 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
 - `default`
 - `memory_off`
 - `naive_recent_context`
-- `verify_failure_only_reflect`
+- `verify_failure_only_observe`
 - `high_weak_conflict_penalty`
 - `short_memory_summary`
 
-说明：当前 loop 已固定为每轮 `act` 后执行 `reflect`，`reflect.strategy` 仍会进入 eval/comparison 报告用于兼容旧配置命名，但不再决定“无进展才触发”或“验证失败才触发”的运行分支。
+说明：当前 loop 已固定为每轮 `act` 后执行 `observe`，`observe.strategy` 仍会进入 eval/comparison 报告用于兼容旧配置命名，但不再决定“无进展才触发”或“验证失败才触发”的运行分支。
 
 ## 模型配置与排障
 
@@ -144,7 +144,7 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
 - `timeout_seconds` 默认配置是 `100`；网络超时、DNS 错误、HTTP 非 2xx 都会在 trace/report 中显示安全摘要。
 - 常见 `model_error` 类型包括 `ModelConfigError`、`ModelRequestError`、`ModelResponseError`。
 - 测试环境可使用 `SELF_CODING_AGENT_FAKE_MODEL_RESPONSE` 注入假响应，仍需设置测试用 API key 环境变量。
-- 排查模型为什么只读文件、不修改文件或没有响应 reflect feedback 时，优先查看 `trace.jsonl` 中的 `model_raw_response` 和 `model_decision`。前者是模型显式返回的原始 JSON content，后者是解析后的结构化决策。
+- 排查模型为什么只读文件、不修改文件或没有接上 `context_snapshot.recent_facts` 时，优先查看 `trace.jsonl` 中的 `model_raw_response` 和 `model_decision`。前者是模型显式返回的原始 JSON content，后者是解析后的结构化决策。
 - `model_decision` 必须包含 `summary`、`rationale`、`planned_actions`、`working_memory`、`tool_calls`；其中只有 `tool_calls` 会被 `act` 阶段实际执行。
 - `model_decision.planned_actions` 是本轮可读计划说明，不是跨轮任务队列；跨轮记忆应写入模型自维护的四字段 `working_memory`，下一轮会通过 `context_snapshot.working_memory` 回填给模型，并附带 harness 从上一轮 `rationale` 注入的 `last_rational`。
 - 工具 schema 会同时约束字段名和字段类型；非法字段、缺少必填字段或类型不匹配会进入 `ModelResponseError`，并在 details 中暴露 `field_path`、`tool_name`、`expected_type`、`actual_type` 等安全摘要。
@@ -259,7 +259,7 @@ MVP 冻结验收命令见 `docs/MVP_ACCEPTANCE.md`。
 ## 当前限制
 
 - loop 已拆分为独立状态处理方法，并已清理旧 Phase 3 固定工具序列语义；后续仍需继续增强真实任务求解策略。
-- reflect feedback 现在是下一轮 plan 的事实输入，不再作为 harness 硬约束；后续仍可继续增强事实压缩质量。
+- `observe_content` 现在是下一轮 plan 的事实输入来源，不再作为 harness 硬约束；后续仍可继续增强事实压缩质量。
 - 默认配置最大求解轮数为 `15`；部分对比策略仍保留较小预算用于实验。CLI 暂不提供单次运行覆盖 `runtime.max_steps` 的专门参数，需通过配置文件调整。
 - CLI 暂不支持单次运行直接传入 `verify_commands` / `verify_rules`，该能力目前只在 eval task schema 中使用。
 
@@ -273,3 +273,4 @@ MVP 冻结验收命令见 `docs/MVP_ACCEPTANCE.md`。
 - `docs/DEVELOPMENT_PLAYBOOK.md`
 
 按项目流程，更新当前状态文档前需要先把旧版本归档到 `dev_process_history/`。
+

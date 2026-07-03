@@ -31,7 +31,7 @@ class AgentState(str, Enum):
     ANALYZE = "analyze"
     PLAN = "plan"
     ACT = "act"
-    REFLECT = "reflect"
+    OBSERVE = "observe"
     VERIFY = "verify"
     FINALIZE = "finalize"
 
@@ -71,12 +71,12 @@ class RuntimeState:
     current_state: str = "bootstrap"
     completed_states: list[str] = field(default_factory=list)
     step_count: int = 0
-    reflect_triggered: bool = False
-    reflect_trigger_reason: str = ""
-    reflect_count: int = 0
-    reflect_trigger_reasons: list[str] = field(default_factory=list)
-    reflect_content: dict[str, Any] = field(default_factory=dict)
-    reflect_content_history: list[dict[str, Any]] = field(default_factory=list)
+    observe_triggered: bool = False
+    observe_trigger_reason: str = ""
+    observe_count: int = 0
+    observe_trigger_reasons: list[str] = field(default_factory=list)
+    observe_content: dict[str, Any] = field(default_factory=dict)
+    observe_content_history: list[dict[str, Any]] = field(default_factory=list)
     current_iteration: int = 0
     iteration_count: int = 0
     max_steps: int = 4
@@ -166,9 +166,9 @@ class LoopOrchestrator:
                     self._finish_with_model_error(runtime_state=runtime_state, error=error)
                     return runtime_state
 
-            self._record_reflect_trigger(runtime_state=runtime_state, reason="after_act")
+            self._record_observe_trigger(runtime_state=runtime_state, reason="after_act")
             self._execute_state(
-                state=AgentState.REFLECT,
+                state=AgentState.OBSERVE,
                 settings=settings,
                 runtime_state=runtime_state,
                 config_data=config_data,
@@ -296,17 +296,17 @@ class LoopOrchestrator:
             "completed_states": runtime_state.completed_states,
             "max_steps": runtime_state.max_steps,
             "iteration_count": runtime_state.iteration_count,
-            "reflect_triggered": runtime_state.reflect_triggered,
-            "reflect_trigger_reason": runtime_state.reflect_trigger_reason,
-            "reflect_count": runtime_state.reflect_count,
-            "reflect_trigger_reasons": list(runtime_state.reflect_trigger_reasons),
+            "observe_triggered": runtime_state.observe_triggered,
+            "observe_trigger_reason": runtime_state.observe_trigger_reason,
+            "observe_count": runtime_state.observe_count,
+            "observe_trigger_reasons": list(runtime_state.observe_trigger_reasons),
             "verification_passed": verification_passed,
             "final_verification_passed": verification_passed,
             "solve_loop_exit_reason": runtime_state.solve_loop_exit_reason,
             "verification_failure": self._build_verification_failure_details(runtime_state=runtime_state),
             "changed_files": runtime_state.changed_files,
             "failed_tool_count": runtime_state.failed_tool_count,
-            "reflect_content": dict(runtime_state.reflect_content),
+            "observe_content": dict(runtime_state.observe_content),
             "working_memory": deepcopy(runtime_state.working_memory),
             "token_usage": dict(runtime_state.token_usage),
         }
@@ -326,12 +326,12 @@ class LoopOrchestrator:
                 return 2
         return 2
 
-    def _record_reflect_trigger(self, runtime_state: RuntimeState, reason: str) -> None:
-        """记录一次固定 reflect，同时保留旧的单值字段兼容 eval。"""
-        runtime_state.reflect_triggered = True
-        runtime_state.reflect_trigger_reason = reason
-        runtime_state.reflect_trigger_reasons.append(reason)
-        runtime_state.reflect_count += 1
+    def _record_observe_trigger(self, runtime_state: RuntimeState, reason: str) -> None:
+        """记录一次固定 observe，同时保留单值字段方便 eval 聚合。"""
+        runtime_state.observe_triggered = True
+        runtime_state.observe_trigger_reason = reason
+        runtime_state.observe_trigger_reasons.append(reason)
+        runtime_state.observe_count += 1
 
     def _finish_with_model_error(self, runtime_state: RuntimeState, error: ModelError) -> None:
         """模型决策失败时立即收口，不再进入末尾最终验证。"""
@@ -364,13 +364,15 @@ class LoopOrchestrator:
             )
         )
 
-    def _get_reflect_strategy(self, config_data: dict[str, Any]) -> str:
-        """从配置里读取当前 reflect 策略，缺省时回落到现有默认行为。"""
-        reflect_config = config_data.get("reflect", {})
-        if not isinstance(reflect_config, dict):
-            return "low_progress_plus_verify_reflect"
-        strategy = str(reflect_config.get("strategy", "low_progress_plus_verify_reflect")).strip()
-        return strategy or "low_progress_plus_verify_reflect"
+    def _get_observe_strategy(self, config_data: dict[str, Any]) -> str:
+        """从配置里读取当前 observe 策略，短期兼容旧 reflect.strategy。"""
+        observe_config = config_data.get("observe", {})
+        if not isinstance(observe_config, dict):
+            observe_config = config_data.get("reflect", {})
+        if not isinstance(observe_config, dict):
+            return "after_act_observe"
+        strategy = str(observe_config.get("strategy", "after_act_observe")).strip()
+        return strategy or "after_act_observe"
 
     def _transition(self, runtime_state: RuntimeState, to_state: AgentState, reason: str) -> None:
         """写入状态迁移事件，并同步更新当前状态指针。"""
@@ -709,8 +711,8 @@ class LoopOrchestrator:
             )
         if state is AgentState.ACT:
             return self._run_act(runtime_state=runtime_state, tool_runner=tool_runner)
-        if state is AgentState.REFLECT:
-            return self._run_reflect(runtime_state=runtime_state)
+        if state is AgentState.OBSERVE:
+            return self._run_observe(runtime_state=runtime_state)
         if state is AgentState.VERIFY:
             return self._run_verify(
                 settings=settings,
@@ -732,9 +734,11 @@ class LoopOrchestrator:
         model_config = config_data.get("model", {})
         if not isinstance(model_config, dict):
             model_config = {}
-        reflect_config = config_data.get("reflect", {})
-        if not isinstance(reflect_config, dict):
-            reflect_config = {}
+        observe_config = config_data.get("observe", {})
+        if not isinstance(observe_config, dict):
+            observe_config = config_data.get("reflect", {})
+        if not isinstance(observe_config, dict):
+            observe_config = {}
         payload = {
             "summary": "Task input and run constraints captured.",
             "task": runtime_state.task,
@@ -751,7 +755,7 @@ class LoopOrchestrator:
             "config_keys": sorted(config_data.keys()),
             "model_provider": model_config.get("provider", ""),
             "model_name": model_config.get("name", ""),
-            "reflect_strategy": reflect_config.get("strategy", self._get_reflect_strategy(config_data=config_data)),
+            "observe_strategy": observe_config.get("strategy", self._get_observe_strategy(config_data=config_data)),
         }
         self.trace_writer.write_event(TraceEvent(event_type="task_ingested", payload=payload))
         return payload
@@ -916,7 +920,7 @@ class LoopOrchestrator:
                     **runtime_state.model_decision.to_dict(),
                     "iteration": runtime_state.current_iteration,
                     "has_context_snapshot": runtime_state.context_snapshot is not None,
-                    "has_reflect_content": bool(runtime_state.reflect_content),
+                    "has_observe_content": bool(runtime_state.observe_content),
                     "run_token_usage": dict(runtime_state.token_usage),
                 },
             )
@@ -946,13 +950,13 @@ class LoopOrchestrator:
             "tool_calls": [tool_call.to_trace_payload() for tool_call in tool_calls],
         }
 
-    def _run_reflect(self, runtime_state: RuntimeState) -> dict[str, Any]:
+    def _run_observe(self, runtime_state: RuntimeState) -> dict[str, Any]:
         """为下一轮 plan 生成事实型反馈。"""
-        reflect_content = self._build_reflect_content(runtime_state=runtime_state)
-        runtime_state.reflect_content = reflect_content
-        runtime_state.reflect_content_history.append(reflect_content)
-        self.trace_writer.write_event(TraceEvent(event_type="reflect_content", payload=reflect_content))
-        return reflect_content
+        observe_content = self._build_observe_content(runtime_state=runtime_state)
+        runtime_state.observe_content = observe_content
+        runtime_state.observe_content_history.append(observe_content)
+        self.trace_writer.write_event(TraceEvent(event_type="observe_content", payload=observe_content))
+        return observe_content
 
     def _run_verify(
         self,
@@ -1004,8 +1008,8 @@ class LoopOrchestrator:
             "solve_loop_exit_reason": runtime_state.solve_loop_exit_reason,
             "changed_files": list(runtime_state.changed_files),
             "failed_tool_count": runtime_state.failed_tool_count,
-            "reflect_count": runtime_state.reflect_count,
-            "reflect_trigger_reasons": list(runtime_state.reflect_trigger_reasons),
+            "observe_count": runtime_state.observe_count,
+            "observe_trigger_reasons": list(runtime_state.observe_trigger_reasons),
             "iteration_count": runtime_state.iteration_count,
             "max_steps": runtime_state.max_steps,
             "tool_execution_count": len(runtime_state.tool_executions),
@@ -1208,7 +1212,7 @@ class LoopOrchestrator:
         changed_files = list(dict.fromkeys(changed_files))
         successful_tools = list(dict.fromkeys(successful_tools))
         failed_tool_count = len(failed_execution_ids)
-        signals = self._build_reflect_signals(
+        signals = self._build_observe_signals(
             edit_attempted=edit_attempted,
             latest_git_diff_changed_file_count=latest_git_diff_changed_file_count,
             failed_tool_count=failed_tool_count,
@@ -1236,7 +1240,7 @@ class LoopOrchestrator:
             "signals": signals,
         }
 
-    def _build_reflect_signals(
+    def _build_observe_signals(
         self,
         edit_attempted: bool,
         latest_git_diff_changed_file_count: int | None,
@@ -1315,8 +1319,8 @@ class LoopOrchestrator:
             rule_types.append("verify_rule")
         return rule_types
 
-    def _build_reflect_content(self, runtime_state: RuntimeState) -> dict[str, Any]:
-        """构造纯事实型 reflect 反馈，不再附带 verification 子段。"""
+    def _build_observe_content(self, runtime_state: RuntimeState) -> dict[str, Any]:
+        """构造纯事实型 observe 反馈，不再附带 verification 子段。"""
         self._update_file_context_cache(runtime_state=runtime_state)
         observation = self._build_tool_fact_observation(runtime_state=runtime_state)
         failed_tool_summaries = [
@@ -1337,9 +1341,9 @@ class LoopOrchestrator:
         ]
 
         return {
-            "summary": "已生成事实型 reflect 反馈。",
+            "summary": "已生成事实型 observe 反馈。",
             "iteration": runtime_state.current_iteration,
-            "trigger": runtime_state.reflect_trigger_reason or "unknown",
+            "trigger": runtime_state.observe_trigger_reason or "unknown",
             "observation": observation,
             "signals": list(observation.get("signals", [])),
             "failed_tools": failed_tool_summaries,
@@ -1555,3 +1559,4 @@ class LoopOrchestrator:
             and summary.get("error") == "old_text_not_found"
             for summary in failed_tool_summaries
         )
+

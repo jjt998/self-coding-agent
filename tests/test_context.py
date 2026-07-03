@@ -81,7 +81,7 @@ def test_context_snapshot_injects_last_rational_into_working_memory(tmp_path: Pa
             "next_risks": ["还没验证最终 diff"],
         },
         model_decision=SimpleNamespace(rationale="上一轮判断应先确认 README 当前内容。  "),
-        reflect_content={},
+        observe_content={},
         file_context_cache={},
         latest_diff_snapshot=None,
         latest_command_result=None,
@@ -92,3 +92,4 @@ def test_context_snapshot_injects_last_rational_into_working_memory(tmp_path: Pa
 
     assert working_memory["confirmed_facts"] == ["README 已被读取"]
     assert working_memory["last_rational"] == "上一轮判断应先确认 README 当前内容。"
+

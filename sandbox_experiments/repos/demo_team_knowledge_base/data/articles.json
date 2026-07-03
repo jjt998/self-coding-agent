@@ -1,0 +1,38 @@
+[
+  {
+    "id": 1,
+    "title": "Python service onboarding",
+    "owner": "alice",
+    "status": "published",
+    "tags": ["onboarding", "python"],
+    "summary": "How to set up the local Python service.",
+    "body": "Install Python, create a virtual environment, and run the service smoke tests before opening a pull request."
+  },
+  {
+    "id": 2,
+    "title": "Release checklist",
+    "owner": "ben",
+    "status": "draft",
+    "tags": ["release", "process"],
+    "summary": "Checklist for weekly release coordination.",
+    "body": "Confirm changelog entries, notify support, verify rollout notes, and prepare rollback instructions."
+  },
+  {
+    "id": 3,
+    "title": "Incident review template",
+    "owner": "alice",
+    "status": "published",
+    "tags": ["incident", "process"],
+    "summary": "Template for writing clear incident reviews.",
+    "body": "Capture impact, timeline, contributing factors, customer communication, and follow-up actions."
+  },
+  {
+    "id": 4,
+    "title": "Support escalation playbook",
+    "owner": "carol",
+    "status": "published",
+    "tags": ["support", "onboarding"],
+    "summary": "How support should escalate urgent customer issues.",
+    "body": "Triage the issue, collect account context, assign severity, and notify the owning engineering team."
+  }
+]

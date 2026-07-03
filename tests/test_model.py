@@ -375,7 +375,7 @@ def test_openai_compatible_adapter_includes_factual_context_snapshot(monkeypatch
     assert "read_file_structure_summary -> read_file_range" in prompt_text
     assert "不要仅因为文件历史上 stale 过就重复读取同一函数" in prompt_text
     assert "runtime_feedback" not in prompt_text
-    assert "previous_reflect_feedback" not in prompt_text
+    assert "previous_observe_feedback" not in prompt_text
     assert "replan_constraints" not in prompt_text
     assert "avoid_exact_tool_sequence" not in prompt_text
 
@@ -888,4 +888,5 @@ class _BytesBody:
 
     def read(self) -> bytes:
         return self.body
+
 

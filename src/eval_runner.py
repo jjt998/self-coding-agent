@@ -89,9 +89,9 @@ class EvalRunResult:
     failure_taxonomy: str | None = None
     failure_taxonomy_tags: list[str] = field(default_factory=list)
     verify_count: int = 0
-    reflect_count: int = 0
-    reflect_triggered: bool = False
-    reflect_trigger_reason: str = ""
+    observe_count: int = 0
+    observe_triggered: bool = False
+    observe_trigger_reason: str = ""
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
@@ -99,7 +99,7 @@ class EvalRunResult:
     missing_usage_count: int = 0
     config_name: str = ""
     context_strategy: str = ""
-    reflect_strategy: str = ""
+    observe_strategy: str = ""
     memory_enabled: bool = False
     memory_strategy: str = ""
 
@@ -123,11 +123,11 @@ class EvalBatchResult:
     average_steps: float
     average_tool_calls: float
     average_verify_count: float
-    average_reflect_count: float
+    average_observe_count: float
     average_prompt_tokens: float
     average_completion_tokens: float
     average_total_tokens: float
-    reflect_trigger_rate: float
+    observe_trigger_rate: float
     clean_pass_count: int
     clean_pass_rate: float
     warning_pass_count: int
@@ -148,11 +148,11 @@ class EvalBatchResult:
     failure_taxonomy_counts: dict[str, int] = field(default_factory=dict)
     failure_taxonomy_tag_counts: dict[str, int] = field(default_factory=dict)
     verification_failure_counts: dict[str, int] = field(default_factory=dict)
-    reflect_trigger_reason_counts: dict[str, int] = field(default_factory=dict)
+    observe_trigger_reason_counts: dict[str, int] = field(default_factory=dict)
     diagnostic_label_counts: dict[str, int] = field(default_factory=dict)
     config_names: list[str] = field(default_factory=list)
     context_strategies: list[str] = field(default_factory=list)
-    reflect_strategies: list[str] = field(default_factory=list)
+    observe_strategies: list[str] = field(default_factory=list)
     memory_strategies: list[str] = field(default_factory=list)
     runs: list[EvalRunResult] = field(default_factory=list)
 
@@ -170,7 +170,7 @@ class StrategySpec:
     name: str
     config_name: str
     context_strategy: str
-    reflect_strategy: str
+    observe_strategy: str
     memory_enabled: bool
     memory_strategy: str
 
@@ -267,7 +267,7 @@ def load_strategy_specs(strategy_names: list[str]) -> list[StrategySpec]:
                 name=config_name,
                 config_name=config_name,
                 context_strategy=_extract_context_strategy(config_data),
-                reflect_strategy=_extract_reflect_strategy(config_data),
+                observe_strategy=_extract_observe_strategy(config_data),
                 memory_enabled=_extract_memory_enabled(config_data),
                 memory_strategy=_extract_memory_strategy(config_data),
             )
@@ -422,14 +422,14 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
     # 这些过程指标都不额外存一份，而是直接从 trace 事件里现算，保证口径一致。
     tool_call_count = sum(1 for event in trace_events if event.get("event_type") == "tool_called")
     verify_count = 1 if verification_payload else 0
-    reflect_count = sum(
+    observe_count = sum(
         1
         for event in trace_events
         if event.get("event_type") == "state_transitioned"
-        and str(event.get("payload", {}).get("to_state", "")).strip() == "reflect"
+        and str(event.get("payload", {}).get("to_state", "")).strip() == "observe"
     )
-    reflect_trigger_reason = str(stop_reason_details.get("reflect_trigger_reason", "")).strip()
-    reflect_triggered = bool(stop_reason_details.get("reflect_triggered")) or reflect_count > 0
+    observe_trigger_reason = str(stop_reason_details.get("observe_trigger_reason", "")).strip()
+    observe_triggered = bool(stop_reason_details.get("observe_triggered")) or observe_count > 0
     passed = bool((verification_payload or {}).get("passed"))
     verification_summary = str((verification_payload or {}).get("summary", "")).strip()
     outcome = _classify_eval_outcome(
@@ -479,9 +479,9 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
             stop_reason_details=stop_reason_details,
         ),
         verify_count=verify_count,
-        reflect_count=reflect_count,
-        reflect_triggered=reflect_triggered,
-        reflect_trigger_reason=reflect_trigger_reason,
+        observe_count=observe_count,
+        observe_triggered=observe_triggered,
+        observe_trigger_reason=observe_trigger_reason,
         prompt_tokens=_normalize_optional_int(token_usage.get("prompt_tokens")) or 0,
         completion_tokens=_normalize_optional_int(token_usage.get("completion_tokens")) or 0,
         total_tokens=_normalize_optional_int(token_usage.get("total_tokens")) or 0,
@@ -489,7 +489,7 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
         missing_usage_count=_normalize_optional_int(token_usage.get("missing_usage_count")) or 0,
         config_name=str(config_snapshot.get("config_name", "")).strip(),
         context_strategy=_extract_context_strategy(config_data),
-        reflect_strategy=_extract_reflect_strategy(config_data),
+        observe_strategy=_extract_observe_strategy(config_data),
         memory_enabled=_extract_memory_enabled(config_data),
         memory_strategy=_extract_memory_strategy(config_data),
     )
@@ -502,7 +502,7 @@ def _build_eval_batch_result(eval_name: str, run_results: list[EvalRunResult]) -
     clean_pass_count = sum(1 for item in run_results if item.outcome == "passed_cleanly")
     warning_pass_count = sum(1 for item in run_results if item.outcome == "passed_with_warnings")
     verification_failure_count = sum(1 for item in run_results if item.outcome == "failed_verification")
-    reflect_trigger_count = sum(1 for item in run_results if item.reflect_triggered)
+    observe_trigger_count = sum(1 for item in run_results if item.observe_triggered)
     token_usage_complete_count = sum(1 for item in run_results if item.token_usage_complete)
     total_prompt_tokens = sum(item.prompt_tokens for item in run_results)
     total_completion_tokens = sum(item.completion_tokens for item in run_results)
@@ -533,8 +533,8 @@ def _build_eval_batch_result(eval_name: str, run_results: list[EvalRunResult]) -
     verification_failure_counts = _count_values(
         [check for item in run_results for check in item.failing_checks if check]
     )
-    reflect_trigger_reason_counts = _count_values(
-        [item.reflect_trigger_reason for item in run_results if item.reflect_trigger_reason]
+    observe_trigger_reason_counts = _count_values(
+        [item.observe_trigger_reason for item in run_results if item.observe_trigger_reason]
     )
     diagnostic_label_counts = _count_values(
         [label for item in run_results for label in item.diagnostic_labels if label]
@@ -549,11 +549,11 @@ def _build_eval_batch_result(eval_name: str, run_results: list[EvalRunResult]) -
         average_steps=mean(item.step_count for item in run_results) if run_results else 0.0,
         average_tool_calls=mean(item.tool_call_count for item in run_results) if run_results else 0.0,
         average_verify_count=mean(item.verify_count for item in run_results) if run_results else 0.0,
-        average_reflect_count=mean(item.reflect_count for item in run_results) if run_results else 0.0,
+        average_observe_count=mean(item.observe_count for item in run_results) if run_results else 0.0,
         average_prompt_tokens=mean(item.prompt_tokens for item in run_results) if run_results else 0.0,
         average_completion_tokens=mean(item.completion_tokens for item in run_results) if run_results else 0.0,
         average_total_tokens=mean(item.total_tokens for item in run_results) if run_results else 0.0,
-        reflect_trigger_rate=(reflect_trigger_count / task_count) if task_count else 0.0,
+        observe_trigger_rate=(observe_trigger_count / task_count) if task_count else 0.0,
         clean_pass_count=clean_pass_count,
         clean_pass_rate=(clean_pass_count / task_count) if task_count else 0.0,
         warning_pass_count=warning_pass_count,
@@ -578,11 +578,11 @@ def _build_eval_batch_result(eval_name: str, run_results: list[EvalRunResult]) -
         failure_taxonomy_counts=failure_taxonomy_counts,
         failure_taxonomy_tag_counts=failure_taxonomy_tag_counts,
         verification_failure_counts=verification_failure_counts,
-        reflect_trigger_reason_counts=reflect_trigger_reason_counts,
+        observe_trigger_reason_counts=observe_trigger_reason_counts,
         diagnostic_label_counts=diagnostic_label_counts,
         config_names=sorted({item.config_name for item in run_results if item.config_name}),
         context_strategies=sorted({item.context_strategy for item in run_results if item.context_strategy}),
-        reflect_strategies=sorted({item.reflect_strategy for item in run_results if item.reflect_strategy}),
+        observe_strategies=sorted({item.observe_strategy for item in run_results if item.observe_strategy}),
         memory_strategies=sorted({item.memory_strategy for item in run_results if item.memory_strategy}),
         runs=run_results,
     )
@@ -595,7 +595,7 @@ def _build_eval_summary_markdown(task_file: Path, batch_result: EvalBatchResult)
         line = (
             f"- `{item.task_name}` / outcome `{item.outcome}` / stop reason `{item.stop_reason}` / "
             f"steps `{item.step_count}` / tools `{item.tool_call_count}` / "
-            f"verify `{item.verify_count}` / reflect `{item.reflect_count}` / "
+            f"verify `{item.verify_count}` / observe `{item.observe_count}` / "
             f"tokens `{item.total_tokens}`"
         )
         if not item.token_usage_complete:
@@ -623,7 +623,7 @@ def _build_eval_summary_markdown(task_file: Path, batch_result: EvalBatchResult)
         f"- average steps `{batch_result.average_steps:.2f}`\n"
         f"- average tool calls `{batch_result.average_tool_calls:.2f}`\n"
         f"- average verify `{batch_result.average_verify_count:.2f}`\n"
-        f"- average reflect `{batch_result.average_reflect_count:.2f}`\n"
+        f"- average observe `{batch_result.average_observe_count:.2f}`\n"
         f"- average prompt tokens `{batch_result.average_prompt_tokens:.2f}`\n"
         f"- average completion tokens `{batch_result.average_completion_tokens:.2f}`\n"
         f"- average total tokens `{batch_result.average_total_tokens:.2f}`\n"
@@ -653,8 +653,8 @@ def _build_eval_summary_markdown(task_file: Path, batch_result: EvalBatchResult)
         f"{_build_markdown_count_lines(batch_result.failure_taxonomy_tag_counts, '- no failure taxonomy tags')}\n\n"
         f"## 验证失败检查项\n\n"
         f"{_build_verification_failure_lines(batch_result.verification_failure_counts)}\n\n"
-        f"## Reflect 原因\n\n"
-        f"{_build_markdown_count_lines(batch_result.reflect_trigger_reason_counts, '- no reflect reasons')}\n\n"
+        f"## Observe 原因\n\n"
+        f"{_build_markdown_count_lines(batch_result.observe_trigger_reason_counts, '- no observe reasons')}\n\n"
         f"## 诊断标签\n\n"
         f"{_build_markdown_count_lines(batch_result.diagnostic_label_counts, '- no diagnostic labels')}\n\n"
         f"## 运行明细\n\n"
@@ -704,13 +704,13 @@ def _build_strategy_delta(
         "average_steps_delta": candidate_summary.average_steps - baseline_summary.average_steps,
         "average_tool_calls_delta": candidate_summary.average_tool_calls - baseline_summary.average_tool_calls,
         "average_verify_count_delta": candidate_summary.average_verify_count - baseline_summary.average_verify_count,
-        "average_reflect_count_delta": candidate_summary.average_reflect_count - baseline_summary.average_reflect_count,
+        "average_observe_count_delta": candidate_summary.average_observe_count - baseline_summary.average_observe_count,
         "average_prompt_tokens_delta": candidate_summary.average_prompt_tokens - baseline_summary.average_prompt_tokens,
         "average_completion_tokens_delta": (
             candidate_summary.average_completion_tokens - baseline_summary.average_completion_tokens
         ),
         "average_total_tokens_delta": candidate_summary.average_total_tokens - baseline_summary.average_total_tokens,
-        "reflect_trigger_rate_delta": candidate_summary.reflect_trigger_rate - baseline_summary.reflect_trigger_rate,
+        "observe_trigger_rate_delta": candidate_summary.observe_trigger_rate - baseline_summary.observe_trigger_rate,
         "clean_pass_rate_delta": candidate_summary.clean_pass_rate - baseline_summary.clean_pass_rate,
         "warning_rate_delta": candidate_summary.warning_rate - baseline_summary.warning_rate,
         "verification_failure_rate_delta": (
@@ -731,7 +731,7 @@ def _build_strategy_delta(
             candidate_summary.expectation_miss_rate - baseline_summary.expectation_miss_rate
         ),
         "context_strategy_changed": candidate.strategy.context_strategy != baseline.strategy.context_strategy,
-        "reflect_strategy_changed": candidate.strategy.reflect_strategy != baseline.strategy.reflect_strategy,
+        "observe_strategy_changed": candidate.strategy.observe_strategy != baseline.strategy.observe_strategy,
         "memory_strategy_changed": candidate.strategy.memory_strategy != baseline.strategy.memory_strategy,
         "failure_taxonomy_counts_delta": _build_count_delta(
             baseline_summary.failure_taxonomy_counts,
@@ -745,9 +745,9 @@ def _build_strategy_delta(
             baseline_summary.verification_failure_counts,
             candidate_summary.verification_failure_counts,
         ),
-        "reflect_trigger_reason_counts_delta": _build_count_delta(
-            baseline_summary.reflect_trigger_reason_counts,
-            candidate_summary.reflect_trigger_reason_counts,
+        "observe_trigger_reason_counts_delta": _build_count_delta(
+            baseline_summary.observe_trigger_reason_counts,
+            candidate_summary.observe_trigger_reason_counts,
         ),
     }
 
@@ -760,12 +760,12 @@ def _build_strategy_comparison_markdown(comparison_result: StrategyComparisonRes
             f" ({'baseline' if item.strategy.name == comparison_result.baseline_strategy else 'candidate'})"
             f": config `{item.strategy.config_name}`, "
             f"context `{item.strategy.context_strategy}`, "
-            f"reflect `{item.strategy.reflect_strategy}`, "
+            f"observe `{item.strategy.observe_strategy}`, "
             f"memory `{item.strategy.memory_strategy}`, "
             f"success rate `{item.summary.success_rate:.2f}`, "
             f"average steps `{item.summary.average_steps:.2f}`, "
             f"average verify `{item.summary.average_verify_count:.2f}`, "
-            f"average reflect `{item.summary.average_reflect_count:.2f}`"
+            f"average observe `{item.summary.average_observe_count:.2f}`"
         )
         for item in comparison_result.strategies
     ]
@@ -778,21 +778,21 @@ def _build_strategy_comparison_markdown(comparison_result: StrategyComparisonRes
             f"average steps delta `{delta['average_steps_delta']:.2f}`, "
             f"average tool calls delta `{delta['average_tool_calls_delta']:.2f}`, "
             f"average verify delta `{delta['average_verify_count_delta']:.2f}`, "
-            f"average reflect delta `{delta['average_reflect_count_delta']:.2f}`, "
+            f"average observe delta `{delta['average_observe_count_delta']:.2f}`, "
             f"average prompt tokens delta `{delta['average_prompt_tokens_delta']:.2f}`, "
             f"average completion tokens delta `{delta['average_completion_tokens_delta']:.2f}`, "
             f"average total tokens delta `{delta['average_total_tokens_delta']:.2f}`, "
             f"total tokens delta `{delta['total_tokens_delta']:+d}`, "
             f"token usage complete delta `{delta['token_usage_complete_count_delta']:+d}`, "
             f"token usage incomplete delta `{delta['token_usage_incomplete_count_delta']:+d}`, "
-            f"reflect trigger rate delta `{delta['reflect_trigger_rate_delta']:.2f}`, "
+            f"observe trigger rate delta `{delta['observe_trigger_rate_delta']:.2f}`, "
             f"context changed `{delta['context_strategy_changed']}`, "
-            f"reflect changed `{delta['reflect_strategy_changed']}`, "
+            f"observe changed `{delta['observe_strategy_changed']}`, "
             f"memory changed `{delta['memory_strategy_changed']}`, "
             f"failure taxonomy delta `{_format_count_delta(delta['failure_taxonomy_counts_delta'])}`, "
             f"failure taxonomy tags delta `{_format_count_delta(delta['failure_taxonomy_tag_counts_delta'])}`, "
             f"verification checks delta `{_format_count_delta(delta['verification_failure_counts_delta'])}`, "
-            f"reflect 原因 delta `{_format_count_delta(delta['reflect_trigger_reason_counts_delta'])}`"
+            f"observe 原因 delta `{_format_count_delta(delta['observe_trigger_reason_counts_delta'])}`"
         )
         for delta in comparison_result.deltas
     ]
@@ -813,9 +813,9 @@ def _build_strategy_comparison_markdown(comparison_result: StrategyComparisonRes
                 f"steps delta `{item['step_count_delta']:+d}`, "
                 f"tool calls delta `{item['tool_call_count_delta']:+d}`, "
                 f"verify delta `{item['verify_count_delta']:+d}`, "
-                f"reflect delta `{item['reflect_count_delta']:+d}`, "
+                f"observe delta `{item['observe_count_delta']:+d}`, "
                 f"total tokens delta `{item['total_tokens_delta']:+d}`, "
-                f"reflect reason `{item['baseline_reflect_trigger_reason']}` -> `{item['candidate_reflect_trigger_reason']}`, "
+                f"observe reason `{item['baseline_observe_trigger_reason']}` -> `{item['candidate_observe_trigger_reason']}`, "
                 f"failure taxonomy `{item['baseline_failure_taxonomy']}` -> `{item['candidate_failure_taxonomy']}`, "
                 f"baseline run `{item['baseline_run_id']}` @ `{item['baseline_run_dir']}`, "
                 f"candidate run `{item['candidate_run_id']}` @ `{item['candidate_run_dir']}`"
@@ -870,15 +870,15 @@ def _build_strategy_task_delta(
                 - (baseline_run.tool_call_count if baseline_run else 0),
                 "verify_count_delta": (candidate_run.verify_count if candidate_run else 0)
                 - (baseline_run.verify_count if baseline_run else 0),
-                "reflect_count_delta": (candidate_run.reflect_count if candidate_run else 0)
-                - (baseline_run.reflect_count if baseline_run else 0),
+                "observe_count_delta": (candidate_run.observe_count if candidate_run else 0)
+                - (baseline_run.observe_count if baseline_run else 0),
                 "total_tokens_delta": (candidate_run.total_tokens if candidate_run else 0)
                 - (baseline_run.total_tokens if baseline_run else 0),
-                "baseline_reflect_trigger_reason": (
-                    baseline_run.reflect_trigger_reason if baseline_run and baseline_run.reflect_trigger_reason else "none"
+                "baseline_observe_trigger_reason": (
+                    baseline_run.observe_trigger_reason if baseline_run and baseline_run.observe_trigger_reason else "none"
                 ),
-                "candidate_reflect_trigger_reason": (
-                    candidate_run.reflect_trigger_reason if candidate_run and candidate_run.reflect_trigger_reason else "none"
+                "candidate_observe_trigger_reason": (
+                    candidate_run.observe_trigger_reason if candidate_run and candidate_run.observe_trigger_reason else "none"
                 ),
                 "baseline_failure_taxonomy": (
                     baseline_run.failure_taxonomy if baseline_run and baseline_run.failure_taxonomy else "none"
@@ -917,11 +917,11 @@ def _load_eval_batch_result(summary_path: Path) -> EvalBatchResult:
         average_steps=float(raw_data.get("average_steps", 0.0)),
         average_tool_calls=float(raw_data.get("average_tool_calls", 0.0)),
         average_verify_count=float(raw_data.get("average_verify_count", 0.0)),
-        average_reflect_count=float(raw_data.get("average_reflect_count", 0.0)),
+        average_observe_count=float(raw_data.get("average_observe_count", 0.0)),
         average_prompt_tokens=float(raw_data.get("average_prompt_tokens", 0.0)),
         average_completion_tokens=float(raw_data.get("average_completion_tokens", 0.0)),
         average_total_tokens=float(raw_data.get("average_total_tokens", 0.0)),
-        reflect_trigger_rate=float(raw_data.get("reflect_trigger_rate", 0.0)),
+        observe_trigger_rate=float(raw_data.get("observe_trigger_rate", 0.0)),
         clean_pass_count=int(raw_data.get("clean_pass_count", 0)),
         clean_pass_rate=float(raw_data.get("clean_pass_rate", 0.0)),
         warning_pass_count=int(raw_data.get("warning_pass_count", 0)),
@@ -942,11 +942,11 @@ def _load_eval_batch_result(summary_path: Path) -> EvalBatchResult:
         failure_taxonomy_counts=_normalize_count_dict(raw_data.get("failure_taxonomy_counts")),
         failure_taxonomy_tag_counts=_normalize_count_dict(raw_data.get("failure_taxonomy_tag_counts")),
         verification_failure_counts=_normalize_count_dict(raw_data.get("verification_failure_counts")),
-        reflect_trigger_reason_counts=_normalize_count_dict(raw_data.get("reflect_trigger_reason_counts")),
+        observe_trigger_reason_counts=_normalize_count_dict(raw_data.get("observe_trigger_reason_counts")),
         diagnostic_label_counts=_normalize_count_dict(raw_data.get("diagnostic_label_counts")),
         config_names=_normalize_string_list(raw_data.get("config_names")),
         context_strategies=_normalize_string_list(raw_data.get("context_strategies")),
-        reflect_strategies=_normalize_string_list(raw_data.get("reflect_strategies")),
+        observe_strategies=_normalize_string_list(raw_data.get("observe_strategies")),
         memory_strategies=_normalize_string_list(raw_data.get("memory_strategies")),
         runs=run_results,
     )
@@ -973,9 +973,9 @@ def _load_eval_run_result(raw_run: Any) -> EvalRunResult:
         failure_taxonomy=_normalize_optional_string(raw_run.get("failure_taxonomy")),
         failure_taxonomy_tags=_normalize_string_list(raw_run.get("failure_taxonomy_tags")),
         verify_count=int(raw_run.get("verify_count", 0)),
-        reflect_count=int(raw_run.get("reflect_count", 0)),
-        reflect_triggered=bool(raw_run.get("reflect_triggered")),
-        reflect_trigger_reason=str(raw_run.get("reflect_trigger_reason", "")).strip(),
+        observe_count=int(raw_run.get("observe_count", 0)),
+        observe_triggered=bool(raw_run.get("observe_triggered")),
+        observe_trigger_reason=str(raw_run.get("observe_trigger_reason", "")).strip(),
         prompt_tokens=int(raw_run.get("prompt_tokens", 0)),
         completion_tokens=int(raw_run.get("completion_tokens", 0)),
         total_tokens=int(raw_run.get("total_tokens", 0)),
@@ -983,7 +983,7 @@ def _load_eval_run_result(raw_run: Any) -> EvalRunResult:
         missing_usage_count=int(raw_run.get("missing_usage_count", 0)),
         config_name=str(raw_run.get("config_name", "")).strip(),
         context_strategy=str(raw_run.get("context_strategy", "")).strip(),
-        reflect_strategy=str(raw_run.get("reflect_strategy", "")).strip(),
+        observe_strategy=str(raw_run.get("observe_strategy", "")).strip(),
         memory_enabled=bool(raw_run.get("memory_enabled")),
         memory_strategy=str(raw_run.get("memory_strategy", "")).strip(),
     )
@@ -1362,13 +1362,15 @@ def _extract_context_strategy(config_data: dict[str, Any]) -> str:
     return strategy or "file_recall_context"
 
 
-def _extract_reflect_strategy(config_data: dict[str, Any]) -> str:
-    """从 config 中提取 reflect 策略名，缺省时回退到默认值。"""
-    reflect_config = config_data.get("reflect", {})
-    if not isinstance(reflect_config, dict):
-        return "low_progress_plus_verify_reflect"
-    strategy = str(reflect_config.get("strategy", "low_progress_plus_verify_reflect")).strip()
-    return strategy or "low_progress_plus_verify_reflect"
+def _extract_observe_strategy(config_data: dict[str, Any]) -> str:
+    """从 config 中提取 observe 策略名，短期兼容旧 reflect.strategy。"""
+    observe_config = config_data.get("observe", {})
+    if not isinstance(observe_config, dict):
+        observe_config = config_data.get("reflect", {})
+    if not isinstance(observe_config, dict):
+        return "after_act_observe"
+    strategy = str(observe_config.get("strategy", "after_act_observe")).strip()
+    return strategy or "after_act_observe"
 
 
 def _extract_memory_enabled(config_data: dict[str, Any]) -> bool:
@@ -1421,9 +1423,9 @@ def _task_delta_changed(baseline_run: EvalRunResult | None, candidate_run: EvalR
             baseline_run.step_count != candidate_run.step_count,
             baseline_run.tool_call_count != candidate_run.tool_call_count,
             baseline_run.verify_count != candidate_run.verify_count,
-            baseline_run.reflect_count != candidate_run.reflect_count,
+            baseline_run.observe_count != candidate_run.observe_count,
             baseline_run.total_tokens != candidate_run.total_tokens,
-            baseline_run.reflect_trigger_reason != candidate_run.reflect_trigger_reason,
+            baseline_run.observe_trigger_reason != candidate_run.observe_trigger_reason,
             (baseline_run.failure_taxonomy or "") != (candidate_run.failure_taxonomy or ""),
             baseline_run.failing_checks != candidate_run.failing_checks,
             baseline_run.diagnostic_labels != candidate_run.diagnostic_labels,
@@ -1451,3 +1453,4 @@ def _find_last_payload(events: list[dict[str, Any]], event_type: str) -> dict[st
             payload = event.get("payload", {})
             return payload if isinstance(payload, dict) else {}
     return {}
+

@@ -15,7 +15,7 @@
       --state: #e6f4ed;
       --model: #e8efff;
       --tool: #fff3cf;
-      --reflect: #ece6ff;
+      --observe: #ece6ff;
       --verify: #e4f2f7;
       --risk: #ffe5df;
       --accent: #1f6d52;
@@ -163,7 +163,7 @@
     .state-dot { background: var(--state); }
     .model-dot { background: var(--model); }
     .tool-dot { background: var(--tool); }
-    .reflect-dot { background: var(--reflect); }
+    .observe-dot { background: var(--observe); }
     .verify-dot { background: var(--verify); }
     .risk-dot { background: var(--risk); }
 
@@ -251,7 +251,7 @@
     .state { background: var(--state); }
     .model { background: var(--model); }
     .tool { background: var(--tool); }
-    .reflect { background: var(--reflect); }
+    .observe { background: var(--observe); }
     .verify { background: var(--verify); }
     .risk { background: var(--risk); }
     .trace { background: var(--surface-soft); }
@@ -367,7 +367,7 @@
         <h1>self-coding-agent 任务运行链路图</h1>
         <p class="lead">
           这张图描述当前真实执行路径：入口完成配置、sandbox、setup 和 trace 初始化后，loop 只做
-          <code>ingest -> analyze -> (plan -> act -> reflect)*</code>，求解阶段退出后再执行一次末尾
+          <code>ingest -> analyze -> (plan -> act -> observe)*</code>，求解阶段退出后再执行一次末尾
           <code>verify -> finalize</code>。它也标出模型决策契约、跨轮反馈、文件缓存污染治理和待修复风险。
         </p>
       </div>
@@ -375,7 +375,7 @@
         <span><i class="dot state-dot"></i>状态机阶段</span>
         <span><i class="dot model-dot"></i>模型决策</span>
         <span><i class="dot tool-dot"></i>工具执行</span>
-        <span><i class="dot reflect-dot"></i>事实型 reflect</span>
+        <span><i class="dot observe-dot"></i>事实型 observe</span>
         <span><i class="dot verify-dot"></i>末尾验证与收口</span>
         <span><i class="dot risk-dot"></i>审查发现 / 待办</span>
       </div>
@@ -436,7 +436,7 @@
         <article class="node model">
           <span class="tag">solve loop</span>
           <h3>多轮求解</h3>
-          <p>每轮固定执行 <code>plan -> act -> reflect</code>。<code>runtime.max_steps</code> 控制最大求解轮数，当前 <code>configs/default.json</code> 为 <code>15</code>。</p>
+          <p>每轮固定执行 <code>plan -> act -> observe</code>。<code>runtime.max_steps</code> 控制最大求解轮数，当前 <code>configs/default.json</code> 为 <code>15</code>。</p>
         </article>
         <article class="node verify">
           <span class="tag">verify</span>
@@ -454,7 +454,7 @@
     <section>
       <h2>求解循环：verify 不在每轮内</h2>
       <p class="section-lead">
-        旧图里的 <code>(plan -> act -> reflect -> verify)*</code> 已过时。现在 verify 是最终裁判，不再把验证失败反馈给下一轮模型。
+        旧图里的“每轮内 verify”结构已过时。现在 verify 是最终裁判，不再把验证失败反馈给下一轮模型。
       </p>
       <div class="loop-flow">
         <article class="node model">
@@ -467,10 +467,10 @@
           <h3>执行工具</h3>
           <p>只执行模型 JSON 中的 <code>tool_calls</code>。<code>planned_actions</code> 是展示字段，不会驱动工具。</p>
         </article>
-        <article class="node reflect">
-          <span class="tag">reflect</span>
+        <article class="node observe">
+          <span class="tag">observe</span>
           <h3>事实压缩</h3>
-          <p>每轮 act 后固定生成 <code>reflect_content</code>，压缩工具结果、失败工具、diff 信号和文件上下文缓存。</p>
+          <p>每轮 act 后固定生成 <code>observe_content</code>，压缩工具结果、失败工具、diff 信号和文件上下文缓存。</p>
         </article>
         <article class="node verify">
           <span class="tag">exit check</span>
@@ -485,7 +485,7 @@
         </article>
         <article class="panel strong-line warning-line">
           <h3>不再存在的反馈</h3>
-          <p>链路中已移除 <code>previous_verification</code> 和 <code>previous_reflect.verification</code>。最终验证只用于收口、报告和 eval 聚合，不参与下一轮重规划。</p>
+          <p>链路中已移除旧式过程内 verification 反馈。最终验证只用于收口、报告和 eval 聚合，不参与下一轮重规划。</p>
         </article>
       </div>
     </section>
@@ -559,7 +559,7 @@
         <code>initial_guide</code> 是首轮任务、仓库召回和长期记忆指导；<code>context_snapshot</code> 是每轮 plan 前重建的运行时事实快照。
       </p>
       <div class="grid-3">
-        <article class="panel reflect">
+        <article class="panel observe">
           <h3><code>initial_guide</code></h3>
           <p>包含 <code>task</code>、<code>repo_guide</code> 和 <code>memory_guide</code>。其中 <code>selected_files</code> 只暴露结构摘要和推荐理由，不再注入不可控 summary。</p>
         </article>
@@ -639,7 +639,7 @@
           <h3>结构后精读</h3>
           <p>大文件优先使用 <code>read_file_structure_summary</code> 定位，再用 <code>read_file_range</code> 精确读取 1 到 80 行。</p>
         </article>
-        <article class="node reflect">
+        <article class="node observe">
           <span class="tag">cache</span>
           <h3>stale / fresh</h3>
           <p>文件被 <code>apply_patch</code> 或 <code>replace_lines</code> 成功编辑后，旧片段标为 <code>stale</code>；重读后恢复为 <code>fresh</code>。</p>
@@ -692,7 +692,7 @@
         </article>
         <article class="panel verify">
           <h3>finalize</h3>
-          <p><code>finalize_summary</code> 记录最终状态、验证是否通过、变更文件、失败工具数、reflect 次数、实际求解轮数、模型决策数和 token usage。</p>
+          <p><code>finalize_summary</code> 记录最终状态、验证是否通过、变更文件、失败工具数、observe 次数、实际求解轮数、模型决策数和 token usage。</p>
         </article>
         <article class="panel state">
           <h3>主 stop reason</h3>
@@ -726,7 +726,7 @@
             <li><code>tool_result</code></li>
             <li><code>initial_guide</code></li>
             <li><code>context_snapshot_prepared</code></li>
-            <li><code>reflect_content</code></li>
+            <li><code>observe_content</code></li>
             <li><code>verification_result</code></li>
           </ul>
         </article>
@@ -785,3 +785,4 @@
   </main>
 </body>
 </html>
+

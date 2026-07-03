@@ -84,4 +84,4 @@ def load_named_config(config_dir: Path, config_name: str) -> dict[str, Any]:
     # Phase 1 先允许“没配配置也能跑”，这样可以优先把控制面打通。
     if not config_path.exists():
         return {}
-    return json.loads(config_path.read_text(encoding="utf-8"))
+    return json.loads(config_path.read_text(encoding="utf-8-sig"))

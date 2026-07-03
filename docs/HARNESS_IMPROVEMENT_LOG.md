@@ -2,14 +2,14 @@
 
 这份文档用于记录 self-coding-agent harness 的进步史，重点沉淀上下文构建、模型重规划、工具调用、验证规则、失败诊断和报告可读性的改进过程。
 
-注意：下方改进记录按发生时间保留当时的字段名和链路形态；当前实现口径以 `initial_guide`、`context_snapshot`、`reflect_content` 为准，不再使用旧 `runtime_feedback`。当前 `context_snapshot.working_memory` 会在模型返回的四字段工作记忆之外，额外注入 `last_rational` 承接上一轮 `rationale`。
+注意：下方改进记录按发生时间保留当时的字段名和链路形态；当前实现口径以 `initial_guide`、`context_snapshot`、`observe_content` 为准，不再使用旧 `runtime_feedback`。当前 `context_snapshot.working_memory` 会在模型返回的四字段工作记忆之外，额外注入 `last_rational` 承接上一轮 `rationale`。
 
 ## 使用规则
 
 - 当你明确说“把这次改动写到 `harness_improvement_log` 中”或同义表达时，默认触发本文档记录规范：用 STAR 法则追加一条改进记录，必须覆盖背景/问题、采取的动作、真实 run 或测试结果、带来的收益和是否固化；除非你额外指定格式，否则不再反复确认。
 - 当一次改进已经通过真实 run 或测试观察到效果后，由你明确说“更新到改进文档中”，再追加记录。
 - 未经确认的想法只放在“待观察问题”里，不写成已固化结论。
-- 记录里可以保留稳定机器字段，例如 `initial_guide`、`context_snapshot`、`reflect_content`、`old_text_not_found`、`verify_rules`。
+- 记录里可以保留稳定机器字段，例如 `initial_guide`、`context_snapshot`、`observe_content`、`old_text_not_found`、`verify_rules`。
 - 不记录 API key、Authorization header 或任何真实密钥。
 
 ## 固定记录格式

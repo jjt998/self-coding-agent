@@ -208,7 +208,7 @@ class ContextBuilder:
         """从 RuntimeState 读取当前事实，生成本轮 plan 要交给模型的运行快照。"""
         task = str(getattr(runtime_state, "task", ""))
         task_type = str(getattr(runtime_state, "task_type", ""))
-        reflect_content = getattr(runtime_state, "reflect_content", {}) or {}
+        observe_content = getattr(runtime_state, "observe_content", {}) or {}
         return ContextSnapshot(
             iteration=int(getattr(runtime_state, "current_iteration", 0) or 0),
             task={
@@ -224,9 +224,9 @@ class ContextBuilder:
             },
             stale_context=self._build_stale_context(runtime_state=runtime_state),
             recent_facts={
-                "recent_tool_results": list(reflect_content.get("recent_tool_results", [])),
-                "failed_tools": list(reflect_content.get("failed_tools", [])),
-                "signals": list(reflect_content.get("signals", [])),
+                "recent_tool_results": list(observe_content.get("recent_tool_results", [])),
+                "failed_tools": list(observe_content.get("failed_tools", [])),
+                "signals": list(observe_content.get("signals", [])),
             },
         )
 
@@ -289,7 +289,7 @@ class ContextBuilder:
         return snippets
 
     def _build_diff_context(self, *, runtime_state: Any) -> list[dict[str, Any]]:
-        """整理最近 git_diff 的完整文本摘要，并标出它来自哪一轮 reflect 后的事实。"""
+        """整理最近 git_diff 的完整文本摘要，并标出它来自哪一轮 observe 后的事实。"""
         diff_context: list[dict[str, Any]] = []
         from_iteration = self._recent_context_iteration(runtime_state=runtime_state)
         for execution in getattr(runtime_state, "recent_tool_executions", []) or []:
@@ -363,9 +363,9 @@ class ContextBuilder:
 
     def _recent_context_iteration(self, *, runtime_state: Any) -> int:
         """给 diff 和命令结果标注来源轮次，让模型能自行判断这些事实是否偏旧。"""
-        reflect_content = getattr(runtime_state, "reflect_content", {}) or {}
-        if isinstance(reflect_content, dict) and reflect_content.get("iteration"):
-            return int(reflect_content.get("iteration") or 0)
+        observe_content = getattr(runtime_state, "observe_content", {}) or {}
+        if isinstance(observe_content, dict) and observe_content.get("iteration"):
+            return int(observe_content.get("iteration") or 0)
         return max(0, int(getattr(runtime_state, "current_iteration", 0) or 0) - 1)
 
     def _select_repo_files(self, task_keywords: list[str], task_type: str) -> tuple[list[SelectedFileGuide], int]:
@@ -538,3 +538,4 @@ class ContextBuilder:
         if normalized_task_type == "refactor":
             return "优先核心代码文件和公共辅助文件"
         return "按任务关键词和通用文件规则做保守召回"
+

@@ -81,7 +81,7 @@ def build_live_trace_snapshot(
                 "tool_called": [],
                 "tool_result": [],
                 "context_snapshot_prepared": None,
-                "reflect_content": None,
+                "observe_content": None,
                 "state_results": [],
                 "event_count": 0,
             },
@@ -102,8 +102,8 @@ def build_live_trace_snapshot(
             block["tool_result"].append(payload)
         elif event_type == "context_snapshot_prepared":
             block["context_snapshot_prepared"] = payload
-        elif event_type == "reflect_content":
-            block["reflect_content"] = payload
+        elif event_type == "observe_content":
+            block["observe_content"] = payload
         elif event_type == "state_result":
             block["state_results"].append(payload)
 
@@ -739,8 +739,8 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
     function renderToolSummary(iteration, iterationIndex) {{
       const toolCalled = Array.isArray(iteration.tool_called) ? iteration.tool_called : [];
       const toolResults = Array.isArray(iteration.tool_result) ? iteration.tool_result : [];
-      const reflectContent = iteration.reflect_content;
-      if (!toolCalled.length && !toolResults.length && !reflectContent) {{
+      const observeContent = iteration.observe_content;
+      if (!toolCalled.length && !toolResults.length && !observeContent) {{
         return '<div class="empty">本轮还没有工具执行结果。</div>';
       }}
       return `
@@ -770,13 +770,13 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
               `).join("")
             }}
             ${{
-              reflectContent
+              observeContent
                 ? `
                   <div class="tool-item">
-                    <div><strong>reflect_content</strong></div>
-                    <div class="subtle">${{escapeHtml((reflectContent.signals || []).join(", ") || "无 signals")}}</div>
+                    <div><strong>observe_content</strong></div>
+                    <div class="subtle">${{escapeHtml((observeContent.signals || []).join(", ") || "无 signals")}}</div>
                     <div class="actions">
-                      <button data-detail-kind="reflect_content" data-iteration-index="${{iterationIndex}}">查看 reflect JSON</button>
+                      <button data-detail-kind="observe_content" data-iteration-index="${{iterationIndex}}">查看 observe JSON</button>
                     </div>
                   </div>
                 `
@@ -878,9 +878,9 @@ def build_live_trace_view_html(*, run_id: str, snapshot_js_path: str) -> str:
             }});
         }});
           root
-            .querySelector(`[data-detail-kind="reflect_content"][data-iteration-index="${{iterationIndex}}"]`)
+            .querySelector(`[data-detail-kind="observe_content"][data-iteration-index="${{iterationIndex}}"]`)
             ?.addEventListener("click", () => {{
-            setDetail(`第 ${{iteration.iteration}} 轮 reflect_content`, iteration.reflect_content || {{}});
+            setDetail(`第 ${{iteration.iteration}} 轮 observe_content`, iteration.observe_content || {{}});
           }});
       }});
     }}
@@ -942,3 +942,4 @@ def _extract_iteration_value(payload: Any) -> int | None:
             normalized_value = int(raw_value.strip())
             return normalized_value if normalized_value > 0 else None
     return None
+

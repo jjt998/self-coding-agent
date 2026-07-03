@@ -82,11 +82,11 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 
 `report.md` 是面向人的单次运行报告。重点查看：
 
-- `运行摘要`：总步数、最大轮数、实际轮数、reflect 次数、stop reason。
+- `运行摘要`：总步数、最大轮数、实际轮数、observe 次数、stop reason。
 - `失败诊断`：setup、model、verify、max steps 等失败摘要。
 - `Token 消耗`：单任务模型请求数、缺失 usage 请求数、`prompt_tokens`、`completion_tokens`、`total_tokens`。
 - `进展观察`：是否观察到文件变更、变更文件数、失败工具数。
-- `反思事实摘要`：最近一次 `reflect_content` 压缩出的工具结果、失败工具、diff 信号和文件缓存状态。
+- `观察事实摘要`：最近一次 `observe_content` 压缩出的工具结果、失败工具、diff 信号和文件缓存状态。
 - `上下文摘要`：`initial_guide` 的候选文件和 `context_snapshot` 的 fresh/stale/recent_facts 概览。
 - `模型返回摘要`：最近一次模型显式返回的 summary、rationale、planned_actions、working_memory 和 tool_calls；其中 `working_memory` 会按四类结构化工作记忆展示。
 - `验证结果`：每条验证检查是否通过。
@@ -136,14 +136,14 @@ eval 产物包含：
 - `summary.md`
 - 每个 task 的独立 run 目录
 
-`summary.json` 中重点字段包括 `outcome_counts`、`failure_taxonomy_counts`、`failure_taxonomy_tag_counts`、`verification_failure_counts`、`reflect_trigger_reason_counts`，以及 `average_total_tokens`、`total_tokens`、`token_usage_complete_count`、`token_usage_incomplete_count`。
+`summary.json` 中重点字段包括 `outcome_counts`、`failure_taxonomy_counts`、`failure_taxonomy_tag_counts`、`verification_failure_counts`、`observe_trigger_reason_counts`，以及 `average_total_tokens`、`total_tokens`、`token_usage_complete_count`、`token_usage_incomplete_count`。
 
 ## 6. 运行 comparison
 
 ```powershell
 & 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
   --eval-task-file eval_tasks\sample_batch.json `
-  --compare-strategies default,verify_failure_only_reflect `
+  --compare-strategies default,verify_failure_only_observe `
   --repo-root . `
   --output-root runs
 ```
@@ -159,7 +159,7 @@ comparison 产物包含：
 - `failure_taxonomy_counts_delta`
 - `failure_taxonomy_tag_counts_delta`
 - `verification_failure_counts_delta`
-- `reflect_trigger_reason_counts_delta`
+- `observe_trigger_reason_counts_delta`
 - `average_total_tokens_delta`
 - `total_tokens_delta`
 - `task_deltas`
@@ -428,7 +428,7 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
 ```powershell
 & 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
   --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_batch.json `
-  --compare-strategies default,memory_off,verify_failure_only_reflect `
+  --compare-strategies default,memory_off,verify_failure_only_observe `
   --repo-root sandbox_experiments\repos\demo_buggy_task_board `
   --output-root sandbox_experiments\runs
 ```
@@ -436,7 +436,7 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
 ```cmd
 D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
   --eval-task-file sandbox_experiments\tasks\demo_bugfix_task_board_batch.json ^
-  --compare-strategies default,memory_off,verify_failure_only_reflect ^
+  --compare-strategies default,memory_off,verify_failure_only_observe ^
   --repo-root sandbox_experiments\repos\demo_buggy_task_board ^
   --output-root sandbox_experiments\runs
 ```
@@ -457,3 +457,4 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
 - `live_trace_view.html` 面向过程观察：右侧看 Harness 发给模型的完整输入，左侧看解析后的 `model_decision`。
 - `trace_view.html` 继续保留为原始事件调试视图；需要逐条排查时仍优先看它和 `trace.jsonl`。
 - `trace.jsonl` 现已新增 `model_request_prepared`，用于记录每轮真实 `request_payload`。
+

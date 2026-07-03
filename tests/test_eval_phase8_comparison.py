@@ -89,13 +89,13 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                 step_count=8,
                 tool_call_count=5,
                 verify_count=1,
-                reflect_count=1,
-                reflect_triggered=True,
-                reflect_trigger_reason="no_progress_after_observe",
+                observe_count=1,
+                observe_triggered=True,
+                observe_trigger_reason="no_progress_after_observe",
                 stop_reason="completed",
                 config_name="default",
                 context_strategy="file_recall_context",
-                reflect_strategy="low_progress_plus_verify_reflect",
+                observe_strategy="low_progress_plus_verify_observe",
                 memory_enabled=True,
                 memory_strategy="structured_memory_on",
                 outcome="passed_cleanly",
@@ -116,13 +116,13 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                 step_count=10,
                 tool_call_count=6,
                 verify_count=1,
-                reflect_count=1,
-                reflect_triggered=True,
-                reflect_trigger_reason="verification_failed",
+                observe_count=1,
+                observe_triggered=True,
+                observe_trigger_reason="verification_failed",
                 stop_reason="completed",
                 config_name="memory_off",
                 context_strategy="naive_recent_context",
-                reflect_strategy="verify_failure_only_reflect",
+                observe_strategy="verify_failure_only_observe",
                 memory_enabled=False,
                 memory_strategy="memory_off",
                 outcome="failed_verification",
@@ -144,13 +144,13 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                 step_count=10,
                 tool_call_count=6,
                 verify_count=1,
-                reflect_count=1,
-                reflect_triggered=True,
-                reflect_trigger_reason="verification_failed",
+                observe_count=1,
+                observe_triggered=True,
+                observe_trigger_reason="verification_failed",
                 stop_reason="completed",
                 config_name="memory_off",
                 context_strategy="naive_recent_context",
-                reflect_strategy="verify_failure_only_reflect",
+                observe_strategy="verify_failure_only_observe",
                 memory_enabled=False,
                 memory_strategy="memory_off",
                 outcome="failed_verification",
@@ -173,12 +173,12 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                 step_count=2,
                 tool_call_count=0,
                 verify_count=0,
-                reflect_count=0,
-                reflect_triggered=False,
+                observe_count=0,
+                observe_triggered=False,
                 stop_reason="model_error",
                 config_name="memory_off",
                 context_strategy="naive_recent_context",
-                reflect_strategy="verify_failure_only_reflect",
+                observe_strategy="verify_failure_only_observe",
                 memory_enabled=False,
                 memory_strategy="memory_off",
                 outcome="stopped_early",
@@ -200,13 +200,13 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                 step_count=8,
                 tool_call_count=5,
                 verify_count=2,
-                reflect_count=1,
-                reflect_triggered=True,
-                reflect_trigger_reason="verification_failed",
+                observe_count=1,
+                observe_triggered=True,
+                observe_trigger_reason="verification_failed",
                 stop_reason="max_steps_reached",
                 config_name="memory_off",
                 context_strategy="naive_recent_context",
-                reflect_strategy="verify_failure_only_reflect",
+                observe_strategy="verify_failure_only_observe",
                 memory_enabled=False,
                 memory_strategy="memory_off",
                 outcome="stopped_early",
@@ -234,7 +234,7 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                     name="default",
                     config_name="default",
                     context_strategy="file_recall_context",
-                    reflect_strategy="low_progress_plus_verify_reflect",
+                    observe_strategy="low_progress_plus_verify_observe",
                     memory_enabled=True,
                     memory_strategy="structured_memory_on",
                 ),
@@ -246,7 +246,7 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
                     name="memory_off",
                     config_name="memory_off",
                     context_strategy="naive_recent_context",
-                    reflect_strategy="verify_failure_only_reflect",
+                    observe_strategy="verify_failure_only_observe",
                     memory_enabled=False,
                     memory_strategy="memory_off",
                 ),
@@ -282,7 +282,7 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
     }
     assert delta["average_total_tokens_delta"] == 1.25
     assert delta["total_tokens_delta"] == 41
-    assert delta["reflect_trigger_reason_counts_delta"] == {
+    assert delta["observe_trigger_reason_counts_delta"] == {
         "no_progress_after_observe": -1,
         "verification_failed": 3,
     }
@@ -306,9 +306,10 @@ def test_strategy_comparison_result_reports_failure_taxonomy_deltas() -> None:
     assert "verification checks delta" in summary_text
     assert "average total tokens delta" in summary_text
     assert "total tokens delta" in summary_text
-    assert "reflect 原因 delta" in summary_text
+    assert "observe 原因 delta" in summary_text
     assert "## Task Delta" in summary_text
     assert "task `task_a`" in summary_text
     assert "outcome `passed_cleanly` -> `failed_verification`" in summary_text
     assert "baseline run `run-a` @ `runs/run-a`" in summary_text
     assert "candidate run `run-b` @ `runs/run-b`" in summary_text
+

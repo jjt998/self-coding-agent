@@ -123,14 +123,14 @@ def _constraint_aware_rationale(context_snapshot, *, repeat_reason: bool = True)
     return "读取 context_snapshot 事实：" + " ".join(item for item in parts if item).strip() + suffix
 
 
-def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path: Path, monkeypatch) -> None:
+def test_verify_failure_only_observe_triggers_after_failed_verification(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
 
     class FakeAdapter:
         provider = "openai_compatible"
-        model_name = "fake-verify-reflect-model"
+        model_name = "fake-verify-observe-model"
 
         def decide(self, *, task, task_type, context_snapshot, config_data):
             rationale = _constraint_aware_rationale(context_snapshot)
@@ -162,11 +162,11 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
     monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
 
     settings = build_settings(
-        task="触发验证失败后的 reflect",
+        task="触发验证失败后的 observe",
         task_type="general",
         repo_root=str(repo_root),
         output_root=str(tmp_path / "runs"),
-        config_name="verify_failure_only_reflect",
+        config_name="verify_failure_only_observe",
     )
     run_dir = Path(settings.output_root) / settings.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -175,12 +175,12 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
 
     runtime_state = loop_module.LoopOrchestrator(trace_writer=trace_writer).run(
         settings=settings,
-        config_data={**_model_config(), "reflect": {"strategy": "verify_failure_only_reflect"}},
+        config_data={**_model_config(), "observe": {"strategy": "verify_failure_only_observe"}},
     )
 
-    assert runtime_state.reflect_triggered is True
-    assert runtime_state.reflect_trigger_reason == "after_act"
-    assert runtime_state.reflect_count == 2
+    assert runtime_state.observe_triggered is True
+    assert runtime_state.observe_trigger_reason == "after_act"
+    assert runtime_state.observe_count == 2
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.VERIFICATION_FAILED
     assert runtime_state.stop_reason.details["verification_failure"]["failing_check_names"] == ["说明文件可读"]
@@ -189,10 +189,10 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
         "analyze",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "verify",
         "finalize",
     ]
@@ -212,10 +212,10 @@ def test_verify_failure_only_reflect_triggers_after_failed_verification(tmp_path
         "analyze",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "verify",
         "finalize",
     ]
@@ -264,7 +264,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     ]
     assert runtime_state.changed_files == ["run_evidence.md"]
     assert runtime_state.failed_tool_count == 0
-    assert runtime_state.reflect_triggered is True
+    assert runtime_state.observe_triggered is True
     assert runtime_state.iteration_count == 1
     assert runtime_state.max_steps == 1
     assert runtime_state.token_usage == {
@@ -280,7 +280,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
         "analyze",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "verify",
         "finalize",
     ]
@@ -311,9 +311,9 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert raw_response_payload["token_usage"]["total_tokens"] == 50
     assert json.loads(raw_response_payload["content"])["planned_actions"] == ["执行模型工具计划"]
     assert not any(event["event_type"] == "progress_observed" for event in trace_events)
-    reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_content")
-    assert reflect_payload["observation"]["changed_files"] == ["run_evidence.md"]
-    assert reflect_payload["observation"]["failed_tool_count"] == 0
+    observe_payload = next(event["payload"] for event in trace_events if event["event_type"] == "observe_content")
+    assert observe_payload["observation"]["changed_files"] == ["run_evidence.md"]
+    assert observe_payload["observation"]["failed_tool_count"] == 0
     ingest_payload = next(event["payload"] for event in trace_events if event["event_type"] == "task_ingested")
     assert ingest_payload["task"] == settings.task
     assert ingest_payload["task_type"] == settings.task_type
@@ -332,7 +332,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
     assert finalize_payload["verification_passed"] is True
     assert finalize_payload["changed_files"] == ["run_evidence.md"]
     assert finalize_payload["failed_tool_count"] == 0
-    assert finalize_payload["reflect_count"] == 1
+    assert finalize_payload["observe_count"] == 1
     assert finalize_payload["iteration_count"] == 1
     assert finalize_payload["max_steps"] == 1
     assert finalize_payload["tool_execution_count"] == 5
@@ -357,7 +357,7 @@ def test_loop_records_model_decision_and_uses_planned_actions(tmp_path: Path, mo
         "analyze",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "verify",
         "finalize",
     ]
@@ -438,7 +438,7 @@ def test_loop_verification_uses_system_diff_snapshot_instead_of_model_git_diff(
     assert diff_check["passed"] is True
 
 
-def test_default_reflect_records_read_only_round_without_no_diff_signal(tmp_path: Path, monkeypatch) -> None:
+def test_default_observe_records_read_only_round_without_no_diff_signal(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README.md").write_text("# Demo\n", encoding="utf-8")
@@ -483,10 +483,10 @@ def test_default_reflect_records_read_only_round_without_no_diff_signal(tmp_path
 
     assert runtime_state.changed_files == []
     assert runtime_state.failed_tool_count == 0
-    assert runtime_state.reflect_triggered is True
-    assert runtime_state.reflect_trigger_reason == "after_act"
-    assert runtime_state.reflect_count == 2
-    assert runtime_state.reflect_trigger_reasons == ["after_act", "after_act"]
+    assert runtime_state.observe_triggered is True
+    assert runtime_state.observe_trigger_reason == "after_act"
+    assert runtime_state.observe_count == 2
+    assert runtime_state.observe_trigger_reasons == ["after_act", "after_act"]
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.VERIFICATION_FAILED
     assert runtime_state.completed_states == [
@@ -494,10 +494,10 @@ def test_default_reflect_records_read_only_round_without_no_diff_signal(tmp_path
         "analyze",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "verify",
         "finalize",
     ]
@@ -507,11 +507,11 @@ def test_default_reflect_records_read_only_round_without_no_diff_signal(tmp_path
         if line.strip()
     ]
     assert not any(event["event_type"] == "progress_observed" for event in trace_events)
-    reflect_payloads = [event["payload"] for event in trace_events if event["event_type"] == "reflect_content"]
-    assert reflect_payloads[0]["trigger"] == "after_act"
-    assert reflect_payloads[0]["signals"] == []
-    assert reflect_payloads[0]["observation"]["changed_files"] == []
-    assert reflect_payloads[0]["observation"]["failed_tool_count"] == 0
+    observe_payloads = [event["payload"] for event in trace_events if event["event_type"] == "observe_content"]
+    assert observe_payloads[0]["trigger"] == "after_act"
+    assert observe_payloads[0]["signals"] == []
+    assert observe_payloads[0]["observation"]["changed_files"] == []
+    assert observe_payloads[0]["observation"]["failed_tool_count"] == 0
     transition_targets = [
         event["payload"]["to_state"]
         for event in trace_events
@@ -522,10 +522,10 @@ def test_default_reflect_records_read_only_round_without_no_diff_signal(tmp_path
         "analyze",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "verify",
         "finalize",
     ]
@@ -693,7 +693,7 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
         model_name = "fake-replan-model"
 
         def decide(self, *, task, task_type, context_snapshot, config_data):
-            has_reflect_content = bool(_cross_round_payload(context_snapshot))
+            has_observe_content = bool(_cross_round_payload(context_snapshot))
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -702,13 +702,13 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
                 rationale=(
                     "回应 verification_failed、fake_verify 和 fix_failing_verification_checks 后重规划，"
                     "再次重复相同工具序列是因为需要覆盖同一文件并重新生成 diff。"
-                    if has_reflect_content
+                    if has_observe_content
                     else "首轮执行常规计划。"
                 ),
                 planned_actions=[
                     (
                         "修复 verification_failed / fake_verify / fix_failing_verification_checks 后重新验证"
-                        if has_reflect_content
+                        if has_observe_content
                         else "执行首轮工具计划"
                     )
                 ],
@@ -755,8 +755,8 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     assert runtime_state.iteration_count == 2
-    assert runtime_state.reflect_count == 2
-    assert runtime_state.reflect_trigger_reasons == ["after_act", "after_act"]
+    assert runtime_state.observe_count == 2
+    assert runtime_state.observe_trigger_reasons == ["after_act", "after_act"]
     assert verification_calls["count"] == 1
 
     trace_events = [
@@ -774,16 +774,16 @@ def test_loop_replans_after_failed_verification_and_then_passes(tmp_path: Path, 
         "analyze",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "plan",
         "act",
-        "reflect",
+        "observe",
         "verify",
         "finalize",
     ]
     run_finished_payload = next(event["payload"] for event in trace_events if event["event_type"] == "run_finished")
     assert run_finished_payload["stop_reason"]["details"]["iteration_count"] == 2
-    assert run_finished_payload["stop_reason"]["details"]["reflect_count"] == 2
+    assert run_finished_payload["stop_reason"]["details"]["observe_count"] == 2
 
 
 def test_second_plan_receives_context_snapshot(tmp_path: Path, monkeypatch) -> None:
@@ -798,7 +798,7 @@ def test_second_plan_receives_context_snapshot(tmp_path: Path, monkeypatch) -> N
 
         def decide(self, *, task, task_type, context_snapshot, config_data):
             feedbacks.append(_cross_round_payload(context_snapshot))
-            has_reflect_content = bool(_cross_round_payload(context_snapshot))
+            has_observe_content = bool(_cross_round_payload(context_snapshot))
             return ModelDecision(
                 provider=self.provider,
                 model_name=self.model_name,
@@ -807,13 +807,13 @@ def test_second_plan_receives_context_snapshot(tmp_path: Path, monkeypatch) -> N
                 rationale=(
                     "回应 verification_failed、fake_verify 和 fix_failing_verification_checks，"
                     "再次使用相同工具序列是因为需要覆盖同一文件并重新生成 diff。"
-                    if has_reflect_content
+                    if has_observe_content
                     else "test feedback"
                 ),
                 planned_actions=[
                     (
                         "处理 verification_failed / fake_verify / fix_failing_verification_checks 后执行反馈测试工具计划"
-                        if has_reflect_content
+                        if has_observe_content
                         else "执行反馈测试工具计划"
                     )
                 ],
@@ -871,11 +871,11 @@ def test_second_plan_receives_context_snapshot(tmp_path: Path, monkeypatch) -> N
         for line in trace_writer.trace_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    reflect_payload = next(event["payload"] for event in trace_events if event["event_type"] == "reflect_content")
-    assert reflect_payload["trigger"] == "after_act"
+    observe_payload = next(event["payload"] for event in trace_events if event["event_type"] == "observe_content")
+    assert observe_payload["trigger"] == "after_act"
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
-    assert model_decision_payloads[0]["has_reflect_content"] is False
-    assert model_decision_payloads[1]["has_reflect_content"] is True
+    assert model_decision_payloads[0]["has_observe_content"] is False
+    assert model_decision_payloads[1]["has_observe_content"] is True
     raw_response_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_raw_response"]
     assert [payload["iteration"] for payload in raw_response_payloads] == [1, 2]
     assert all(payload["parsed_ok"] is True for payload in raw_response_payloads)
@@ -1013,7 +1013,7 @@ def test_context_snapshot_includes_read_file_excerpt_after_old_text_not_found(
     assert 'status = "[done]" if task["done"] else "[todo]"' in patch_summary["failed_old_text_excerpt"]
     assert 'status = "done" if task.get("done") else "todo"' in patch_summary["new_text_excerpt"]
 
-    assert "previous_reflect_feedback" not in second_feedback
+    assert "previous_observe_feedback" not in second_feedback
     assert "replan_constraints" not in recent_facts
     failed_tool = recent_facts["failed_tools"][0]
     assert failed_tool["error"] == "old_text_not_found"
@@ -1560,7 +1560,7 @@ def test_context_snapshot_keeps_last_five_file_context_snippets(
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.VERIFICATION_FAILED
     assert len(feedbacks) == 6
-    final_cache = runtime_state.reflect_content["file_context_cache"]["app.py"]
+    final_cache = runtime_state.observe_content["file_context_cache"]["app.py"]
     assert final_cache["covered_ranges"] == ["6-10", "11-15", "16-20", "21-25", "26-30"]
     assert len(final_cache["snippets"]) == 5
     assert final_cache["snippets"][0]["content_excerpt"].startswith("line 6")
@@ -1688,14 +1688,14 @@ def test_context_snapshot_marks_file_context_cache_stale_after_edit_and_refreshe
         }
     ]
 
-    fresh_cache = runtime_state.reflect_content["file_context_cache"]["app.py"]
+    fresh_cache = runtime_state.observe_content["file_context_cache"]["app.py"]
     assert fresh_cache["cache_status"] == "fresh"
     assert fresh_cache["stale_reason"] == ""
     assert fresh_cache["covered_ranges"] == ["1-3"]
     assert fresh_cache["snippets"][0]["content_excerpt"] == "one\nTWO\nthree\n"
-    assert runtime_state.reflect_content["stale_file_paths"] == []
-    assert runtime_state.reflect_content["stale_reread_guidance"] == []
-    assert runtime_state.reflect_content["reread_fresh_ranges"] == [
+    assert runtime_state.observe_content["stale_file_paths"] == []
+    assert runtime_state.observe_content["stale_reread_guidance"] == []
+    assert runtime_state.observe_content["reread_fresh_ranges"] == [
         {
             "path": "app.py",
             "cache_status": "fresh",
@@ -1708,7 +1708,7 @@ def test_context_snapshot_marks_file_context_cache_stale_after_edit_and_refreshe
     ]
 
 
-def _run_factual_reflect_content_case(
+def _run_factual_observe_content_case(
     tmp_path: Path,
     monkeypatch,
     *,
@@ -1722,11 +1722,11 @@ def _run_factual_reflect_content_case(
 
     class FakeAdapter:
         provider = "openai_compatible"
-        model_name = "fake-reflect-constraint-model"
+        model_name = "fake-observe-constraint-model"
 
         def decide(self, *, task, task_type, context_snapshot, config_data):
-            has_reflect_content = bool(_cross_round_payload(context_snapshot))
-            if has_reflect_content:
+            has_observe_content = bool(_cross_round_payload(context_snapshot))
+            if has_observe_content:
                 tool_calls = [
                     PlannedToolCall(
                         tool_name="apply_patch",
@@ -1779,7 +1779,7 @@ def _run_factual_reflect_content_case(
     monkeypatch.setattr(loop_module, "build_model_adapter", lambda config_data: FakeAdapter())
     monkeypatch.setattr(loop_module, "build_phase_4_verification", fake_verification)
     settings = build_settings(
-        task="检查 reflect 事实反馈",
+        task="检查 observe 事实反馈",
         task_type="general",
         repo_root=str(repo_root),
         output_root=str(tmp_path / "runs"),
@@ -1802,8 +1802,8 @@ def _run_factual_reflect_content_case(
     return runtime_state, trace_events
 
 
-def test_second_plan_continues_with_factual_reflect_content(tmp_path: Path, monkeypatch) -> None:
-    runtime_state, trace_events = _run_factual_reflect_content_case(
+def test_second_plan_continues_with_factual_observe_content(tmp_path: Path, monkeypatch) -> None:
+    runtime_state, trace_events = _run_factual_observe_content_case(
         tmp_path,
         monkeypatch,
         second_rationale="忽略上一轮失败，直接继续。",
@@ -1814,12 +1814,12 @@ def test_second_plan_continues_with_factual_reflect_content(tmp_path: Path, monk
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
-    assert model_decision_payloads[1]["has_reflect_content"] is True
-    assert "reflect_constraints_acknowledged" not in model_decision_payloads[1]
+    assert model_decision_payloads[1]["has_observe_content"] is True
+    assert "observe_constraints_acknowledged" not in model_decision_payloads[1]
 
 
 def test_second_plan_does_not_emit_repeated_sequence_constraint_event(tmp_path: Path, monkeypatch) -> None:
-    runtime_state, trace_events = _run_factual_reflect_content_case(
+    runtime_state, trace_events = _run_factual_observe_content_case(
         tmp_path,
         monkeypatch,
         second_rationale="回应 verification_failed、fake_verify 和 fix_failing_verification_checks。",
@@ -1833,7 +1833,7 @@ def test_second_plan_does_not_emit_repeated_sequence_constraint_event(tmp_path: 
 
 
 def test_second_plan_can_repeat_tool_sequence_without_harness_hard_constraint(tmp_path: Path, monkeypatch) -> None:
-    runtime_state, trace_events = _run_factual_reflect_content_case(
+    runtime_state, trace_events = _run_factual_observe_content_case(
         tmp_path,
         monkeypatch,
         second_rationale=(
@@ -1847,8 +1847,8 @@ def test_second_plan_can_repeat_tool_sequence_without_harness_hard_constraint(tm
     assert runtime_state.stop_reason is not None
     assert runtime_state.stop_reason.code == loop_module.StopReasonCode.COMPLETED
     model_decision_payloads = [event["payload"] for event in trace_events if event["event_type"] == "model_decision"]
-    assert model_decision_payloads[1]["has_reflect_content"] is True
-    assert "reflect_constraints_acknowledged" not in model_decision_payloads[1]
+    assert model_decision_payloads[1]["has_observe_content"] is True
+    assert "observe_constraints_acknowledged" not in model_decision_payloads[1]
 
 
 def test_loop_stops_with_model_error_when_model_config_fails(tmp_path: Path, monkeypatch) -> None:
@@ -2491,6 +2491,7 @@ def test_loop_injects_refactor_runtime_rule_into_context_snapshot(tmp_path: Path
     assert "runtime_rules" not in memory_guide
     assert "runtime_rule_entries" not in memory_guide
     assert captured["context_snapshot"]["iteration"] == 1
+
 
 
 
