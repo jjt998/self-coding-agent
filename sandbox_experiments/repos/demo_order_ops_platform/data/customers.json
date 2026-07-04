@@ -1,0 +1,23 @@
+[
+  {
+    "id": "C001",
+    "name": "Alice Retail",
+    "segment": "retail",
+    "risk_tier": "normal",
+    "chargeback_count": 0
+  },
+  {
+    "id": "C002",
+    "name": "Victor VIP",
+    "segment": "vip",
+    "risk_tier": "normal",
+    "chargeback_count": 0
+  },
+  {
+    "id": "C900",
+    "name": "High Risk Buyer",
+    "segment": "retail",
+    "risk_tier": "high",
+    "chargeback_count": 3
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "sku": "SKU-RED",
+    "name": "Red Travel Mug",
+    "category": "home",
+    "tax_category": "standard",
+    "price": 100.0,
+    "active": true
+  },
+  {
+    "sku": "SKU-BLUE",
+    "name": "Blue Notebook",
+    "category": "office",
+    "tax_category": "standard",
+    "price": 30.0,
+    "active": true
+  },
+  {
+    "sku": "SKU-GROCERY",
+    "name": "Trail Mix Box",
+    "category": "grocery",
+    "tax_category": "grocery",
+    "price": 25.0,
+    "active": true
+  },
+  {
+    "sku": "SKU-DIGI",
+    "name": "Digital Setup Guide",
+    "category": "digital",
+    "tax_category": "digital",
+    "price": 15.0,
+    "active": true
+  }
+]

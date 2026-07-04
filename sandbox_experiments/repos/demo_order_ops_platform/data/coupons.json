@@ -1,0 +1,45 @@
+[
+  {
+    "code": "SAVE10",
+    "active": true,
+    "discount_type": "percent",
+    "discount_value": 10,
+    "max_discount": 40,
+    "min_subtotal": 50,
+    "categories": [
+      "home",
+      "office"
+    ],
+    "segment": "retail",
+    "exclusive": false,
+    "max_uses": 50,
+    "used_count": 0
+  },
+  {
+    "code": "VIP20",
+    "active": true,
+    "discount_type": "percent",
+    "discount_value": 20,
+    "max_discount": 100,
+    "min_subtotal": 20,
+    "categories": [],
+    "segment": "vip",
+    "exclusive": true,
+    "max_uses": 20,
+    "used_count": 1
+  },
+  {
+    "code": "GROCERY5",
+    "active": true,
+    "discount_type": "amount",
+    "discount_value": 5,
+    "min_subtotal": 20,
+    "categories": [
+      "grocery"
+    ],
+    "segment": "retail",
+    "exclusive": false,
+    "max_uses": 100,
+    "used_count": 0
+  }
+]
