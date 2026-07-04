@@ -458,3 +458,33 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
 - `trace_view.html` 继续保留为原始事件调试视图；需要逐条排查时仍优先看它和 `trace.jsonl`。
 - `trace.jsonl` 现已新增 `model_request_prepared`，用于记录每轮真实 `request_payload`。
 
+
+## 2026-07-04 Order Ops feature eval tasks
+
+Run these commands from the project root. Use `--repo-root .` because each task file already sets `repo_subdir`.
+
+```powershell
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_order_ops_feature_coupon_stack_rules.json `
+  --repo-root . `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_order_ops_feature_inventory_reservation.json `
+  --repo-root . `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_order_ops_feature_risk_hold_workflow.json `
+  --repo-root . `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --eval-task-file sandbox_experiments\tasks\demo_order_ops_feature_refund_restock_report.json `
+  --repo-root . `
+  --output-root sandbox_experiments\runs `
+  --config-name default
+```

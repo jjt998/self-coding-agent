@@ -1,0 +1,95 @@
+{
+  "tasks": [
+    {
+      "name": "feature_order_inventory_reservation",
+      "repo_subdir": "sandbox_experiments/repos/demo_order_ops_platform",
+      "task": "Implement place-order and cancel-order. place-order must quote, create an order, reserve inventory, and persist orders.json and inventory.json. cancel-order must cancel an unpaid reserved order and release inventory. Do not only print success.",
+      "task_type": "feature",
+      "workspace_mode": "per_task_sandbox",
+      "sandbox_retention": "always_delete",
+      "verify_commands": [
+        [
+          "python",
+          "order_ops.py",
+          "place-order",
+          "--customer",
+          "C001",
+          "--sku",
+          "SKU-RED",
+          "--qty",
+          "2",
+          "--coupon",
+          "SAVE10"
+        ],
+        [
+          "python",
+          "order_ops.py",
+          "cancel-order",
+          "--order-id",
+          "O1003"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "place order succeeds",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "place order returns reservation status",
+          "command_index": 1,
+          "contains": "status=inventory_reserved"
+        },
+        {
+          "type": "command_returncode",
+          "name": "cancel order succeeds",
+          "command_index": 2,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "cancel order confirms release",
+          "command_index": 2,
+          "contains": "released=2"
+        },
+        {
+          "type": "json_file_value_equals",
+          "name": "order persisted as cancelled",
+          "path": "data/orders.json",
+          "json_path": "2.status",
+          "expected_value": "cancelled"
+        },
+        {
+          "type": "json_file_value_equals",
+          "name": "reserved inventory restored",
+          "path": "data/inventory.json",
+          "json_path": "SKU-RED.reserved",
+          "expected_value": 1
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "orders changed",
+          "path": "order_ops/orders.py"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "inventory changed",
+          "path": "order_ops/inventory.py"
+        },
+        {
+          "type": "diff_contains_text",
+          "name": "reserve helper introduced",
+          "contains": "reserve_inventory"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 4,
+        "max_step_count": 15
+      }
+    }
+  ]
+}
