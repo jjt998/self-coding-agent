@@ -7,7 +7,7 @@
     "timeout_seconds": 100
   },
   "runtime": {
-    "max_steps": 15,
+    "max_steps": 30,
     "trace_level": "standard"
   },
   "context": {
@@ -20,6 +20,12 @@
     "enabled": true,
     "weak_conflict_penalty": 3,
     "summary_max_length": 80
+  },
+  "report": {
+    "task_outcome_summary": {
+      "enabled": true,
+      "model_polish": true,
+      "polish_timeout_seconds": 20
+    }
   }
 }
-

@@ -19,6 +19,7 @@ from model import (
     build_empty_working_memory,
     build_model_adapter,
 )
+from outcome_summary import build_task_outcome_facts
 from runtime_trace import TraceEvent, TraceWriter
 from tools import FULL_READ_FILE_MAX_CHARS, FULL_READ_FILE_MAX_LINES, CoreToolRunner, ToolExecution
 from verify import VerificationResult, build_phase_4_verification
@@ -105,6 +106,7 @@ class RuntimeState:
     )
     verification_result: VerificationResult | None = None
     stop_reason: StopReason | None = None
+    task_outcome_summary: dict[str, Any] = field(default_factory=dict)
 
     def mark_completed(self, state: AgentState) -> None:
         """记录某个状态已经执行完，并推进总步数。"""
@@ -278,6 +280,7 @@ class LoopOrchestrator:
             message=message,
             details=self._build_stop_reason_details(runtime_state=runtime_state),
         )
+        self._attach_basic_task_outcome_summary(runtime_state=runtime_state)
         self.trace_writer.write_event(
             TraceEvent(
                 event_type="run_finished",
@@ -288,6 +291,20 @@ class LoopOrchestrator:
                 },
             )
         )
+
+    def _attach_basic_task_outcome_summary(self, runtime_state: RuntimeState) -> None:
+        """Attach a pre-artifact outcome summary to run_finished details."""
+        if not runtime_state.stop_reason:
+            return
+        facts = build_task_outcome_facts(settings=None, runtime_state=runtime_state)
+        summary = {
+            "facts": facts,
+            "polished_text": "",
+            "polish_status": "skipped",
+            "polish_error": "",
+        }
+        runtime_state.task_outcome_summary = summary
+        runtime_state.stop_reason.details["task_outcome_summary"] = summary
 
     def _build_stop_reason_details(self, runtime_state: RuntimeState) -> dict[str, Any]:
         """整理 run 结束时需要保留的最终诊断字段。"""
@@ -353,6 +370,7 @@ class LoopOrchestrator:
             message="模型决策失败，run 已停止。",
             details=payload,
         )
+        self._attach_basic_task_outcome_summary(runtime_state=runtime_state)
         self.trace_writer.write_event(
             TraceEvent(
                 event_type="run_finished",

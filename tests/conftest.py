@@ -58,9 +58,22 @@ def _fake_model_response() -> str:
     )
 
 
+def _fake_summary_polish_response() -> str:
+    """Provide a dedicated fake response for task outcome summary polishing."""
+    payload = {
+        "polished_text": "任务完成总览：测试模型已根据事实层生成润色摘要。\n- 改动和验证证据以 report 与 trace 为准。\n- 该文本来自独立润色阶段。",
+        "confidence_notes": [],
+    }
+    return json.dumps(
+        {"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]},
+        ensure_ascii=False,
+    )
+
+
 @pytest.fixture(autouse=True)
 def fake_model_environment(monkeypatch) -> None:
     """默认让测试使用可审计的假模型响应；功能代码仍要求 API key 存在。"""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setenv("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", _fake_model_response())
+    monkeypatch.setenv("SELF_CODING_AGENT_FAKE_SUMMARY_POLISH_RESPONSE", _fake_summary_polish_response())
 

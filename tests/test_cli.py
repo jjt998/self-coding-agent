@@ -177,6 +177,8 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     live_trace_snapshot = json.loads((run_dir / "live_trace_snapshot.json").read_text(encoding="utf-8"))
     assert "`finalize`" in report_text
     assert "## Code Diff" in report_text
+    assert "## 任务完成总览" in report_text
+    assert "任务完成总览：测试模型已根据事实层生成润色摘要。" in report_text
     assert "## Trace View" in report_text
     assert "trace_view.html" in report_text
     assert "live_trace_view.html" in report_text
@@ -212,6 +214,17 @@ def test_cli_creates_run_artifacts(tmp_path: Path) -> None:
     assert live_trace_snapshot["run_id"] == snapshot["run_id"]
     assert live_trace_snapshot["iterations"][0]["model_request_prepared"]["request_payload"]["model"] == "deepseek-v4-flash"
     assert "run_evidence.md" in final_diff_text
+
+    assert [event["event_type"] for event in trace_events].count("task_outcome_summary_facts") == 1
+    assert [event["event_type"] for event in trace_events].count("task_outcome_summary_polish_requested") == 1
+    assert [event["event_type"] for event in trace_events].count("task_outcome_summary_polished") == 1
+    final_run_finished = [event["payload"] for event in trace_events if event["event_type"] == "run_finished"][-1]
+    task_outcome_summary = final_run_finished["stop_reason"]["details"]["task_outcome_summary"]
+    assert task_outcome_summary["polish_status"] == "success"
+    assert task_outcome_summary["facts"]["status"] == "failed_verification"
+    assert task_outcome_summary["facts"]["verification"]["failing_checks"] == ["task_verification_configured"]
+    assert task_outcome_summary["facts"]["rationale_trace"]
+    assert "verification_failed" in task_outcome_summary["facts"]["rationale_trace"][0]["rationale"]
 
 
 def test_build_sandbox_ignore_skips_local_temp_directories(tmp_path: Path) -> None:

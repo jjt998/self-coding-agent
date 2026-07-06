@@ -222,6 +222,10 @@ class ModelAdapter:
         """返回最近一次真实发给模型的请求快照；默认没有可用数据。"""
         return {}
 
+    def complete_json(self, request_payload: dict[str, Any]) -> dict[str, Any]:
+        """Return one generic JSON object from the model without ModelDecision parsing."""
+        raise NotImplementedError
+
 
 class OpenAICompatibleModelAdapter(ModelAdapter):
     """通过 OpenAI 兼容 chat completions 接口获取任务级决策。"""
@@ -299,9 +303,29 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
         """返回最近一次准备好的请求快照。"""
         return dict(self._last_request_payload)
 
-    def _request_chat_completion(self, request_payload: dict[str, Any]) -> dict[str, Any]:
+    def complete_json(self, request_payload: dict[str, Any]) -> dict[str, Any]:
+        """Call the model for a generic JSON object, used by non-decision tasks."""
+        payload = dict(request_payload)
+        payload["model"] = self.model_name
+        self._last_request_payload = payload
+        response_payload = self._request_chat_completion(
+            payload,
+            fake_response_env="SELF_CODING_AGENT_FAKE_SUMMARY_POLISH_RESPONSE",
+        )
+        raw_object, raw_response_content = self._extract_json_content(response_payload)
+        self._last_response_content = raw_response_content
+        return raw_object
+
+    def _request_chat_completion(
+        self,
+        request_payload: dict[str, Any],
+        fake_response_env: str = "SELF_CODING_AGENT_FAKE_MODEL_RESPONSE",
+    ) -> dict[str, Any]:
         """执行 HTTP 请求；测试可通过环境变量提供假响应但仍必须配置 API key。"""
-        fake_response = os.environ.get("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", "").strip()
+        fake_response = os.environ.get(fake_response_env, "").strip()
+        if not fake_response and fake_response_env != "SELF_CODING_AGENT_FAKE_MODEL_RESPONSE":
+            fake_response = os.environ.get("SELF_CODING_AGENT_FAKE_MODEL_RESPONSE", "").strip()
+            fake_response_env = "SELF_CODING_AGENT_FAKE_MODEL_RESPONSE"
         if fake_response:
             try:
                 return json.loads(fake_response)
@@ -311,7 +335,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
                     provider=self.provider,
                     model_name=self.model_name,
                     details=self._diagnostic_details(
-                        source="SELF_CODING_AGENT_FAKE_MODEL_RESPONSE",
+                        source=fake_response_env,
                         field_path="fake_model_response",
                         response_excerpt=_truncate_text(fake_response),
                     ),
@@ -383,6 +407,10 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
 
     def _extract_decision_json(self, response_payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
         """从 OpenAI 兼容响应中取出 message.content 并解析为决策 JSON。"""
+        return self._extract_json_content(response_payload)
+
+    def _extract_json_content(self, response_payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+        """Extract a JSON object from choices[0].message.content."""
         try:
             content = response_payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as error:
@@ -414,7 +442,7 @@ class OpenAICompatibleModelAdapter(ModelAdapter):
             ) from error
         if not isinstance(raw_decision, dict):
             raise ModelResponseError(
-                "模型决策 JSON 必须是对象。",
+                "模型返回 JSON 必须是对象。",
                 provider=self.provider,
                 model_name=self.model_name,
                 details=self._diagnostic_details(field_path="choices[0].message.content"),

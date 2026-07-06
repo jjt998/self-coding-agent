@@ -148,6 +148,9 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
     assert summary_data["runs"][1]["task_name"] == "bug_fix_fail"
     assert summary_data["runs"][0]["outcome"] == "passed_cleanly"
     assert summary_data["runs"][1]["outcome"] == "passed_cleanly"
+    assert summary_data["runs"][0]["task_outcome_status"] == "passed"
+    assert summary_data["runs"][0]["task_outcome_headline"]
+    assert "测试模型已根据事实层生成润色摘要" in summary_data["runs"][0]["task_outcome_polished_text"]
     assert summary_data["runs"][0]["expectation_result"]["matched"] is True
     assert isinstance(summary_data["runs"][1]["expectation_result"]["matched"], bool)
 
@@ -165,6 +168,7 @@ def test_cli_runs_eval_batch_and_writes_summary(tmp_path: Path) -> None:
     assert "## 运行明细" in summary_text
     assert "average total tokens" in summary_text
     assert "token usage 完整任务数" in summary_text
+    assert "outcome summary" in summary_text
 
     run_dirs = sorted((eval_dir / "runs").iterdir())
     assert len(run_dirs) == 2
@@ -413,6 +417,7 @@ def test_eval_summary_markdown_includes_outcome_layers_and_taxonomy() -> None:
             total_tokens=12,
             token_usage_complete=False,
             missing_usage_count=1,
+            task_outcome_polished_text="这次任务通过但带有记忆冲突警告。",
             expectation_result=EvalExpectationAssessment(
                     defined=True,
                     matched=False,
@@ -437,6 +442,7 @@ def test_eval_summary_markdown_includes_outcome_layers_and_taxonomy() -> None:
                     "outcome:failed_verification",
                     "verification_check:说明文件可读",
                 ],
+                task_outcome_polished_text="验证失败：说明文件可读检查未通过，下一步需要查看报告。",
                 expectation_result=EvalExpectationAssessment(defined=True, matched=True),
             ),
         ],
@@ -462,6 +468,8 @@ def test_eval_summary_markdown_includes_outcome_layers_and_taxonomy() -> None:
     assert "失败检查 `说明文件可读`" in summary_text
     assert "expectation 未命中 `outcome, max_step_count`" in summary_text
     assert "token usage 不完整 `missing=1`" in summary_text
+    assert "outcome summary 这次任务通过但带有记忆冲突警告。" in summary_text
+    assert "outcome summary 验证失败：说明文件可读检查未通过" in summary_text
 
 
 def test_load_expectation_spec_normalizes_minimal_expectation_fields() -> None:

@@ -13,6 +13,7 @@ from config import RunSettings
 from live_trace_view import build_live_trace_snapshot, build_live_trace_view_html, load_trace_events_from_jsonl
 from loop import LoopOrchestrator, RuntimeState, StopReason, StopReasonCode
 from memory import LongTermMemoryEntry, LongTermMemoryStore, _extract_keywords, _normalize_file_paths
+from outcome_summary import build_task_outcome_facts, build_task_outcome_summary
 from runtime_trace import TraceEvent, TraceWriter
 
 
@@ -187,6 +188,14 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
         runtime_state=runtime_state,
         trace_writer=trace_writer,
     )
+    task_outcome_summary = _build_and_write_task_outcome_summary(
+        settings=settings,
+        config_data=config_data,
+        runtime_state=runtime_state,
+        final_diff_artifact_result=final_diff_artifact_result,
+        sandbox_cleanup_result=sandbox_cleanup_result,
+        trace_writer=trace_writer,
+    )
     trace_writer.write_report(
         _build_phase_4_report(
             settings=settings,
@@ -194,6 +203,7 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
             memory_write_result=memory_write_result,
             final_diff_artifact_result=final_diff_artifact_result,
             sandbox_cleanup_result=sandbox_cleanup_result,
+            task_outcome_summary=task_outcome_summary,
         )
     )
     _write_trace_view_artifact(run_dir=run_dir, trace_writer=trace_writer)
@@ -334,6 +344,14 @@ def _build_setup_failed_runtime_state(
             "setup_results": [asdict(result) for result in setup_results],
         },
     )
+    facts = build_task_outcome_facts(settings=settings, runtime_state=runtime_state)
+    runtime_state.task_outcome_summary = {
+        "facts": facts,
+        "polished_text": "",
+        "polish_status": "skipped",
+        "polish_error": "",
+    }
+    runtime_state.stop_reason.details["task_outcome_summary"] = runtime_state.task_outcome_summary
     trace_writer.write_event(
         TraceEvent(
             event_type="run_finished",
@@ -391,6 +409,51 @@ def _cleanup_sandbox_if_needed(
     )
     trace_writer.write_event(TraceEvent(event_type="sandbox_cleanup_result", payload=asdict(result)))
     return result
+
+
+def _build_and_write_task_outcome_summary(
+    *,
+    settings: RunSettings,
+    config_data: dict,
+    runtime_state: RuntimeState,
+    final_diff_artifact_result: FinalDiffArtifactResult,
+    sandbox_cleanup_result: SandboxCleanupResult,
+    trace_writer: TraceWriter,
+) -> dict[str, Any]:
+    """Build final outcome summary and write trace events for report/live/eval."""
+    facts = build_task_outcome_facts(
+        settings=settings,
+        runtime_state=runtime_state,
+        final_diff_artifact_result=final_diff_artifact_result,
+        sandbox_cleanup_result=sandbox_cleanup_result,
+    )
+    trace_writer.write_event(TraceEvent(event_type="task_outcome_summary_facts", payload=facts))
+    trace_writer.write_event(
+        TraceEvent(
+            event_type="task_outcome_summary_polish_requested",
+            payload={
+                "enabled": True,
+                "facts_status": facts.get("status", "unknown"),
+                "facts_headline": facts.get("headline", ""),
+            },
+        )
+    )
+    summary = build_task_outcome_summary(facts=facts, config_data=config_data)
+    runtime_state.task_outcome_summary = summary
+    if runtime_state.stop_reason:
+        runtime_state.stop_reason.details["task_outcome_summary"] = summary
+    trace_writer.write_event(TraceEvent(event_type="task_outcome_summary_polished", payload=summary))
+    trace_writer.write_event(
+        TraceEvent(
+            event_type="run_finished",
+            payload={
+                "final_state": runtime_state.current_state,
+                "step_count": runtime_state.step_count,
+                "stop_reason": runtime_state.stop_reason.to_dict() if runtime_state.stop_reason else {},
+            },
+        )
+    )
+    return summary
 
 
 def _decide_sandbox_retention(retention_policy: str, verification_passed: bool) -> tuple[bool, str]:
@@ -998,6 +1061,7 @@ def _build_phase_4_report(
     memory_write_result: MemoryWriteResult,
     final_diff_artifact_result: FinalDiffArtifactResult,
     sandbox_cleanup_result: SandboxCleanupResult,
+    task_outcome_summary: dict[str, Any] | None = None,
 ) -> str:
     """把状态流、工具摘要和验证结果整理成当前阶段可读报告。"""
     stop_reason = runtime_state.stop_reason
@@ -1189,12 +1253,16 @@ def _build_phase_4_report(
             f"signals `{', '.join(recent_facts.get('signals', [])) or '无'}`"
         )
     context_summary = "\n".join(context_lines) if context_lines else "- 尚未生成 initial_guide/context_snapshot。"
+    task_outcome_section = _format_task_outcome_report_section(
+        task_outcome_summary or runtime_state.task_outcome_summary
+    )
 
     return (
         f"# 运行报告\n\n"
         f"- Run ID：`{settings.run_id}`\n"
         f"- 任务类型：`{settings.task_type}`\n"
         f"- 任务内容：{settings.task}\n\n"
+        f"{task_outcome_section}\n"
         f"## 当前状态\n\n"
         f"`{runtime_state.current_state}`\n\n"
         f"## 状态流\n\n"
@@ -1239,6 +1307,23 @@ def _build_phase_4_report(
         f"- 说明：{sandbox_cleanup_result.reason}\n"
         f"- sandbox 目录：`{sandbox_cleanup_result.sandbox_dir or '无'}`\n"
     )
+
+
+def _format_task_outcome_report_section(task_outcome_summary: dict[str, Any] | None) -> str:
+    """Format the final task outcome summary for the top of report.md."""
+    if not isinstance(task_outcome_summary, dict) or not task_outcome_summary:
+        return "## 任务完成总览\n\n- 尚未生成任务完成总览。\n\n"
+    polished_text = str(task_outcome_summary.get("polished_text", "")).strip()
+    polish_status = str(task_outcome_summary.get("polish_status", "")).strip() or "unknown"
+    polish_error = str(task_outcome_summary.get("polish_error", "")).strip()
+    if not polished_text:
+        facts = task_outcome_summary.get("facts", {})
+        if isinstance(facts, dict):
+            polished_text = str(facts.get("headline", "")).strip()
+    if not polished_text:
+        polished_text = "- 尚未生成任务完成总览。"
+    error_line = f"\n\n- polish_status=`failed`; polish_error={polish_error}" if polish_status == "failed" else ""
+    return f"## 任务完成总览\n\n{polished_text}{error_line}\n\n"
 
 
 def _write_long_term_memory_if_needed(settings: RunSettings, runtime_state: RuntimeState) -> MemoryWriteResult:
@@ -1329,6 +1414,7 @@ def _build_phase_4_report(
     memory_write_result: MemoryWriteResult,
     final_diff_artifact_result: FinalDiffArtifactResult,
     sandbox_cleanup_result: SandboxCleanupResult,
+    task_outcome_summary: dict[str, Any] | None = None,
 ) -> str:
     """在原报告基础上补充最终验证与求解收口诊断说明。"""
     base_report = _ORIGINAL_BUILD_PHASE_4_REPORT(
@@ -1337,6 +1423,7 @@ def _build_phase_4_report(
         memory_write_result=memory_write_result,
         final_diff_artifact_result=final_diff_artifact_result,
         sandbox_cleanup_result=sandbox_cleanup_result,
+        task_outcome_summary=task_outcome_summary,
     )
     stop_reason_details = runtime_state.stop_reason.details if runtime_state.stop_reason else {}
     solve_loop_exit_reason = str(stop_reason_details.get("solve_loop_exit_reason", "")).strip() or "unknown"

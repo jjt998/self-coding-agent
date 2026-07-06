@@ -8,6 +8,7 @@ from statistics import mean
 from typing import Any
 
 from config import build_settings, load_named_config
+from outcome_summary import truncate_eval_summary_text
 from runner import execute_initial_run
 
 
@@ -102,6 +103,9 @@ class EvalRunResult:
     observe_strategy: str = ""
     memory_enabled: bool = False
     memory_strategy: str = ""
+    task_outcome_headline: str = ""
+    task_outcome_polished_text: str = ""
+    task_outcome_status: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """把单条运行结果转成普通字典，供 summary.json 直接使用。"""
@@ -401,6 +405,10 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
     verification_payload = _find_last_payload(trace_events, "verification_result")
     run_finished_payload = _find_last_payload(trace_events, "run_finished")
     initial_guide_payload = _find_last_payload(trace_events, "initial_guide")
+    task_outcome_summary = _extract_task_outcome_summary(trace_events=trace_events, run_finished_payload=run_finished_payload)
+    task_outcome_facts = task_outcome_summary.get("facts", {}) if isinstance(task_outcome_summary, dict) else {}
+    if not isinstance(task_outcome_facts, dict):
+        task_outcome_facts = {}
 
     verification_checks = verification_payload.get("checks", []) if verification_payload else []
     failing_checks = [
@@ -492,6 +500,11 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
         observe_strategy=_extract_observe_strategy(config_data),
         memory_enabled=_extract_memory_enabled(config_data),
         memory_strategy=_extract_memory_strategy(config_data),
+        task_outcome_headline=str(task_outcome_facts.get("headline", "")).strip(),
+        task_outcome_polished_text=str(task_outcome_summary.get("polished_text", "")).strip()
+        if isinstance(task_outcome_summary, dict)
+        else "",
+        task_outcome_status=str(task_outcome_facts.get("status", "")).strip(),
     )
 
 
@@ -606,6 +619,9 @@ def _build_eval_summary_markdown(task_file: Path, batch_result: EvalBatchResult)
             line += f" / 失败检查 `{', '.join(item.failing_checks)}`"
         if item.failure_taxonomy_tags:
             line += f" / taxonomy tags `{', '.join(item.failure_taxonomy_tags)}`"
+        short_outcome = truncate_eval_summary_text(item.task_outcome_polished_text or item.task_outcome_headline)
+        if short_outcome:
+            line += f" / outcome summary {short_outcome}"
         if item.expectation_result and item.expectation_result.defined:
             if item.expectation_result.matched:
                 line += " / expectation 命中"
@@ -986,6 +1002,9 @@ def _load_eval_run_result(raw_run: Any) -> EvalRunResult:
         observe_strategy=str(raw_run.get("observe_strategy", "")).strip(),
         memory_enabled=bool(raw_run.get("memory_enabled")),
         memory_strategy=str(raw_run.get("memory_strategy", "")).strip(),
+        task_outcome_headline=str(raw_run.get("task_outcome_headline", "")).strip(),
+        task_outcome_polished_text=str(raw_run.get("task_outcome_polished_text", "")).strip(),
+        task_outcome_status=str(raw_run.get("task_outcome_status", "")).strip(),
     )
 
 
@@ -1453,4 +1472,19 @@ def _find_last_payload(events: list[dict[str, Any]], event_type: str) -> dict[st
             payload = event.get("payload", {})
             return payload if isinstance(payload, dict) else {}
     return {}
+
+
+def _extract_task_outcome_summary(
+    *,
+    trace_events: list[dict[str, Any]],
+    run_finished_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Read final task_outcome_summary, preferring the dedicated polished event."""
+    polished_payload = _find_last_payload(trace_events, "task_outcome_summary_polished")
+    if polished_payload:
+        return polished_payload
+    stop_reason = run_finished_payload.get("stop_reason", {}) if isinstance(run_finished_payload, dict) else {}
+    details = stop_reason.get("details", {}) if isinstance(stop_reason, dict) else {}
+    summary = details.get("task_outcome_summary", {}) if isinstance(details, dict) else {}
+    return summary if isinstance(summary, dict) else {}
 
