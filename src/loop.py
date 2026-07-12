@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import inspect
+import pickle
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -9,6 +10,19 @@ from typing import Any
 
 from context import ContextBuilder, ContextSnapshot, InitialGuide
 from config import RunSettings
+from hitl import (
+    HUMAN_INPUT_REQUEST_FILE,
+    PENDING_RUNTIME_STATE_FILE,
+    PENDING_TOOL_CALL_FILE,
+    TOOL_BASELINE_FILE,
+    HumanInputResponse,
+    HumanInputRequest,
+    ToolPermissionEngine,
+    build_human_request_id,
+    build_tool_call_id,
+    utc_now_iso,
+    write_json_file,
+)
 from memory import RuntimeMemoryManager
 from model import (
     TOOL_SCHEMAS,
@@ -46,6 +60,7 @@ class StopReasonCode(str, Enum):
     VERIFICATION_FAILED = "verification_failed"
     INTERNAL_ERROR = "internal_error"
     MODEL_ERROR = "model_error"
+    NEED_HUMAN_INPUT = "need_human_input"
 
 
 @dataclass(slots=True)
@@ -107,6 +122,15 @@ class RuntimeState:
     verification_result: VerificationResult | None = None
     stop_reason: StopReason | None = None
     task_outcome_summary: dict[str, Any] = field(default_factory=dict)
+    human_context: dict[str, Any] = field(
+        default_factory=lambda: {
+            "pending_request": None,
+            "responses": [],
+            "instructions": [],
+            "policy_events": [],
+        }
+    )
+    pending_human_request: dict[str, Any] = field(default_factory=dict)
 
     def mark_completed(self, state: AgentState) -> None:
         """记录某个状态已经执行完，并推进总步数。"""
@@ -167,6 +191,9 @@ class LoopOrchestrator:
                     runtime_state.solve_loop_exit_reason = "model_error"
                     self._finish_with_model_error(runtime_state=runtime_state, error=error)
                     return runtime_state
+                if self._is_waiting_for_human_input(runtime_state=runtime_state):
+                    self._finish_with_human_input(runtime_state=runtime_state)
+                    return runtime_state
 
             self._record_observe_trigger(runtime_state=runtime_state, reason="after_act")
             self._execute_state(
@@ -211,6 +238,172 @@ class LoopOrchestrator:
             ),
         )
         return runtime_state
+
+    def resume_after_human_response(
+        self,
+        *,
+        settings: RunSettings,
+        config_data: dict[str, Any],
+        runtime_state: RuntimeState,
+        human_response: HumanInputResponse,
+        pending_tool_payload: dict[str, Any],
+        tool_runner: CoreToolRunner,
+    ) -> RuntimeState:
+        """从 need_human_input 状态恢复：处理人工响应，然后继续同一个 run。"""
+        context_builder = ContextBuilder(
+            repo_root=settings.repo_root,
+            strategy_config=config_data.get("context", {}),
+        )
+        memory_manager = RuntimeMemoryManager(
+            repo_root=settings.repo_root,
+            strategy_config=config_data.get("memory", {}),
+        )
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="human_input_response_loaded",
+                payload=human_response.to_dict(),
+            )
+        )
+        self._active_iteration = runtime_state.current_iteration
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="run_resumed",
+                payload={
+                    "request_id": human_response.request_id,
+                    "tool_call_id": human_response.tool_call_id,
+                    "action": human_response.action,
+                },
+            )
+        )
+        runtime_state.stop_reason = None
+        runtime_state.pending_human_request = {}
+        runtime_state.human_context["pending_request"] = None
+        runtime_state.human_context.setdefault("responses", []).append(human_response.to_dict())
+
+        if human_response.action == "approve":
+            self._resume_approved_tool_call(
+                settings=settings,
+                runtime_state=runtime_state,
+                config_data=config_data,
+                tool_runner=tool_runner,
+                pending_tool_payload=pending_tool_payload,
+                human_response=human_response,
+            )
+            if self._is_waiting_for_human_input(runtime_state=runtime_state):
+                self._finish_with_human_input(runtime_state=runtime_state)
+                return runtime_state
+        elif human_response.action == "reject":
+            runtime_state.recent_tool_executions = [
+                ToolExecution(
+                    tool_name=str(pending_tool_payload.get("tool_name", "")),
+                    tool_input=dict(pending_tool_payload.get("tool_input", {})),
+                    tool_output={
+                        "ok": False,
+                        "error": "human_rejected_tool_call",
+                        "request_id": human_response.request_id,
+                        "tool_call_id": human_response.tool_call_id,
+                    },
+                )
+            ]
+            runtime_state.tool_executions.extend(runtime_state.recent_tool_executions)
+            self.trace_writer.write_event(
+                TraceEvent(event_type="human_input_rejected", payload=human_response.to_dict())
+            )
+        else:
+            instruction_payload = {
+                "request_id": human_response.request_id,
+                "tool_call_id": human_response.tool_call_id,
+                "text": human_response.instruction,
+                "created_at": human_response.responded_at,
+            }
+            runtime_state.human_context.setdefault("instructions", []).append(instruction_payload)
+            runtime_state.recent_tool_executions = []
+            self.trace_writer.write_event(
+                TraceEvent(event_type="human_instruction_added", payload=instruction_payload)
+            )
+
+        self._record_observe_trigger(runtime_state=runtime_state, reason="after_human_response")
+        self._execute_state(
+            state=AgentState.OBSERVE,
+            settings=settings,
+            runtime_state=runtime_state,
+            config_data=config_data,
+            context_builder=context_builder,
+            memory_manager=memory_manager,
+            tool_runner=tool_runner,
+        )
+
+        for iteration in range(runtime_state.current_iteration + 1, runtime_state.max_steps + 1):
+            runtime_state.current_iteration = iteration
+            runtime_state.iteration_count = iteration
+            for state in [AgentState.PLAN, AgentState.ACT]:
+                try:
+                    self._execute_state(
+                        state=state,
+                        settings=settings,
+                        runtime_state=runtime_state,
+                        config_data=config_data,
+                        context_builder=context_builder,
+                        memory_manager=memory_manager,
+                        tool_runner=tool_runner,
+                    )
+                except ModelError as error:
+                    runtime_state.solve_loop_exit_reason = "model_error"
+                    self._finish_with_model_error(runtime_state=runtime_state, error=error)
+                    return runtime_state
+                if self._is_waiting_for_human_input(runtime_state=runtime_state):
+                    self._finish_with_human_input(runtime_state=runtime_state)
+                    return runtime_state
+
+            self._record_observe_trigger(runtime_state=runtime_state, reason="after_act")
+            self._execute_state(
+                state=AgentState.OBSERVE,
+                settings=settings,
+                runtime_state=runtime_state,
+                config_data=config_data,
+                context_builder=context_builder,
+                memory_manager=memory_manager,
+                tool_runner=tool_runner,
+            )
+            if self._should_exit_solve_loop(runtime_state=runtime_state):
+                break
+
+        self._execute_state(
+            state=AgentState.VERIFY,
+            settings=settings,
+            runtime_state=runtime_state,
+            config_data=config_data,
+            context_builder=context_builder,
+            memory_manager=memory_manager,
+            tool_runner=tool_runner,
+        )
+        self._execute_state(
+            state=AgentState.FINALIZE,
+            settings=settings,
+            runtime_state=runtime_state,
+            config_data=config_data,
+            context_builder=context_builder,
+            memory_manager=memory_manager,
+            tool_runner=tool_runner,
+        )
+        verification_passed = bool(runtime_state.verification_result and runtime_state.verification_result.passed)
+        self._finish_run(
+            runtime_state=runtime_state,
+            code=StopReasonCode.COMPLETED if verification_passed else StopReasonCode.VERIFICATION_FAILED,
+            message=(
+                "人工响应处理后继续运行，最终验证通过。"
+                if verification_passed
+                else "人工响应处理后继续运行，但最终验证失败。"
+            ),
+        )
+        return runtime_state
+
+    def _is_waiting_for_human_input(self, runtime_state: RuntimeState) -> bool:
+        """判断当前 run 是否已经在工具执行前暂停等待人工处理。"""
+        return bool(
+            runtime_state.stop_reason
+            and runtime_state.stop_reason.code is StopReasonCode.NEED_HUMAN_INPUT
+        )
 
     def _should_exit_solve_loop(self, runtime_state: RuntimeState) -> bool:
         """根据收口信号判断是否结束求解阶段。"""
@@ -371,6 +564,34 @@ class LoopOrchestrator:
             details=payload,
         )
         self._attach_basic_task_outcome_summary(runtime_state=runtime_state)
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="run_finished",
+                payload={
+                    "final_state": runtime_state.current_state,
+                    "step_count": runtime_state.step_count,
+                    "stop_reason": runtime_state.stop_reason.to_dict(),
+                },
+            )
+        )
+
+    def _finish_with_human_input(self, runtime_state: RuntimeState) -> None:
+        """工具需要人工确认时写出暂停事件和 run_finished，不进入 observe/verify。"""
+        if not runtime_state.stop_reason:
+            return
+        self._attach_basic_task_outcome_summary(runtime_state=runtime_state)
+        details = runtime_state.stop_reason.details
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="run_paused",
+                payload={
+                    "reason": "need_human_input",
+                    "request_id": details.get("request_id", ""),
+                    "tool_call_id": details.get("tool_call_id", ""),
+                    "request_path": details.get("request_path", ""),
+                },
+            )
+        )
         self.trace_writer.write_event(
             TraceEvent(
                 event_type="run_finished",
@@ -728,7 +949,12 @@ class LoopOrchestrator:
                 context_builder=context_builder,
             )
         if state is AgentState.ACT:
-            return self._run_act(runtime_state=runtime_state, tool_runner=tool_runner)
+            return self._run_act(
+                settings=settings,
+                runtime_state=runtime_state,
+                config_data=config_data,
+                tool_runner=tool_runner,
+            )
         if state is AgentState.OBSERVE:
             return self._run_observe(runtime_state=runtime_state)
         if state is AgentState.VERIFY:
@@ -954,18 +1180,32 @@ class LoopOrchestrator:
             "run_token_usage": dict(runtime_state.token_usage),
         }
 
-    def _run_act(self, runtime_state: RuntimeState, tool_runner: CoreToolRunner) -> dict[str, Any]:
+    def _run_act(
+        self,
+        settings: RunSettings,
+        runtime_state: RuntimeState,
+        config_data: dict[str, Any],
+        tool_runner: CoreToolRunner,
+    ) -> dict[str, Any]:
         """执行模型为当前轮规划的工具调用。"""
         self._active_iteration = runtime_state.current_iteration
         tool_calls = self._run_planned_tools(
+            settings=settings,
+            runtime_state=runtime_state,
+            config_data=config_data,
             tool_runner=tool_runner,
             model_decision=runtime_state.model_decision,
         )
         runtime_state.recent_tool_executions = tool_calls
         runtime_state.tool_executions.extend(tool_calls)
         return {
-            "summary": "Executed the model-planned tool sequence.",
+            "summary": (
+                "工具执行前触发人工审批，run 已暂停。"
+                if self._is_waiting_for_human_input(runtime_state=runtime_state)
+                else "Executed the model-planned tool sequence."
+            ),
             "tool_calls": [tool_call.to_trace_payload() for tool_call in tool_calls],
+            "waiting_for_human_input": self._is_waiting_for_human_input(runtime_state=runtime_state),
         }
 
     def _run_observe(self, runtime_state: RuntimeState) -> dict[str, Any]:
@@ -1053,23 +1293,84 @@ class LoopOrchestrator:
 
     def _run_planned_tools(
         self,
+        settings: RunSettings,
+        runtime_state: RuntimeState,
+        config_data: dict[str, Any],
         tool_runner: CoreToolRunner,
         model_decision: ModelDecision,
     ) -> list[ToolExecution]:
         """执行决策层产出的工具计划；工具计划必须来自模型决策。"""
         executions: list[ToolExecution] = []
+        permission_engine = ToolPermissionEngine(
+            config_data=config_data,
+            interaction_mode=settings.interaction_mode,
+        )
         planned_tool_calls = [
             (item.tool_name, self._normalize_tool_input(tool_name=item.tool_name, tool_input=item.tool_input))
             for item in model_decision.tool_calls
         ]
 
-        for tool_name, tool_input in planned_tool_calls:
+        for tool_index, (tool_name, tool_input) in enumerate(planned_tool_calls):
+            tool_call_id = build_tool_call_id(
+                iteration=runtime_state.current_iteration,
+                tool_index=tool_index,
+            )
+            permission_decision = permission_engine.check(tool_name=tool_name, tool_input=tool_input)
+            self.trace_writer.write_event(
+                TraceEvent(
+                    event_type="tool_permission_checked",
+                    payload={
+                        "tool_name": tool_name,
+                        "tool_input": tool_input,
+                        "tool_call_id": tool_call_id,
+                        "tool_index": tool_index,
+                        "tool_total": len(planned_tool_calls),
+                        "iteration": self._current_tool_iteration(),
+                        "decision": permission_decision.to_dict(),
+                    },
+                )
+            )
+            if permission_decision.action == "deny":
+                execution = self._build_tool_permission_denied_execution(
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    tool_call_id=tool_call_id,
+                    permission_decision=permission_decision,
+                    runtime_state=runtime_state,
+                )
+                executions.append(execution)
+                self.trace_writer.write_event(
+                    TraceEvent(
+                        event_type="tool_permission_denied",
+                        payload={
+                            **execution.to_trace_payload(),
+                            "tool_call_id": tool_call_id,
+                            "iteration": self._current_tool_iteration(),
+                        },
+                    )
+                )
+                continue
+            if permission_decision.action == "require_approval":
+                self._pause_for_tool_approval(
+                    settings=settings,
+                    runtime_state=runtime_state,
+                    tool_runner=tool_runner,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    tool_index=tool_index,
+                    tool_total=len(planned_tool_calls),
+                    tool_call_id=tool_call_id,
+                    remaining_tool_calls=planned_tool_calls[tool_index + 1 :],
+                    permission_decision=permission_decision,
+                )
+                break
             self.trace_writer.write_event(
                 TraceEvent(
                     event_type="tool_called",
                     payload={
                         "tool_name": tool_name,
                         "tool_input": tool_input,
+                        "tool_call_id": tool_call_id,
                         "iteration": self._current_tool_iteration(),
                     },
                 )
@@ -1081,11 +1382,209 @@ class LoopOrchestrator:
                     event_type="tool_result",
                     payload={
                         **execution.to_trace_payload(),
+                        "tool_call_id": tool_call_id,
                         "iteration": self._current_tool_iteration(),
                     },
                 )
             )
         return executions
+
+    def _resume_approved_tool_call(
+        self,
+        *,
+        settings: RunSettings,
+        runtime_state: RuntimeState,
+        config_data: dict[str, Any],
+        tool_runner: CoreToolRunner,
+        pending_tool_payload: dict[str, Any],
+        human_response: HumanInputResponse,
+    ) -> None:
+        """执行已获批准的 pending tool，并按顺序处理同一轮剩余工具。"""
+        tool_name = str(pending_tool_payload.get("tool_name", "")).strip()
+        tool_input = dict(pending_tool_payload.get("tool_input", {}))
+        tool_call_id = human_response.tool_call_id
+        self.trace_writer.write_event(
+            TraceEvent(event_type="human_input_approved", payload=human_response.to_dict())
+        )
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="tool_called",
+                payload={
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "tool_call_id": tool_call_id,
+                    "iteration": self._current_tool_iteration(),
+                    "approved_by_human": True,
+                },
+            )
+        )
+        execution = getattr(tool_runner, tool_name)(**tool_input)
+        executions = [execution]
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="tool_result",
+                payload={
+                    **execution.to_trace_payload(),
+                    "tool_call_id": tool_call_id,
+                    "iteration": self._current_tool_iteration(),
+                    "approved_by_human": True,
+                },
+            )
+        )
+
+        remaining_calls = [
+            (
+                str(item.get("tool_name", "")).strip(),
+                dict(item.get("tool_input", {})),
+            )
+            for item in pending_tool_payload.get("remaining_tool_calls", [])
+            if isinstance(item, dict)
+        ]
+        if remaining_calls:
+            synthetic_decision = deepcopy(runtime_state.model_decision)
+            if synthetic_decision is not None:
+                # 这里复用原有权限检查和执行逻辑，只把工具列表收窄到尚未执行的尾部。
+                from model import PlannedToolCall
+
+                synthetic_decision.tool_calls = [
+                    PlannedToolCall(tool_name=name, tool_input=input_payload)
+                    for name, input_payload in remaining_calls
+                ]
+                executions.extend(
+                    self._run_planned_tools(
+                        settings=settings,
+                        runtime_state=runtime_state,
+                        config_data=config_data,
+                        tool_runner=tool_runner,
+                        model_decision=synthetic_decision,
+                    )
+                )
+        runtime_state.recent_tool_executions = executions
+        runtime_state.tool_executions.extend(executions)
+
+    def _build_tool_permission_denied_execution(
+        self,
+        *,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        tool_call_id: str,
+        permission_decision: Any,
+        runtime_state: RuntimeState,
+    ) -> ToolExecution:
+        """把策略拒绝包装成普通工具失败结果，让 observe 能把事实反馈给模型。"""
+        policy_event = {
+            "tool": tool_name,
+            "tool_call_id": tool_call_id,
+            "action": "deny",
+            "reason": permission_decision.reason,
+            "matched_rule_id": permission_decision.matched_rule_id,
+        }
+        runtime_state.human_context.setdefault("policy_events", []).append(policy_event)
+        return ToolExecution(
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_output={
+                "ok": False,
+                "error": "tool_permission_denied",
+                "detail": permission_decision.reason,
+                "matched_rule_id": permission_decision.matched_rule_id,
+            },
+        )
+
+    def _pause_for_tool_approval(
+        self,
+        *,
+        settings: RunSettings,
+        runtime_state: RuntimeState,
+        tool_runner: CoreToolRunner,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        tool_index: int,
+        tool_total: int,
+        tool_call_id: str,
+        remaining_tool_calls: list[tuple[str, dict[str, Any]]],
+        permission_decision: Any,
+    ) -> None:
+        """写出 headless HITL 需要的请求、待执行工具和运行态快照，然后标记暂停。"""
+        run_dir = self.trace_writer.run_dir
+        request_id = build_human_request_id(
+            iteration=runtime_state.current_iteration,
+            tool_index=tool_index,
+        )
+        pending_tool_payload = {
+            "request_id": request_id,
+            "tool_call_id": tool_call_id,
+            "tool_index": tool_index,
+            "tool_total": tool_total,
+            "iteration": runtime_state.current_iteration,
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "remaining_tool_calls": [
+                {"tool_name": name, "tool_input": input_payload}
+                for name, input_payload in remaining_tool_calls
+            ],
+        }
+        pending_tool_path = run_dir / PENDING_TOOL_CALL_FILE
+        write_json_file(pending_tool_path, pending_tool_payload)
+        write_json_file(run_dir / TOOL_BASELINE_FILE, tool_runner.export_baseline_snapshot())
+
+        request = HumanInputRequest(
+            request_id=request_id,
+            run_id=settings.run_id,
+            created_at=utc_now_iso(),
+            stage="act",
+            reason="tool_requires_approval",
+            message=f"工具 {tool_name} 需要人工确认后才能执行。",
+            tool_call_id=tool_call_id,
+            tool_index=tool_index,
+            tool_total=tool_total,
+            tool=tool_name,
+            tool_input_preview=self._truncate_model_feedback_text(tool_input, limit=1200),
+            full_tool_input_path=str(pending_tool_path),
+            policy={
+                "matched_rule_id": permission_decision.matched_rule_id,
+                "action": permission_decision.action,
+                "reason": permission_decision.reason,
+            },
+            context_hint={
+                "task": runtime_state.task,
+                "iteration": runtime_state.current_iteration,
+                "last_rational": getattr(runtime_state.model_decision, "rationale", ""),
+            },
+        )
+        request_path = run_dir / HUMAN_INPUT_REQUEST_FILE
+        write_json_file(request_path, request.to_dict())
+        runtime_state.pending_human_request = request.to_dict()
+        runtime_state.human_context["pending_request"] = request.to_dict()
+        runtime_state.human_context.setdefault("policy_events", []).append(
+            {
+                "tool": tool_name,
+                "tool_call_id": tool_call_id,
+                "action": "require_approval",
+                "reason": permission_decision.reason,
+                "matched_rule_id": permission_decision.matched_rule_id,
+            }
+        )
+        runtime_state.stop_reason = StopReason(
+            code=StopReasonCode.NEED_HUMAN_INPUT,
+            message=f"工具 {tool_name} 需要人工确认，run 已暂停。",
+            details={
+                "request_id": request_id,
+                "tool_call_id": tool_call_id,
+                "request_path": str(request_path),
+                "pending_tool_call_path": str(pending_tool_path),
+                "interaction_mode": settings.interaction_mode,
+                "human_context": deepcopy(runtime_state.human_context),
+            },
+        )
+        with (run_dir / PENDING_RUNTIME_STATE_FILE).open("wb") as handle:
+            pickle.dump(runtime_state, handle)
+        self.trace_writer.write_event(
+            TraceEvent(
+                event_type="human_input_requested",
+                payload=request.to_dict(),
+            )
+        )
 
     def _normalize_tool_input(self, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
         """兼容常见参数别名，并拒绝结构化工具 schema 未声明的字段。"""

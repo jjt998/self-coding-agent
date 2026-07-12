@@ -48,7 +48,57 @@ DEEPSEEK_API_KEY=你的 DeepSeek API key
 - `report.md`
 - `config_snapshot.json`
 
-## 3. 编写 eval task
+## 3. 使用 headless HITL
+
+MVP2 支持 `headless_hitl` 模式。该模式不会在终端里实时提问，而是在敏感工具执行前写出人工请求文件，并暂停 run。
+
+启动方式：
+
+```powershell
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --task "修改代码并通过验证" `
+  --repo-root . `
+  --output-root runs `
+  --config-name default `
+  --interaction-mode headless_hitl
+```
+
+如果命中 `require_approval` 规则，run 会以 `need_human_input` 停止，并在 run 目录生成：
+
+- `human_input_request.json`：说明等待审批的单个工具调用。
+- `pending_tool_call.json`：保存待执行工具的完整参数。
+- `pending_runtime_state.pkl`：保存恢复所需的运行态。
+- `tool_baseline_snapshot.json`：保存 diff 基线，避免 resume 后丢失原始对比。
+
+人工响应示例：
+
+```json
+{
+  "request_id": "hir_...",
+  "tool_call_id": "toolcall_...",
+  "action": "approve",
+  "instruction": ""
+}
+```
+
+恢复命令：
+
+```powershell
+& 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
+  --resume-run runs\run-xxxx `
+  --human-response runs\run-xxxx\human_response.json `
+  --config-name default
+```
+
+`action` 支持：
+
+- `approve`：执行原 pending tool call，并继续当前 run。
+- `reject`：不执行原工具，把人工拒绝写回上下文，让模型重新决策。
+- `add_instruction`：不执行原工具，把补充说明写入 `context_snapshot.human_context`。
+
+`interactive` 模式在 MVP2 只保留配置语义，运行时会提示暂未实现。
+
+## 4. 编写 eval task
 
 eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_commands` 或 `verify_rules`。
 
@@ -78,7 +128,7 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 
 未配置 `verify_commands` 且未配置 `verify_rules` 时，验证会失败为 `missing_task_verification`。
 
-## 4. 查看 report
+## 5. 查看 report
 
 `report.md` 是面向人的单次运行报告。重点查看：
 
@@ -108,7 +158,7 @@ eval task 使用 JSON。需要成功判定的任务必须显式配置 `verify_co
 这里记录的是模型显式返回内容，不包含 provider 隐藏推理链，也不会记录 API key 或请求头。
 token 指标只统计 provider 返回的模型 usage，不统计工具调用或命令开销；若某轮缺少 `usage`，当前会保留真实值并把整次任务标记为 token usage 不完整，不做本地估算。
 
-## 4.1 读取源码时的工具分工
+## 5.1 读取源码时的工具分工
 
 - `read_file`：通用入口。小文件返回全文；大文件返回 `content_mode="structure_summary"`。
 - `read_file_structure_summary`：显式只读结构摘要。适合先看 `.py` 文件里的 `class` / `def` 起始行号，或先看 Markdown / 文本文件的标题分节。
@@ -120,7 +170,7 @@ token 指标只统计 provider 返回的模型 usage，不统计工具调用或�
 - `cache_status = stale`：这个文件在编辑后已整文件失效，旧片段只表示“以前读过”，不能继续当成当前可信源码。
 - 如果只想在 stale 后重新定位结构，优先再调用一次 `read_file_structure_summary`；确定位置后再用 `read_file_range`。
 
-## 5. 运行 eval batch
+## 6. 运行 eval batch
 
 ```powershell
 & 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
@@ -138,7 +188,7 @@ eval 产物包含：
 
 `summary.json` 中重点字段包括 `outcome_counts`、`failure_taxonomy_counts`、`failure_taxonomy_tag_counts`、`verification_failure_counts`、`observe_trigger_reason_counts`，以及 `average_total_tokens`、`total_tokens`、`token_usage_complete_count`、`token_usage_incomplete_count`。
 
-## 6. 运行 comparison
+## 7. 运行 comparison
 
 ```powershell
 & 'D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe' -m cli `
@@ -164,7 +214,7 @@ comparison 产物包含：
 - `total_tokens_delta`
 - `task_deltas`
 
-## 7. 当前仓库任务与启动命令
+## 8. 当前仓库任务与启动命令
 
 当前仓库里已有两类可直接运行的任务文件：
 
@@ -441,7 +491,7 @@ D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m cli ^
   --output-root sandbox_experiments\runs
 ```
 
-## 8. 当前限制
+## 9. 当前限制
 
 - 不支持 `rule_based` provider。
 - CLI 单次运行暂不支持直接传入 `verify_commands` / `verify_rules`。

@@ -27,6 +27,9 @@ class RunSettings:
     workspace_mode: str = "in_place"
     sandbox_dir: str = ""
     sandbox_retention: str = "always_delete"
+    interaction_mode: str = "tasks"
+    resume_run_dir: str = ""
+    human_response_path: str = ""
     setup_commands: list[list[str]] = field(default_factory=list)
     verify_setup_commands: list[list[str]] = field(default_factory=list)
     verify_cleanup_commands: list[list[str]] = field(default_factory=list)
@@ -50,6 +53,9 @@ def build_settings(
     source_repo_root: str | None = None,
     workspace_mode: str = "in_place",
     sandbox_retention: str = "always_delete",
+    interaction_mode: str = "tasks",
+    resume_run_dir: str = "",
+    human_response_path: str = "",
     setup_commands: list[list[str]] | None = None,
     verify_setup_commands: list[list[str]] | None = None,
     verify_cleanup_commands: list[list[str]] | None = None,
@@ -70,6 +76,9 @@ def build_settings(
         config_name=config_name,
         workspace_mode=workspace_mode,
         sandbox_retention=sandbox_retention,
+        interaction_mode=interaction_mode,
+        resume_run_dir=resume_run_dir,
+        human_response_path=human_response_path,
         setup_commands=list(setup_commands or []),
         verify_setup_commands=list(verify_setup_commands or []),
         verify_cleanup_commands=list(verify_cleanup_commands or []),

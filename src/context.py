@@ -122,6 +122,7 @@ class ContextSnapshot:
     fresh_context: dict[str, Any]
     stale_context: dict[str, Any]
     recent_facts: dict[str, Any]
+    human_context: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """导出模型可消费的当前轮事实，并把缺失字段补成稳定空列表或空字符串。"""
@@ -151,6 +152,12 @@ class ContextSnapshot:
                 "recent_tool_results": list(self.recent_facts.get("recent_tool_results", [])),
                 "failed_tools": list(self.recent_facts.get("failed_tools", [])),
                 "signals": list(self.recent_facts.get("signals", [])),
+            },
+            "human_context": {
+                "pending_request": self.human_context.get("pending_request"),
+                "responses": list(self.human_context.get("responses", [])),
+                "instructions": list(self.human_context.get("instructions", [])),
+                "policy_events": list(self.human_context.get("policy_events", [])),
             },
         }
 
@@ -228,7 +235,20 @@ class ContextBuilder:
                 "failed_tools": list(observe_content.get("failed_tools", [])),
                 "signals": list(observe_content.get("signals", [])),
             },
+            human_context=self._build_human_context(runtime_state=runtime_state),
         )
+
+    def _build_human_context(self, *, runtime_state: Any) -> dict[str, Any]:
+        """把人工审批相关摘要放进运行快照，供模型下一轮按人的决定调整动作。"""
+        raw_context = getattr(runtime_state, "human_context", {}) or {}
+        if not isinstance(raw_context, dict):
+            raw_context = {}
+        return {
+            "pending_request": raw_context.get("pending_request"),
+            "responses": list(raw_context.get("responses", [])),
+            "instructions": list(raw_context.get("instructions", [])),
+            "policy_events": list(raw_context.get("policy_events", [])),
+        }
 
     def _task_keywords_from_runtime_state(self, *, runtime_state: Any) -> list[str]:
         """优先复用首轮关键词，避免后续轮次因为重新拆词导致召回口径漂移。"""

@@ -64,6 +64,14 @@ class CoreToolRunner:
         self.repo_root = Path(repo_root).resolve()
         self._baseline_snapshot = self._snapshot_repo_texts()
 
+    def export_baseline_snapshot(self) -> dict[str, str]:
+        """导出启动时文本快照，供 headless_hitl 暂停恢复后继续计算 diff。"""
+        return dict(self._baseline_snapshot)
+
+    def import_baseline_snapshot(self, snapshot: dict[str, str]) -> None:
+        """恢复启动时文本快照，避免 resume 后把已修改文件误当成新基线。"""
+        self._baseline_snapshot = dict(snapshot)
+
     def search_text(self, query: str, limit: int = 20) -> ToolExecution:
         """在仓库里做最小文本搜索，返回命中的文件和行号。"""
         matches: list[dict[str, Any]] = []

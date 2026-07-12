@@ -8,7 +8,32 @@
   },
   "runtime": {
     "max_steps": 30,
-    "trace_level": "standard"
+    "trace_level": "standard",
+    "interaction_mode": "tasks"
+  },
+  "tool_permissions": {
+    "enabled": false,
+    "default_action": "allow",
+    "rules": [
+      {
+        "id": "edit_requires_approval",
+        "tool": "apply_patch",
+        "action": "require_approval"
+      },
+      {
+        "id": "replace_lines_requires_approval",
+        "tool": "replace_lines",
+        "action": "require_approval"
+      },
+      {
+        "id": "hard_reset_denied",
+        "tool": "run_command",
+        "action": "deny",
+        "match": {
+          "command_contains_any": ["git reset --hard"]
+        }
+      }
+    ]
   },
   "context": {
     "strategy": "file_recall_context"

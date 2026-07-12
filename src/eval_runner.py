@@ -9,7 +9,7 @@ from typing import Any
 
 from config import build_settings, load_named_config
 from outcome_summary import truncate_eval_summary_text
-from runner import execute_initial_run
+from runner import execute_initial_run, execute_resume_run
 
 
 @dataclass(slots=True)
@@ -56,6 +56,10 @@ class EvalTaskSpec:
     repo_subdir: str = "."
     workspace_mode: str = "per_task_sandbox"
     sandbox_retention: str = "always_delete"
+    interaction_mode: str = ""
+    expected_stop_reason: str = ""
+    auto_human_response: dict[str, Any] = field(default_factory=dict)
+    resume_after_human_response: bool = False
     setup_commands: list[list[str]] = field(default_factory=list)
     verify_setup_commands: list[list[str]] = field(default_factory=list)
     verify_cleanup_commands: list[list[str]] = field(default_factory=list)
@@ -106,6 +110,7 @@ class EvalRunResult:
     task_outcome_headline: str = ""
     task_outcome_polished_text: str = ""
     task_outcome_status: str = ""
+    hitl: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """把单条运行结果转成普通字典，供 summary.json 直接使用。"""
@@ -247,6 +252,14 @@ def load_eval_task_specs(task_file: Path) -> list[EvalTaskSpec]:
                 repo_subdir=_normalize_repo_subdir(raw_task.get("repo_subdir")),
                 workspace_mode=_normalize_workspace_mode(raw_task.get("workspace_mode")),
                 sandbox_retention=_normalize_sandbox_retention(raw_task.get("sandbox_retention")),
+                interaction_mode=_normalize_interaction_mode(raw_task.get("interaction_mode")),
+                expected_stop_reason=str(raw_task.get("expected_stop_reason", "")).strip(),
+                auto_human_response=(
+                    dict(raw_task.get("auto_human_response", {}))
+                    if isinstance(raw_task.get("auto_human_response"), dict)
+                    else {}
+                ),
+                resume_after_human_response=bool(raw_task.get("resume_after_human_response", False)),
                 setup_commands=_normalize_command_matrix(raw_task.get("setup_commands")),
                 verify_setup_commands=_normalize_command_matrix(raw_task.get("verify_setup_commands")),
                 verify_cleanup_commands=_normalize_command_matrix(raw_task.get("verify_cleanup_commands")),
@@ -284,6 +297,7 @@ def run_eval_batch(
     repo_root: str,
     output_root: str,
     config_name: str,
+    interaction_mode_override: str = "",
 ) -> Path:
     """按同一份任务文件批量执行 run，并产出 eval 级别的 JSON/Markdown 汇总。"""
     task_specs = load_eval_task_specs(task_file)
@@ -298,6 +312,13 @@ def run_eval_batch(
     for task_spec in task_specs:
         # 这里每条任务都走一遍统一 run 内核，避免 eval 和真实运行两套逻辑慢慢漂移。
         task_repo_root = _resolve_task_repo_root(repo_root=Path(repo_root), repo_subdir=task_spec.repo_subdir)
+        interaction_mode = _resolve_eval_interaction_mode(
+            cli_interaction_mode=interaction_mode_override,
+            task_interaction_mode=task_spec.interaction_mode,
+            config_data=config_data,
+        )
+        if interaction_mode == "interactive":
+            raise ValueError("interactive 模式暂未实现，请使用 tasks 或 headless_hitl。")
         settings = build_settings(
             task=task_spec.task,
             task_type=task_spec.task_type,
@@ -307,6 +328,7 @@ def run_eval_batch(
             source_repo_root=str(task_repo_root),
             workspace_mode=task_spec.workspace_mode,
             sandbox_retention=task_spec.sandbox_retention,
+            interaction_mode=interaction_mode,
             setup_commands=task_spec.setup_commands,
             verify_setup_commands=task_spec.verify_setup_commands,
             verify_cleanup_commands=task_spec.verify_cleanup_commands,
@@ -314,6 +336,12 @@ def run_eval_batch(
             verify_rules=task_spec.verify_rules,
         )
         run_dir = execute_initial_run(settings=settings, config_data=config_data)
+        if task_spec.resume_after_human_response:
+            _auto_resume_hitl_run(
+                run_dir=run_dir,
+                task_spec=task_spec,
+                config_data=config_data,
+            )
         run_results.append(_collect_eval_run_result(task_spec=task_spec, run_id=settings.run_id, run_dir=run_dir))
 
     batch_result = _build_eval_batch_result(eval_name=eval_name, run_results=run_results)
@@ -343,6 +371,30 @@ def _make_unique_output_dir(base_dir: Path) -> Path:
         if not numbered_candidate.exists():
             return numbered_candidate
     raise RuntimeError(f"无法为输出目录生成唯一名称：{base_dir}")
+
+
+def _auto_resume_hitl_run(*, run_dir: Path, task_spec: EvalTaskSpec, config_data: dict[str, Any]) -> None:
+    """按 eval 任务里的预置动作生成 human_response.json，并调用正式恢复入口。"""
+    request_path = run_dir / "human_input_request.json"
+    if not request_path.exists():
+        raise RuntimeError("eval 任务要求自动恢复，但 run 没有生成 human_input_request.json。")
+    request = json.loads(request_path.read_text(encoding="utf-8-sig"))
+    if not isinstance(request, dict):
+        raise RuntimeError("human_input_request.json 根节点必须是对象。")
+    action = str(task_spec.auto_human_response.get("action", "approve")).strip() or "approve"
+    instruction = str(task_spec.auto_human_response.get("instruction", "")).strip()
+    response_payload = {
+        "request_id": str(request.get("request_id", "")),
+        "tool_call_id": str(request.get("tool_call_id", "")),
+        "action": action,
+        "instruction": instruction,
+    }
+    response_path = run_dir / "human_response.auto.json"
+    response_path.write_text(
+        json.dumps(response_payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    execute_resume_run(run_dir=run_dir, human_response_path=response_path, config_data=config_data)
 
 
 def run_strategy_comparison(
@@ -409,6 +461,9 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
     task_outcome_facts = task_outcome_summary.get("facts", {}) if isinstance(task_outcome_summary, dict) else {}
     if not isinstance(task_outcome_facts, dict):
         task_outcome_facts = {}
+    hitl_facts = task_outcome_facts.get("hitl", {})
+    if not isinstance(hitl_facts, dict):
+        hitl_facts = {}
 
     verification_checks = verification_payload.get("checks", []) if verification_payload else []
     failing_checks = [
@@ -462,6 +517,13 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
         diagnostic_labels=diagnostic_labels,
         failure_taxonomy=failure_taxonomy,
     )
+    if task_spec.expected_stop_reason:
+        if expectation_result is None:
+            expectation_result = EvalExpectationAssessment()
+        expectation_result.defined = True
+        if stop_reason != task_spec.expected_stop_reason:
+            expectation_result.matched = False
+            expectation_result.failed_fields.append("expected_stop_reason")
 
     config_data = config_snapshot.get("config", {})
     return EvalRunResult(
@@ -505,6 +567,7 @@ def _collect_eval_run_result(task_spec: EvalTaskSpec, run_id: str, run_dir: Path
         if isinstance(task_outcome_summary, dict)
         else "",
         task_outcome_status=str(task_outcome_facts.get("status", "")).strip(),
+        hitl=dict(hitl_facts),
     )
 
 
@@ -619,6 +682,12 @@ def _build_eval_summary_markdown(task_file: Path, batch_result: EvalBatchResult)
             line += f" / 失败检查 `{', '.join(item.failing_checks)}`"
         if item.failure_taxonomy_tags:
             line += f" / taxonomy tags `{', '.join(item.failure_taxonomy_tags)}`"
+        if item.hitl.get("triggered"):
+            line += (
+                f" / HITL paused=`{item.hitl.get('paused', False)}`"
+                f" resumed=`{item.hitl.get('resumed', False)}`"
+                f" action=`{item.hitl.get('last_action', '') or 'none'}`"
+            )
         short_outcome = truncate_eval_summary_text(item.task_outcome_polished_text or item.task_outcome_headline)
         if short_outcome:
             line += f" / outcome summary {short_outcome}"
@@ -1214,6 +1283,33 @@ def _normalize_workspace_mode(raw_value: Any) -> str:
     if text in {"in_place", "per_task_sandbox"}:
         return text
     return "per_task_sandbox"
+
+
+def _normalize_interaction_mode(raw_value: Any) -> str:
+    """把 eval 任务里的交互模式收敛成稳定枚举；缺省时交给 config 决定。"""
+    text = _normalize_optional_string(raw_value)
+    if text in {"tasks", "headless_hitl", "interactive"}:
+        return text
+    return ""
+
+
+def _resolve_eval_interaction_mode(
+    *,
+    cli_interaction_mode: str = "",
+    task_interaction_mode: str,
+    config_data: dict[str, Any],
+) -> str:
+    """按 CLI > eval task > config runtime > tasks 的顺序决定交互模式。"""
+    if cli_interaction_mode:
+        return cli_interaction_mode
+    if task_interaction_mode:
+        return task_interaction_mode
+    runtime_config = config_data.get("runtime", {})
+    if isinstance(runtime_config, dict):
+        configured = _normalize_interaction_mode(runtime_config.get("interaction_mode"))
+        if configured:
+            return configured
+    return "tasks"
 
 
 def _normalize_command_matrix(raw_value: Any) -> list[list[str]]:

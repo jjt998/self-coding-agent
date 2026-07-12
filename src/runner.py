@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 import os
+import pickle
 from pathlib import Path
 import shutil
 import subprocess
@@ -11,10 +12,19 @@ import webbrowser
 
 from config import RunSettings
 from live_trace_view import build_live_trace_snapshot, build_live_trace_view_html, load_trace_events_from_jsonl
+from hitl import (
+    HUMAN_INPUT_REQUEST_FILE,
+    PENDING_RUNTIME_STATE_FILE,
+    PENDING_TOOL_CALL_FILE,
+    TOOL_BASELINE_FILE,
+    load_human_response,
+    load_json_file,
+)
 from loop import LoopOrchestrator, RuntimeState, StopReason, StopReasonCode
 from memory import LongTermMemoryEntry, LongTermMemoryStore, _extract_keywords, _normalize_file_paths
 from outcome_summary import build_task_outcome_facts, build_task_outcome_summary
 from runtime_trace import TraceEvent, TraceWriter
+from tools import CoreToolRunner
 
 
 @dataclass(slots=True)
@@ -211,6 +221,110 @@ def execute_initial_run(settings: RunSettings, config_data: dict) -> Path:
     return run_dir
 
 
+def execute_resume_run(run_dir: Path, human_response_path: Path, config_data: dict) -> Path:
+    """恢复一个 need_human_input run，处理人工响应后继续写同一个 run 的产物。"""
+    run_dir = run_dir.resolve()
+    if not run_dir.exists():
+        raise ValueError(f"待恢复的 run 目录不存在：{run_dir}")
+    request_path = run_dir / HUMAN_INPUT_REQUEST_FILE
+    pending_tool_path = run_dir / PENDING_TOOL_CALL_FILE
+    pending_state_path = run_dir / PENDING_RUNTIME_STATE_FILE
+    baseline_path = run_dir / TOOL_BASELINE_FILE
+    if not request_path.exists():
+        raise ValueError("当前 run 没有 human_input_request.json，不能执行 headless_hitl 恢复。")
+    if not pending_tool_path.exists() or not pending_state_path.exists():
+        raise ValueError("当前 run 缺少 pending tool 或 runtime state，不能恢复。")
+
+    request_payload = load_json_file(request_path)
+    pending_tool_payload = load_json_file(pending_tool_path)
+    human_response = load_human_response(human_response_path)
+    if human_response.request_id != str(request_payload.get("request_id", "")):
+        raise ValueError("人工响应 request_id 与当前待处理请求不匹配。")
+    if human_response.tool_call_id != str(request_payload.get("tool_call_id", "")):
+        raise ValueError("人工响应 tool_call_id 与当前待处理工具不匹配。")
+
+    settings = _load_settings_from_run_snapshot(run_dir=run_dir)
+    settings.resume_run_dir = str(run_dir)
+    settings.human_response_path = str(human_response_path.resolve())
+    if settings.interaction_mode != "headless_hitl":
+        settings.interaction_mode = "headless_hitl"
+
+    trace_writer = TraceWriter(run_dir=run_dir)
+    trace_writer.enable_live_trace_refresh(
+        lambda: _refresh_live_trace_artifacts(run_dir=run_dir, trace_writer=trace_writer)
+    )
+    trace_writer.refresh_live_trace_artifacts()
+
+    with pending_state_path.open("rb") as handle:
+        runtime_state = pickle.load(handle)
+    if not isinstance(runtime_state, RuntimeState):
+        raise ValueError("pending runtime state 格式不正确，不能恢复。")
+
+    tool_runner = CoreToolRunner(repo_root=settings.repo_root)
+    if baseline_path.exists():
+        baseline_payload = json.loads(baseline_path.read_text(encoding="utf-8-sig"))
+        if isinstance(baseline_payload, dict):
+            tool_runner.import_baseline_snapshot({str(k): str(v) for k, v in baseline_payload.items()})
+
+    runtime_state = LoopOrchestrator(trace_writer=trace_writer).resume_after_human_response(
+        settings=settings,
+        config_data=config_data or _load_config_from_run_snapshot(run_dir=run_dir),
+        runtime_state=runtime_state,
+        human_response=human_response,
+        pending_tool_payload=pending_tool_payload,
+        tool_runner=tool_runner,
+    )
+    memory_entry_written_payload = None
+    if runtime_state.verification_result and runtime_state.verification_result.passed:
+        memory_entry_written_payload = _build_memory_entry_written_payload(
+            settings=settings,
+            runtime_state=runtime_state,
+        )
+    memory_write_result = _write_long_term_memory_if_needed(settings=settings, runtime_state=runtime_state)
+    final_diff_artifact_result = _write_final_diff_artifact(
+        run_dir=run_dir,
+        runtime_state=runtime_state,
+        trace_writer=trace_writer,
+    )
+    if memory_entry_written_payload:
+        trace_writer.write_event(TraceEvent(event_type="memory_entry_written", payload=memory_entry_written_payload))
+    trace_writer.write_event(
+        TraceEvent(
+            event_type="memory_write_result",
+            payload={
+                "written": memory_write_result.written,
+                "store_path": memory_write_result.store_path,
+                "reason": memory_write_result.reason,
+            },
+        )
+    )
+    sandbox_cleanup_result = _cleanup_sandbox_if_needed(
+        settings=settings,
+        runtime_state=runtime_state,
+        trace_writer=trace_writer,
+    )
+    task_outcome_summary = _build_and_write_task_outcome_summary(
+        settings=settings,
+        config_data=config_data or _load_config_from_run_snapshot(run_dir=run_dir),
+        runtime_state=runtime_state,
+        final_diff_artifact_result=final_diff_artifact_result,
+        sandbox_cleanup_result=sandbox_cleanup_result,
+        trace_writer=trace_writer,
+    )
+    trace_writer.write_report(
+        _build_phase_4_report(
+            settings=settings,
+            runtime_state=runtime_state,
+            memory_write_result=memory_write_result,
+            final_diff_artifact_result=final_diff_artifact_result,
+            sandbox_cleanup_result=sandbox_cleanup_result,
+            task_outcome_summary=task_outcome_summary,
+        )
+    )
+    _write_trace_view_artifact(run_dir=run_dir, trace_writer=trace_writer)
+    return run_dir
+
+
 def _prepare_execution_workspace(settings: RunSettings, run_dir: Path) -> None:
     """按运行模式准备真正执行任务的工作目录。"""
     source_repo_root = Path(settings.source_repo_root or settings.repo_root).resolve()
@@ -233,6 +347,27 @@ def _prepare_execution_workspace(settings: RunSettings, run_dir: Path) -> None:
     )
     settings.repo_root = str(sandbox_repo_root.resolve())
     settings.sandbox_dir = str(sandbox_root.resolve())
+
+
+def _load_settings_from_run_snapshot(run_dir: Path) -> RunSettings:
+    """从 run 初始化时写下的 config_snapshot.json 还原运行配置。"""
+    snapshot = load_json_file(run_dir / "config_snapshot.json")
+    allowed_fields = set(RunSettings.__dataclass_fields__)
+    settings_payload = {
+        key: value
+        for key, value in snapshot.items()
+        if key in allowed_fields
+    }
+    if not settings_payload.get("task"):
+        raise ValueError("config_snapshot.json 缺少 task，不能恢复 run。")
+    return RunSettings(**settings_payload)
+
+
+def _load_config_from_run_snapshot(run_dir: Path) -> dict[str, Any]:
+    """从 run 快照里取回当时使用的配置，避免 resume 时配置漂移。"""
+    snapshot = load_json_file(run_dir / "config_snapshot.json")
+    config = snapshot.get("config", {})
+    return config if isinstance(config, dict) else {}
 
 
 def _make_unique_sandbox_root(source_repo_root: Path, run_id: str) -> Path:
@@ -378,6 +513,17 @@ def _cleanup_sandbox_if_needed(
             sandbox_dir=settings.sandbox_dir,
             retention_policy=settings.sandbox_retention,
             reason="当前运行未使用 per-task sandbox，无需清理。",
+        )
+        trace_writer.write_event(TraceEvent(event_type="sandbox_cleanup_result", payload=asdict(result)))
+        return result
+
+    if runtime_state.stop_reason and runtime_state.stop_reason.code == StopReasonCode.NEED_HUMAN_INPUT:
+        result = SandboxCleanupResult(
+            attempted=False,
+            kept=True,
+            sandbox_dir=settings.sandbox_dir,
+            retention_policy=settings.sandbox_retention,
+            reason="当前 run 正在等待人工输入，必须保留 sandbox 以便后续 resume。",
         )
         trace_writer.write_event(TraceEvent(event_type="sandbox_cleanup_result", payload=asdict(result)))
         return result
@@ -1256,6 +1402,7 @@ def _build_phase_4_report(
     task_outcome_section = _format_task_outcome_report_section(
         task_outcome_summary or runtime_state.task_outcome_summary
     )
+    hitl_section = _format_hitl_report_section(runtime_state=runtime_state)
 
     return (
         f"# 运行报告\n\n"
@@ -1263,6 +1410,7 @@ def _build_phase_4_report(
         f"- 任务类型：`{settings.task_type}`\n"
         f"- 任务内容：{settings.task}\n\n"
         f"{task_outcome_section}\n"
+        f"{hitl_section}\n"
         f"## 当前状态\n\n"
         f"`{runtime_state.current_state}`\n\n"
         f"## 状态流\n\n"
@@ -1324,6 +1472,33 @@ def _format_task_outcome_report_section(task_outcome_summary: dict[str, Any] | N
         polished_text = "- 尚未生成任务完成总览。"
     error_line = f"\n\n- polish_status=`failed`; polish_error={polish_error}" if polish_status == "failed" else ""
     return f"## 任务完成总览\n\n{polished_text}{error_line}\n\n"
+
+
+def _format_hitl_report_section(runtime_state: RuntimeState) -> str:
+    """把人工介入过程整理成报告小节，和任务验证结果分开表达。"""
+    human_context = runtime_state.human_context if isinstance(runtime_state.human_context, dict) else {}
+    pending_request = human_context.get("pending_request")
+    responses = human_context.get("responses", [])
+    policy_events = human_context.get("policy_events", [])
+    triggered = bool(pending_request or responses or policy_events)
+    if not triggered:
+        return "## 人工介入记录\n\n本次运行没有触发人工审核。\n\n"
+
+    lines = ["## 人工介入记录", ""]
+    lines.append("- 本次运行触发了人工审核：是")
+    if isinstance(pending_request, dict) and pending_request:
+        lines.append(f"- 当前待处理请求：`{pending_request.get('request_id', '')}`")
+        lines.append(f"- 待审批工具：`{pending_request.get('tool', '')}`")
+        lines.append(f"- 请求文件：`{HUMAN_INPUT_REQUEST_FILE}`")
+    if isinstance(responses, list) and responses:
+        last_response = responses[-1] if isinstance(responses[-1], dict) else {}
+        lines.append(f"- 最近人工响应：`{last_response.get('action', '')}`")
+        lines.append(f"- 响应 request_id：`{last_response.get('request_id', '')}`")
+    if isinstance(policy_events, list) and policy_events:
+        last_event = policy_events[-1] if isinstance(policy_events[-1], dict) else {}
+        lines.append(f"- 最近权限事件：`{last_event.get('action', '')}` / `{last_event.get('tool', '')}`")
+        lines.append(f"- 规则说明：{last_event.get('reason', '')}")
+    return "\n".join(lines) + "\n\n"
 
 
 def _write_long_term_memory_if_needed(settings: RunSettings, runtime_state: RuntimeState) -> MemoryWriteResult:

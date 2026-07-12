@@ -60,6 +60,7 @@ def build_task_outcome_facts(
             verification_result=verification_result,
             stop_details=stop_details,
         ),
+        "hitl": _build_hitl_facts(runtime_state=runtime_state, stop_details=stop_details),
         "metrics": _build_metrics(runtime_state=runtime_state),
         "artifacts": _build_artifacts(
             final_diff_artifact_result=final_diff_artifact_result,
@@ -136,6 +137,7 @@ def format_task_outcome_facts_markdown(facts: dict[str, Any]) -> str:
     verification = facts.get("verification", {}) if isinstance(facts.get("verification"), dict) else {}
     metrics = facts.get("metrics", {}) if isinstance(facts.get("metrics"), dict) else {}
     artifacts = facts.get("artifacts", {}) if isinstance(facts.get("artifacts"), dict) else {}
+    hitl = facts.get("hitl", {}) if isinstance(facts.get("hitl"), dict) else {}
     changed_files = _normalize_string_list(facts.get("changed_files", []))
     actions = _normalize_string_list(facts.get("actions_taken", []))
     failing_checks = _normalize_string_list(verification.get("failing_checks", []))
@@ -147,6 +149,10 @@ def format_task_outcome_facts_markdown(facts: dict[str, Any]) -> str:
         f"- 变更文件：`{', '.join(changed_files) if changed_files else 'none'}`",
         f"- 执行动作：{'；'.join(actions) if actions else 'none'}",
         f"- 失败检查：`{', '.join(failing_checks) if failing_checks else 'none'}`",
+        (
+            f"- 人工介入：`{'triggered' if hitl.get('triggered') else 'not_triggered'}`；"
+            f"paused=`{hitl.get('paused', False)}`；last_action=`{hitl.get('last_action', '') or 'none'}`"
+        ),
         f"- 推理轨迹：`{len(facts.get('rationale_trace', [])) if isinstance(facts.get('rationale_trace'), list) else 0}` 轮",
         (
             f"- 指标：steps `{metrics.get('steps', 0)}`，iterations `{metrics.get('iterations', 0)}`，"
@@ -233,6 +239,8 @@ def _classify_status(*, stop_code: str, verification_passed: bool) -> str:
         return "model_error"
     if stop_code == "max_steps_reached":
         return "max_steps_reached"
+    if stop_code == "need_human_input":
+        return "need_human_input"
     if stop_code == "completed" and not verification_passed:
         return "failed_verification"
     return "unknown"
@@ -250,7 +258,30 @@ def _build_headline(*, status: str, changed_files: list[str], failing_checks: li
         return "任务因模型调用或模型响应错误停止。"
     if status == "max_steps_reached":
         return "任务达到最大步骤数后停止。"
+    if status == "need_human_input":
+        return "任务已暂停，正在等待人工处理工具审批。"
     return "任务已结束，结果状态未知。"
+
+
+def _build_hitl_facts(*, runtime_state: Any, stop_details: dict[str, Any]) -> dict[str, Any]:
+    """从运行态里提取人工介入事实，供最终总结和 eval 汇总使用。"""
+    human_context = getattr(runtime_state, "human_context", {}) or {}
+    if not isinstance(human_context, dict):
+        human_context = {}
+    responses = human_context.get("responses", [])
+    policy_events = human_context.get("policy_events", [])
+    pending_request = human_context.get("pending_request")
+    last_response = responses[-1] if isinstance(responses, list) and responses and isinstance(responses[-1], dict) else {}
+    return {
+        "triggered": bool(pending_request or responses or policy_events or stop_details.get("request_id")),
+        "paused": bool(stop_details.get("request_id")),
+        "resumed": bool(responses),
+        "requests": 1 if pending_request or stop_details.get("request_id") else 0,
+        "responses": len(responses) if isinstance(responses, list) else 0,
+        "last_action": str(last_response.get("action", "")).strip(),
+        "last_request_id": str(stop_details.get("request_id", "") or last_response.get("request_id", "")).strip(),
+        "last_tool_call_id": str(stop_details.get("tool_call_id", "") or last_response.get("tool_call_id", "")).strip(),
+    }
 
 
 def _build_failing_checks(verification_result: Any) -> list[str]:
