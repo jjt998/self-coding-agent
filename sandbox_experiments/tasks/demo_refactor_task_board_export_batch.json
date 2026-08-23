@@ -1,0 +1,72 @@
+{
+  "tasks": [
+    {
+      "name": "demo_refactor_task_board_share_filter_and_sort_pipeline",
+      "task": "对 `task_board/query_engine.py` 做一次行为保持的重构。当前 `render_task_list()` 和 `render_export_list()` 各自维护一套“标准化输入 -> 过滤 -> 排序”的流程，导致 list 与 export 的前置处理逻辑重复。请抽取一个共享 helper 来统一这段 filter-and-sort pipeline，并让 list 与 export 都复用它；不要改变 list 的文本输出、export 的 CSV 输出、过滤语义或排序规则。",
+      "task_type": "refactor",
+      "sandbox_retention": "always_delete",
+      "verify_commands": [
+        [
+          "python",
+          "task_board.py",
+          "list",
+          "--owner",
+          "alice",
+          "--status",
+          "todo"
+        ],
+        [
+          "python",
+          "task_board.py",
+          "export",
+          "--owner",
+          "alice",
+          "--status",
+          "todo"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "list command exits successfully",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "list output stays unchanged",
+          "command_index": 1,
+          "regex": "^1\\. \\[todo\\] Draft status page copy \\| owner=alice \\| priority=1$"
+        },
+        {
+          "type": "command_returncode",
+          "name": "export command exits successfully",
+          "command_index": 2,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "export csv output stays unchanged",
+          "command_index": 2,
+          "regex": "(?s)^id,title,owner,status,archived\\r?\\n1,Draft status page copy,alice,todo,false$"
+        },
+        {
+          "type": "file_contains",
+          "name": "query_engine contains shared filter_and_sort_tasks helper",
+          "path": "task_board/query_engine.py",
+          "contains": "def filter_and_sort_tasks("
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "query_engine changed",
+          "path": "task_board/query_engine.py"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 2
+      }
+    }
+  ]
+}

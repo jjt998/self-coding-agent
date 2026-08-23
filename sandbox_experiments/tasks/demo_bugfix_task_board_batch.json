@@ -1,0 +1,128 @@
+{
+  "tasks": [
+    {
+      "name": "demo_buggy_task_board_fix_combined_filters",
+      "task": "修复 task_board CLI 的 list 过滤 bug。当前核心逻辑已经集中到一个较大的文件 `task_board/query_engine.py` 中。现在 `python task_board.py list --owner alice --status todo` 会错误返回 owner 或 status 任一命中的任务，而不是同时满足两个条件；另外 `--include-archived` 的行为也有问题。请让 list 默认排除 archived 任务；当同时提供 `--owner` 和 `--status` 时，结果必须同时满足两个条件；当显式传入 `--include-archived` 时，再把 archived 任务包含进来。保留现有输出格式和排序规则。",
+      "task_type": "bug_fix",
+      "sandbox_retention": "always_delete",
+      "verify_commands": [
+        [
+          "python",
+          "task_board.py",
+          "list",
+          "--owner",
+          "alice",
+          "--status",
+          "todo"
+        ],
+        [
+          "python",
+          "task_board.py",
+          "list",
+          "--owner",
+          "alice",
+          "--status",
+          "todo",
+          "--include-archived"
+        ],
+        [
+          "python",
+          "task_board.py",
+          "list",
+          "--status",
+          "done"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "combined filter command exits successfully",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "combined filter keeps alice todo task",
+          "command_index": 1,
+          "contains": "1. [todo] Draft status page copy | owner=alice | priority=1"
+        },
+        {
+          "type": "command_stdout_not_contains",
+          "name": "combined filter excludes alice done task",
+          "command_index": 1,
+          "not_contains": "2. [done] Review API schema | owner=alice | priority=2"
+        },
+        {
+          "type": "command_stdout_not_contains",
+          "name": "combined filter excludes bob todo task",
+          "command_index": 1,
+          "not_contains": "3. [todo] Clean old screenshots | owner=bob | priority=3"
+        },
+        {
+          "type": "command_stdout_not_contains",
+          "name": "combined filter excludes archived task by default",
+          "command_index": 1,
+          "not_contains": "4. [todo] Archive migration notes | owner=alice | priority=4 (archived)"
+        },
+        {
+          "type": "command_returncode",
+          "name": "include archived command exits successfully",
+          "command_index": 2,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "include archived command keeps active alice todo task",
+          "command_index": 2,
+          "contains": "1. [todo] Draft status page copy | owner=alice | priority=1"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "include archived command adds archived alice todo task",
+          "command_index": 2,
+          "contains": "4. [todo] Archive migration notes | owner=alice | priority=4 (archived)"
+        },
+        {
+          "type": "command_stdout_not_contains",
+          "name": "include archived command still excludes alice done task",
+          "command_index": 2,
+          "not_contains": "2. [done] Review API schema | owner=alice | priority=2"
+        },
+        {
+          "type": "command_returncode",
+          "name": "done filter command exits successfully",
+          "command_index": 3,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "done filter includes alice done task",
+          "command_index": 3,
+          "contains": "2. [done] Review API schema | owner=alice | priority=2"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "done filter includes charlie done task",
+          "command_index": 3,
+          "contains": "5. [done] Publish onboarding checklist | owner=charlie | priority=5"
+        },
+        {
+          "type": "command_stdout_not_contains",
+          "name": "done filter excludes todo task",
+          "command_index": 3,
+          "not_contains": "1. [todo] Draft status page copy | owner=alice | priority=1"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "large query engine changed",
+          "path": "task_board/query_engine.py"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 2
+      }
+    }
+  ]
+}

@@ -92,7 +92,7 @@ Orchestrator 是顶层应用服务，不应包含 provider 级模型细节，也
 - 定义允许的状态转移。
 - 定义什么时候调用模型。
 - 定义什么时候执行工具。
-- 定义什么时候 verify 和 reflect。
+- 定义什么时候 verify 和 observe。
 
 MVP 阶段 loop 是固定 baseline，不是第一批主要实验变量。
 
@@ -172,47 +172,39 @@ self-coding-agent/
     MONTH_PLAN.md
     MONTH_PLAN.zh-CN.md
   src/
-    self_coding_agent/
-      cli/
-        main.py
-      core/
-        loop.py
-        state.py
-        runtime.py
-        stop.py
-        orchestrator.py
-      models/
-        base.py
-        openai_adapter.py
-      tools/
-        base.py
-        registry.py
-        filesystem.py
-        command.py
-        git.py
-      context/
-        builder.py
-        recall.py
-        compression.py
-        layers.py
-      memory/
-        runtime_memory.py
-        long_term_memory.py
-        store.py
-        retrieval.py
-      trace/
-        events.py
-        writer.py
-        replay.py
-      eval/
-        task_spec.py
-        runner.py
-        metrics.py
-        diagnostics.py
-      reports/
-        markdown.py
-      schemas/
-        common.py
+    cli.py
+    config.py
+    loop.py
+    runner.py
+    trace.py
+    tools/
+      base.py
+      registry.py
+      filesystem.py
+      command.py
+      git.py
+    context/
+      builder.py
+      recall.py
+      compression.py
+      layers.py
+    memory/
+      runtime_memory.py
+      long_term_memory.py
+      store.py
+      retrieval.py
+    models/
+      base.py
+      openai_adapter.py
+    eval/
+      task_spec.py
+      runner.py
+      metrics.py
+      diagnostics.py
+    reports/
+      markdown.py
+    schemas/
+      common.py
   eval_tasks/
   runs/
   tests/
@@ -287,13 +279,33 @@ plan_step:
 
 ```yaml
 model_decision:
-  decision_type: tool_call | update_plan | verify | reflect | finalize
-  reasoning_summary:
-  tool_name:
-  tool_args:
-  plan_update:
-  finalize_message:
+  provider:
+  model_name:
+  task_type:
+  summary:
+  rationale:
+  planned_actions:
+    - "本轮 tool_calls 实际会执行的动作说明"
+  working_memory:
+    confirmed_facts: "字符串或字符串列表"
+    invalidated_beliefs: "字符串或字符串列表"
+    completed_actions: "字符串或字符串列表"
+    next_risks: "字符串或字符串列表"
+  tool_calls:
+    - tool_name:
+      tool_input:
+  raw_response_content:
+  normalization_notes:
 ```
+
+字段职责：
+
+- `tool_calls` 是唯一执行源，`act` 阶段只按这个数组调用工具。
+- `planned_actions` 是本轮可读计划说明，不是跨轮任务队列，也不驱动执行。
+- `working_memory` 当前承载模型维护的结构化运行时记忆；下一轮会通过 `context_snapshot.working_memory` 回填给模型，帮助模型延续事实、已推翻判断、已完成动作和风险判断，并由 harness 额外注入 `last_rational` 承接上一轮 `rationale`。
+- harness 不会再自动 merge 或补写 working_memory；如果上一轮判断失效，必须由模型在本轮主动改写对应字段。
+- `raw_response_content` 只写入本地 trace，用于排查模型显式返回内容，不包含 provider 隐藏推理链。
+- `normalization_notes` 记录展示字段的宽容归一化，例如缺失 `planned_actions` 时从 `tool_calls` 派生说明。
 
 ### 6.6 ToolResult
 
@@ -345,92 +357,68 @@ memory_entry:
 - `analyze`：理解任务，并识别初始 repo 线索。
 - `plan`：在第一次行动前产出阶段性执行计划。
 - `act`：调用工具或执行修改。
-- `observe`：解释工具结果并更新 runtime memory。
-- `reflect`：分析低进展、验证失败或证据冲突。
+- `observe`：每轮 `act` 后固定执行，保真压缩工具结果、diff 事实、失败工具和轻量 signals。
 - `verify`：运行验证检查。
 - `finalize`：输出最终状态、报告和可写入的 memory。
 
 ### 7.2 状态转移规则
 
 ```text
-ingest -> analyze -> plan -> act -> observe
+ingest -> analyze -> (plan -> act -> observe)* -> verify -> finalize
 
-observe -> act
-observe -> reflect
-observe -> verify
-
-verify -> finalize
-verify -> reflect
-
-reflect -> act
-reflect -> plan
-reflect -> finalize
+solve loop exit -> verify
+final verify passed -> finalize(completed)
+final verify failed -> finalize(verification_failed)
 ```
 
 ### 7.3 Loop 不变量
 
 - 第一次 `act` 前必须先经过 `plan`。
 - 除非任务类型明确允许，否则 `finalize` 之前必须至少有一次 verify。
-- `reflect` 不是每一轮 loop 的固定步骤。
+- `observe` 是每一轮 `act` 后的固定事实压缩步骤。
 - 每次工具调用都必须增加 `tool_call_count`。
 - 每次状态转移都必须写入 trace event。
 
-### 7.4 Reflect 触发条件
+### 7.4 Observe 事实压缩
 
-- verify 失败。
-- 连续工具结果没有新信息。
-- 重复相同工具调用模式且没有状态变化。
-- 反复读相同文件或做相同搜索但没有新信号。
-- 工具结果与当前计划冲突。
-- 接近 step budget 或 tool-call budget。
+- harness 负责保真地压缩事实，LLM 负责解释事实并重规划。
+- 如果本轮有修改类工具且最新 `git_diff.changed_file_count == 0`，observe 记录 `no_diff_after_edit_attempt`。
+- 如果本轮只有读取、搜索或其它信息收集工具，不产生 no-diff signal。
+- 下一轮模型不会再收到旧式过程内 verification 反馈；最终验证只作为末尾裁判结果保留在 trace、report 和 eval 聚合里。
+- `file_context_cache` 现在会区分 `fresh` 与 `stale`：文件一旦被 `apply_patch` 或 `replace_lines` 成功编辑，旧读取缓存按整文件失效；只有后续重新读取后才会恢复为 `fresh`。
 
-### 7.5 无进展规则
+### 7.5 模型可见预算
 
-- 连续三步没有新增候选文件、有效 diff 或更好的验证结果。
-- 连续两次代码修改后，验证结果没有改善。
-- 工具多次返回空结果且计划未更新。
-- 重复相同工具调用并得到相同输出。
+- `runtime.max_steps` 仍由 harness 内部控制最大求解轮数。
+- 模型请求里的 `context_snapshot` 只暴露当前 iteration，不暴露剩余轮数或最大轮数。
+- trace、report、stop reason 可继续记录轮数信息，供本地审计和诊断使用。
 
 ## 8. Context 架构
 
-### 8.1 Context 分层
+### 8.1 Context 双层输入
 
-- `task_context`
-- `repo_context`
-- `runtime_context`
-- `memory_context`
+当前实现由 `ContextBuilder` 统一生成两层上下文：
+
+- `initial_guide`：analyze 阶段只生成一次，包含任务文本/类型/关键词、仓库召回策略、候选文件结构摘要、长期记忆和被抑制的长期记忆。
+- `context_snapshot`：每轮 `plan` 前重新生成，包含当前 iteration、任务关键词、模型工作记忆、fresh 文件片段、diff、命令结果、stale 文件提示和最近工具事实。
 
 ### 8.2 各层语义
 
-`task_context`
+`initial_guide`
 
-- 任务目标
-- 成功标准
-- 约束条件
-- 禁止事项
-- 预算
-- 任务类型
+- `task`：任务文本、任务类型和关键词。
+- `repo_guide`：召回策略、候选文件数量、`selected_files`。候选文件只提供 `structure_summary` 和推荐理由，不提前注入不可控 summary。
+- `memory_guide`：`long_term_memory`、`suppressed_long_term_memory` 和 `diagnostic_labels`，用于提醒模型哪些长期经验可参考、哪些经验被判定为冲突。
 
-`repo_context`
+`context_snapshot`
 
-- repo map
-- 关键模块
-- 构建和测试命令
-- 候选文件
-- 与任务相关的代码事实
+- `working_memory`：上一轮模型维护的四字段工作记忆，加上 harness 从上一轮 `rationale` 注入的 `last_rational`；harness 不再自动 merge 或补写判断。
+- `fresh_context.file_snippets`：当前仍可信的已读文件片段，`content` 就是工具读取后压缩出的内容。
+- `fresh_context.diffs` / `fresh_context.command_results`：最近 diff 和命令事实，带 `from_iteration`，方便模型判断是否需要重查。
+- `stale_context`：当前仍 stale 的文件列表、失效细节和统一重读建议；默认顺序是先 `read_file_structure_summary`，再 `read_file_range`。
+- `recent_facts`：由 `observe_content` 压缩出的最近工具结果、失败工具和 signals。
 
-`runtime_context`
-
-- 当前计划
-- 最近工具调用
-- 关键观察
-- 当前 diff 摘要
-- 已尝试路径
-- 当前活跃假设
-
-`memory_context`
-
-- 被选中的稳定长期记忆
+这两层共同组成模型输入的“上下文窗口”。`initial_guide` 负责首轮导航，`context_snapshot` 负责运行时事实；链路中不再传递旧跨轮反馈字段。
 
 ### 8.3 注入策略
 
@@ -586,9 +574,18 @@ class BaseModelAdapter:
 
 - `search_text`
 - `read_file`
+- `read_file_structure_summary`
+- `read_file_range`
 - `apply_patch`
+- `replace_lines`
 - `run_command`
 - `git_diff`
+
+读取类工具分工如下：
+
+- `read_file`：小文件直接返回全文；大文件只返回 `content_mode="structure_summary"` 与结构摘要。
+- `read_file_structure_summary`：显式只读结构摘要，适合先定位大文件里的函数、类、标题和起始行号。
+- `read_file_range`：按闭区间行号精读关键片段。
 
 ### 12.2 工具契约
 
@@ -597,8 +594,34 @@ class BaseModelAdapter:
 - name
 - description
 - argument schema
+- accepted aliases
 - execution handler
 - permission constraints
+
+当前工具 schema 至少包含：
+
+- `required`：必填字段。
+- `optional`：可选字段。
+- `properties`：字段类型，例如 `string`、`integer`、`null`、`array` 和数组元素类型。
+- `accepted_aliases`：模型常见别名到规范字段的映射，例如 `file_path -> path`。
+
+校验发生在两层：
+
+- 模型响应解析阶段：拒绝未知工具、非对象 `tool_input`、未声明字段、缺少必填字段和类型不匹配字段。
+- `act` 前兜底阶段：对 fake adapter 或测试直接构造的 `ModelDecision` 再做一次 schema 校验。
+
+示例：
+
+```yaml
+apply_patch:
+  required: [path, old_text, new_text]
+  properties:
+    path: string
+    old_text: string | null
+    new_text: string
+```
+
+因此 `apply_patch.new_text = null` 会在模型决策层收口为 `ModelResponseError` / `model_error`，不会继续进入 `Path.write_text(None)` 这类工具层 traceback。
 
 每个工具结果应包含：
 
@@ -621,6 +644,7 @@ class BaseModelAdapter:
 - 危险命令模式必须阻断。
 - 命令执行必须包含 timeout 和 working directory 控制。
 - 工具失败必须结构化返回，不能用沉默异常吞掉。
+- 即使上游绕过 schema 校验，工具实现也应尽量返回结构化失败，例如 `apply_patch` 的 `invalid_tool_input`。
 
 ## 13. Trace 与 Replay
 
@@ -641,7 +665,8 @@ Trace 使用 JSONL，一行一个事件。
 - `memory_written`
 - `patch_applied`
 - `verify_completed`
-- `reflect_completed`
+- `observe_content`
+- `state_result`
 - `state_transitioned`
 - `run_finished`
 
@@ -715,7 +740,7 @@ Eval task spec 使用 YAML 或 JSON。
 - steps
 - tool calls
 - verify count
-- reflect count
+- observe count
 - duration
 
 诊断指标：
@@ -812,5 +837,8 @@ MVP 阶段不需要复杂存储后端，JSONL 和本地文件已经足够。
 - 如果 trace payload 策略不控制，trace 会很快变得噪音过多。
 - 如果过早放松 memory 写入规则，未来 run 会被污染。
 - 如果 success criteria 没有按任务类型区分，eval 会失去可信度。
+- 如果把可读计划说明、工作记忆和真实工具执行混为一谈，模型可能“文字上看起来很忙、实际只读文件”；当前通过 `planned_actions`、`working_memory`、`tool_calls` 三字段拆分降低这个风险。
 
 MVP 架构选择故意偏保守，目标是在保证后续扩展点的同时，降低这些风险。
+
+

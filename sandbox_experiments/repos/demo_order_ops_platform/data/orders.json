@@ -1,0 +1,34 @@
+[
+  {
+    "id": "O1001",
+    "customer_id": "C001",
+    "sku": "SKU-RED",
+    "quantity": 1,
+    "status": "paid",
+    "subtotal": "100.00",
+    "discount_total": "10.00",
+    "tax_total": "7.43",
+    "total": "97.43",
+    "created_at": "2026-07-03T09:00:00+00:00",
+    "applied_coupons": [
+      "SAVE10"
+    ],
+    "events": []
+  },
+  {
+    "id": "O1002",
+    "customer_id": "C002",
+    "sku": "SKU-BLUE",
+    "quantity": 2,
+    "status": "paid",
+    "subtotal": "60.00",
+    "discount_total": "12.00",
+    "tax_total": "3.96",
+    "total": "51.96",
+    "created_at": "2026-07-03T10:00:00+00:00",
+    "applied_coupons": [
+      "VIP20"
+    ],
+    "events": []
+  }
+]

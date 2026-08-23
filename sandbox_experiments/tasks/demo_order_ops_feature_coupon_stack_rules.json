@@ -1,0 +1,115 @@
+{
+  "tasks": [
+    {
+      "name": "feature_order_coupon_stack_rules",
+      "repo_subdir": "sandbox_experiments/repos/demo_order_ops_platform",
+      "task": "Complete the coupon quote flow. The pricing module already contains coupon stack helpers; verify and wire the CLI so quote can apply multiple coupon codes with minimum subtotal, category, segment, usage limit, and exclusive-conflict rules. A successful quote must persist applied coupon used_count to data/coupons.json. Do not fake output; update the real CLI/storage flow.",
+      "task_type": "feature",
+      "workspace_mode": "per_task_sandbox",
+      "sandbox_retention": "always_delete",
+      "verify_setup_commands": [
+        [
+          "python",
+          "-c",
+          "import json; from pathlib import Path; p=Path('data/coupons.json'); data=json.loads(p.read_text(encoding='utf-8')); counts={'SAVE10':0,'VIP20':1,'GROCERY5':0};\nfor row in data:\n    row['used_count']=counts.get(row.get('code'), row.get('used_count', 0))\np.write_text(json.dumps(data, indent=2, ensure_ascii=False)+'\\n', encoding='utf-8')"
+        ]
+      ],
+      "verify_commands": [
+        [
+          "python",
+          "order_ops.py",
+          "quote",
+          "--customer",
+          "C001",
+          "--sku",
+          "SKU-RED",
+          "--qty",
+          "2",
+          "--coupon",
+          "SAVE10",
+          "--coupon",
+          "GROCERY5"
+        ],
+        [
+          "python",
+          "order_ops.py",
+          "quote",
+          "--customer",
+          "C002",
+          "--sku",
+          "SKU-BLUE",
+          "--qty",
+          "2",
+          "--coupon",
+          "VIP20",
+          "--coupon",
+          "SAVE10"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "retail stacked quote succeeds",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "retail quote applies save10",
+          "command_index": 1,
+          "contains": "applied=SAVE10"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "retail quote rejects grocery category",
+          "command_index": 1,
+          "contains": "GROCERY5:category_mismatch"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "vip quote applies exclusive vip coupon",
+          "command_index": 2,
+          "contains": "applied=VIP20"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "vip quote rejects save10 exclusive conflict",
+          "command_index": 2,
+          "contains": "SAVE10:exclusive_conflict"
+        },
+        {
+          "type": "json_file_value_equals",
+          "name": "save10 usage persisted",
+          "path": "data/coupons.json",
+          "json_path": "0.used_count",
+          "expected_value": 1
+        },
+        {
+          "type": "json_file_value_equals",
+          "name": "vip20 usage persisted",
+          "path": "data/coupons.json",
+          "json_path": "1.used_count",
+          "expected_value": 2
+        },
+        {
+          "type": "json_file_value_equals",
+          "name": "rejected grocery coupon not persisted",
+          "path": "data/coupons.json",
+          "json_path": "2.used_count",
+          "expected_value": 0
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "cli changed",
+          "path": "order_ops.py"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 4,
+        "max_step_count": 15
+      }
+    }
+  ]
+}

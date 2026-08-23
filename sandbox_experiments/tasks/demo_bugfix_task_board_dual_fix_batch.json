@@ -1,0 +1,91 @@
+{
+  "tasks": [
+    {
+      "name": "demo_buggy_task_board_dual_fix_combined_filters_and_archived_order",
+      "task": "修复 task_board CLI 的 list 过滤与展示顺序问题。核心逻辑集中在较大的文件 `task_board/query_engine.py` 中。现在运行 `python task_board.py list --owner alice --status todo` 时，结果会错误返回 owner 或 status 任一命中的任务；另外当显式传入 `--include-archived` 时，archived 任务会被错误排到 active 任务前面。请让默认 list 排除 archived 任务；当同时提供 `--owner` 和 `--status` 时，结果必须同时满足两个条件；当显式传入 `--include-archived` 时，再把 archived 任务包含进来，但 active 结果必须仍然排在 archived 结果前面，并保留各分组内现有排序规则和输出格式。",
+      "task_type": "bug_fix",
+      "sandbox_retention": "always_delete",
+      "verify_commands": [
+        [
+          "python",
+          "task_board.py",
+          "list",
+          "--owner",
+          "alice",
+          "--status",
+          "todo"
+        ],
+        [
+          "python",
+          "task_board.py",
+          "list",
+          "--owner",
+          "alice",
+          "--status",
+          "todo",
+          "--include-archived"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "combined filter exits successfully",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "default combined filter returns only active alice todo task",
+          "command_index": 1,
+          "regex": "^1\\. \\[todo\\] Draft status page copy \\| owner=alice \\| priority=1$"
+        },
+        {
+          "type": "command_returncode",
+          "name": "include archived filter exits successfully",
+          "command_index": 2,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "include archived output keeps active task",
+          "command_index": 2,
+          "contains": "1. [todo] Draft status page copy | owner=alice | priority=1"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "include archived output includes low priority archived task",
+          "command_index": 2,
+          "contains": "6. [todo] Recover legacy screenshots | owner=alice | priority=0 (archived)"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "include archived output includes original archived task",
+          "command_index": 2,
+          "contains": "4. [todo] Archive migration notes | owner=alice | priority=4 (archived)"
+        },
+        {
+          "type": "command_stdout_not_contains",
+          "name": "include archived output still excludes alice done task",
+          "command_index": 2,
+          "not_contains": "2. [done] Review API schema | owner=alice | priority=2"
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "active tasks stay before archived tasks",
+          "command_index": 2,
+          "regex": "(?s)^1\\. \\[todo\\] Draft status page copy \\| owner=alice \\| priority=1\\r?\\n6\\. \\[todo\\] Recover legacy screenshots \\| owner=alice \\| priority=0 \\(archived\\)\\r?\\n4\\. \\[todo\\] Archive migration notes \\| owner=alice \\| priority=4 \\(archived\\)$"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "large query engine changed",
+          "path": "task_board/query_engine.py"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 3
+      }
+    }
+  ]
+}

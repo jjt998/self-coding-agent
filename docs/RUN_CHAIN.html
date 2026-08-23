@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>self-coding-agent 任务运行链路图</title>
+  <style>
+    :root {
+      --bg: #f6f7f3;
+      --surface: #ffffff;
+      --surface-soft: #f0f4ef;
+      --ink: #16211d;
+      --muted: #5e6b65;
+      --line: #cfd9d2;
+      --state: #e6f4ed;
+      --model: #e8efff;
+      --tool: #fff3cf;
+      --observe: #ece6ff;
+      --verify: #e4f2f7;
+      --risk: #ffe5df;
+      --accent: #1f6d52;
+      --accent-2: #b74b2f;
+      --shadow: 0 16px 36px rgba(18, 33, 29, 0.09);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: linear-gradient(180deg, #fbfcf8 0%, var(--bg) 62%, #eef2ec 100%);
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
+      line-height: 1.62;
+    }
+
+    main {
+      width: min(1440px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 36px 0 48px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+      gap: 24px;
+      align-items: end;
+      padding-bottom: 18px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(34px, 4.8vw, 60px);
+      line-height: 1.06;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+      line-height: 1.25;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+      line-height: 1.3;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    code {
+      padding: 2px 6px;
+      border-radius: 6px;
+      color: #153f31;
+      background: rgba(31, 109, 82, 0.1);
+      font-family: "Cascadia Mono", Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre;
+    }
+
+    pre code {
+      display: block;
+      padding: 16px;
+      overflow-x: auto;
+      color: #f5f7f2;
+      background: #15241f;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+    }
+
+    li {
+      margin: 4px 0;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding: 5px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--accent);
+      background: rgba(255, 255, 255, 0.72);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .lead {
+      max-width: 900px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow: var(--shadow);
+    }
+
+    .legend span {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border: 1px solid rgba(22, 33, 29, 0.18);
+      border-radius: 999px;
+      flex: 0 0 auto;
+    }
+
+    .state-dot { background: var(--state); }
+    .model-dot { background: var(--model); }
+    .tool-dot { background: var(--tool); }
+    .observe-dot { background: var(--observe); }
+    .verify-dot { background: var(--verify); }
+    .risk-dot { background: var(--risk); }
+
+    section {
+      margin-top: 22px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: var(--shadow);
+    }
+
+    .section-lead {
+      max-width: 1000px;
+      margin-bottom: 16px;
+      color: var(--muted);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(180px, 1fr));
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .loop-flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .node,
+    .panel {
+      border: 1px solid rgba(22, 33, 29, 0.14);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+
+    .node {
+      position: relative;
+      min-height: 148px;
+      padding: 14px;
+    }
+
+    .node:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      transform: translateY(-50%);
+      z-index: 2;
+      color: var(--accent-2);
+      font-weight: 700;
+      font-size: 18px;
+    }
+
+    .panel {
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    .node p,
+    .node li,
+    .panel p,
+    .panel li,
+    td,
+    th {
+      color: #3e4b45;
+      font-size: 14px;
+    }
+
+    .state { background: var(--state); }
+    .model { background: var(--model); }
+    .tool { background: var(--tool); }
+    .observe { background: var(--observe); }
+    .verify { background: var(--verify); }
+    .risk { background: var(--risk); }
+    .trace { background: var(--surface-soft); }
+
+    .tag {
+      display: inline-flex;
+      margin-bottom: 9px;
+      padding: 3px 7px;
+      border-radius: 6px;
+      background: rgba(22, 33, 29, 0.08);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .callout {
+      display: grid;
+      grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .strong-line {
+      border-left: 4px solid var(--accent);
+      padding-left: 12px;
+    }
+
+    .warning-line {
+      border-left-color: var(--accent-2);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    th,
+    td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--ink);
+      background: rgba(31, 109, 82, 0.1);
+      font-weight: 700;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .risk-text {
+      color: #9f2e1d;
+      font-weight: 700;
+    }
+
+    .footer-note {
+      margin-top: 22px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      main {
+        width: min(100% - 24px, 760px);
+      }
+
+      header,
+      .callout,
+      .grid-2,
+      .grid-3 {
+        grid-template-columns: 1fr;
+      }
+
+      .flow,
+      .loop-flow {
+        grid-template-columns: 1fr;
+      }
+
+      .node:not(:last-child)::after {
+        top: auto;
+        right: 16px;
+        bottom: -14px;
+        transform: none;
+        content: "↓";
+      }
+
+      .legend {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">Phase 9 / Current Run Chain</p>
+        <h1>self-coding-agent 任务运行链路图</h1>
+        <p class="lead">
+          这张图描述当前真实执行路径：入口完成配置、sandbox、setup 和 trace 初始化后，loop 只做
+          <code>ingest -> analyze -> (plan -> act -> observe)*</code>，求解阶段退出后再执行一次末尾
+          <code>verify -> finalize</code>。它也标出模型决策契约、跨轮反馈、文件缓存污染治理和待修复风险。
+        </p>
+      </div>
+      <div class="legend" aria-label="图例">
+        <span><i class="dot state-dot"></i>状态机阶段</span>
+        <span><i class="dot model-dot"></i>模型决策</span>
+        <span><i class="dot tool-dot"></i>工具执行</span>
+        <span><i class="dot observe-dot"></i>事实型 observe</span>
+        <span><i class="dot verify-dot"></i>末尾验证与收口</span>
+        <span><i class="dot risk-dot"></i>审查发现 / 待办</span>
+      </div>
+    </header>
+
+    <section>
+      <h2>总览：从入口到产物</h2>
+      <p class="section-lead">
+        当前主链路把“求解”和“裁判”分开。模型可以多轮读、改、查，但是否完成任务只在求解退出后由最终验证判定。
+      </p>
+      <div class="flow">
+        <article class="node state">
+          <span class="tag">CLI / Eval</span>
+          <h3>启动入口</h3>
+          <p><code>python -m cli</code> 接收单次任务或 eval/comparison 参数。</p>
+          <ul>
+            <li><code>--task</code></li>
+            <li><code>--eval-task-file</code></li>
+            <li><code>--compare-strategies</code></li>
+          </ul>
+        </article>
+        <article class="node state">
+          <span class="tag">Config</span>
+          <h3>配置与密钥</h3>
+          <p>加载 <code>configs/*.json</code>、<code>.env</code> 和系统环境变量。真实模型缺少 <code>DEEPSEEK_API_KEY</code> 会以 <code>model_error</code> 收口。</p>
+        </article>
+        <article class="node tool">
+          <span class="tag">Workspace</span>
+          <h3>准备 sandbox</h3>
+          <p><code>per_task_sandbox</code> 会把目标仓库复制到 <code>.agent_sandboxes/&lt;run_id&gt;/repo</code>，避免污染源仓库。</p>
+        </article>
+        <article class="node trace">
+          <span class="tag">Trace</span>
+          <h3>初始化产物</h3>
+          <p>写入 <code>config_snapshot.json</code>、<code>trace.jsonl</code>、<code>report.md</code>、<code>live_trace_view.html</code> 和实时快照。</p>
+        </article>
+        <article class="node tool">
+          <span class="tag">Setup</span>
+          <h3>任务准备</h3>
+          <p>执行 eval task 中的 <code>setup_commands</code>。失败会跳过求解 loop，直接生成 <code>setup_failed</code> 的结构化收口。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>状态机主链路</h2>
+      <div class="flow">
+        <article class="node state">
+          <span class="tag">ingest</span>
+          <h3>输入摘要</h3>
+          <p>记录任务文本、任务类型、repo/workspace 信息、setup/verify 数量、最大求解轮数和配置摘要。</p>
+        </article>
+        <article class="node state">
+          <span class="tag">analyze</span>
+          <h3>上下文构建</h3>
+          <p>根据任务关键词和 context 策略选择候选文件，生成 <code>initial_guide</code>，并读取 long-term memory。</p>
+        </article>
+        <article class="node model">
+          <span class="tag">solve loop</span>
+          <h3>多轮求解</h3>
+          <p>每轮固定执行 <code>plan -> act -> observe</code>。<code>runtime.max_steps</code> 控制最大求解轮数，当前 <code>configs/default.json</code> 为 <code>15</code>。</p>
+        </article>
+        <article class="node verify">
+          <span class="tag">verify</span>
+          <h3>末尾单次验证</h3>
+          <p>求解阶段退出后，调用 <code>git_diff</code> 快照，并执行任务级 <code>verify_commands</code> / <code>verify_rules</code>。</p>
+        </article>
+        <article class="node verify">
+          <span class="tag">finalize</span>
+          <h3>报告与清理</h3>
+          <p>写入 <code>finalize_summary</code> 和 <code>run_finished</code>，再按 sandbox cleanup 策略保留或删除现场。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>求解循环：verify 不在每轮内</h2>
+      <p class="section-lead">
+        旧图里的“每轮内 verify”结构已过时。现在 verify 是最终裁判，不再把验证失败反馈给下一轮模型。
+      </p>
+      <div class="loop-flow">
+        <article class="node model">
+          <span class="tag">plan</span>
+          <h3>模型决策</h3>
+          <p>构造 OpenAI compatible 请求，写入 <code>model_request_prepared</code>、<code>model_raw_response</code>、<code>model_decision</code> 和 token usage。</p>
+        </article>
+        <article class="node tool">
+          <span class="tag">act</span>
+          <h3>执行工具</h3>
+          <p>只执行模型 JSON 中的 <code>tool_calls</code>。<code>planned_actions</code> 是展示字段，不会驱动工具。</p>
+        </article>
+        <article class="node observe">
+          <span class="tag">observe</span>
+          <h3>事实压缩</h3>
+          <p>每轮 act 后固定生成 <code>observe_content</code>，压缩工具结果、失败工具、diff 信号和文件上下文缓存。</p>
+        </article>
+        <article class="node verify">
+          <span class="tag">exit check</span>
+          <h3>求解退出</h3>
+          <p><code>tool_calls=[]</code> 时记录 <code>solve_loop_exit_reason=no_planned_tool_calls</code>；达到最大轮数时记录 <code>max_steps_reached</code>。</p>
+        </article>
+      </div>
+      <div class="grid-2" style="margin-top: 14px;">
+        <article class="panel strong-line">
+          <h3>继续下一轮的唯一事实输入</h3>
+          <p>每轮 plan 前都会把 <code>initial_guide</code> 与最新 <code>context_snapshot</code> 一起交给模型；第二轮及以后，重点由 <code>context_snapshot.working_memory</code>、<code>context_snapshot.fresh_context</code>、<code>context_snapshot.stale_context</code> 和 <code>context_snapshot.recent_facts</code> 承载运行事实。</p>
+        </article>
+        <article class="panel strong-line warning-line">
+          <h3>不再存在的反馈</h3>
+          <p>链路中已移除旧式过程内 verification 反馈。最终验证只用于收口、报告和 eval 聚合，不参与下一轮重规划。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>模型决策契约</h2>
+      <p class="section-lead">
+        模型必须返回结构化 JSON。harness 会校验字段、工具名、工具入参和部分类型；决策文本和真实执行路径保持分离。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>当前语义</th>
+            <th>是否会驱动执行</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>summary</code></td>
+            <td>本轮决策摘要，进入 trace/report。</td>
+            <td>否</td>
+          </tr>
+          <tr>
+            <td><code>rationale</code></td>
+            <td>模型显式给出的判断理由；下一轮会由 harness 注入到 <code>context_snapshot.working_memory.last_rational</code>。</td>
+            <td>否</td>
+          </tr>
+          <tr>
+            <td><code>planned_actions</code></td>
+            <td>只能描述本轮 <code>tool_calls</code> 实际会做的事；不可当作跨轮任务队列。</td>
+            <td>否</td>
+          </tr>
+          <tr>
+            <td><code>working_memory</code></td>
+            <td>模型返回固定四字段：<code>confirmed_facts</code>、<code>invalidated_beliefs</code>、<code>completed_actions</code>、<code>next_risks</code>；输入快照中会额外带有 <code>last_rational</code>。</td>
+            <td>否</td>
+          </tr>
+          <tr>
+            <td><code>tool_calls</code></td>
+            <td>工具调用数组。工具名必须属于 schema，<code>tool_input</code> 必须是对象并通过字段校验。</td>
+            <td>是，唯一执行源</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout" style="margin-top: 14px;">
+        <article class="panel">
+          <h3>当前可用工具</h3>
+          <p>
+            <code>search_text</code>、
+            <code>read_file</code>、
+            <code>read_file_structure_summary</code>、
+            <code>read_file_range</code>、
+            <code>apply_patch</code>、
+            <code>replace_lines</code>、
+            <code>run_command</code>、
+            <code>git_diff</code>
+          </p>
+        </article>
+        <article class="panel risk">
+          <h3>收口信号</h3>
+          <p><code>tool_calls=[]</code> 不表示“已经通过验证”，只表示模型认为不需要继续求解。随后仍要经过最终 <code>verify</code>，最终 stop reason 由模型错误、setup 失败或验证结果决定。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>initial_guide / context_snapshot 形状</h2>
+      <p class="section-lead">
+        <code>initial_guide</code> 是首轮任务、仓库召回和长期记忆指导；<code>context_snapshot</code> 是每轮 plan 前重建的运行时事实快照。
+      </p>
+      <div class="grid-3">
+        <article class="panel observe">
+          <h3><code>initial_guide</code></h3>
+          <p>包含 <code>task</code>、<code>repo_guide</code> 和 <code>memory_guide</code>。其中 <code>selected_files</code> 只暴露结构摘要和推荐理由，不再注入不可控 summary。</p>
+        </article>
+        <article class="panel model">
+          <h3><code>context_snapshot.working_memory</code></h3>
+          <p>上一轮模型返回的四字段工作记忆，加上 harness 从上一轮 <code>rationale</code> 注入的 <code>last_rational</code>。模型如果推翻了旧判断，需要自己写入 <code>invalidated_beliefs</code>。</p>
+        </article>
+        <article class="panel state">
+          <h3><code>fresh / stale / recent</code></h3>
+          <p><code>fresh_context</code> 放仍可信的片段、diff 和命令结果；<code>stale_context</code> 提醒哪些旧片段需重读；<code>recent_facts</code> 放最近工具结果、失败工具和 signals。</p>
+        </article>
+      </div>
+      <div style="margin-top: 14px;">
+        <pre><code>{
+  "initial_guide": {
+    "task": {"text": "...", "task_type": "bug_fix", "keywords": []},
+    "repo_guide": {
+      "recall_strategy": "优先测试文件和相关代码文件",
+      "candidate_file_count": 42,
+      "selected_files": [
+        {"path": "src/foo.py", "score": 5, "reason": "...", "structure_summary": []}
+      ]
+    },
+    "memory_guide": {
+      "long_term_memory": [],
+      "suppressed_long_term_memory": [],
+      "diagnostic_labels": []
+    }
+  },
+  "context_snapshot": {
+    "iteration": 2,
+    "task": {"text": "...", "task_type": "bug_fix", "keywords": []},
+    "working_memory": {
+      "confirmed_facts": [],
+      "invalidated_beliefs": [],
+      "completed_actions": [],
+      "next_risks": [],
+      "last_rational": "上一轮模型给出的判断理由"
+    },
+    "fresh_context": {"file_snippets": [], "diffs": [], "command_results": []},
+    "stale_context": {
+      "stale_file_paths": [],
+      "details": [],
+      "reason": "file_was_edited_and_previous_snippets_are_stale",
+      "recommended_sequence": ["read_file_structure_summary", "read_file_range"],
+      "suggest": "先重新建立当前文件结构和最新行号，再按新的行号范围精读。"
+    },
+    "recent_facts": {"recent_tool_results": [], "failed_tools": [], "signals": []}
+  }
+}</code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>上下文窗口与文件缓存</h2>
+      <p class="section-lead">
+        初始上下文不会把整个仓库塞给模型。文件进入上下文前会先被筛选、打分和裁剪；大文件优先暴露结构摘要，再用精确行号补齐。
+      </p>
+      <div class="flow">
+        <article class="node state">
+          <span class="tag">task</span>
+          <h3>任务关键词</h3>
+          <p>从任务文本抽取路径、标识符和关键字，用于候选文件召回。</p>
+        </article>
+        <article class="node tool">
+          <span class="tag">scan</span>
+          <h3>仓库文本扫描</h3>
+          <p>扫描 repo root 内可按 UTF-8 读取的文本文件，并计算 <code>candidate_file_count</code>。</p>
+        </article>
+        <article class="node state">
+          <span class="tag">select</span>
+          <h3>选择文件</h3>
+          <p>按分数和路径排序，写入 <code>initial_guide.repo_guide.selected_files</code>；首轮只提供 <code>structure_summary</code> 和推荐理由，具体内容由模型后续主动读取。</p>
+        </article>
+        <article class="node tool">
+          <span class="tag">large file</span>
+          <h3>结构后精读</h3>
+          <p>大文件优先使用 <code>read_file_structure_summary</code> 定位，再用 <code>read_file_range</code> 精确读取 1 到 80 行。</p>
+        </article>
+        <article class="node observe">
+          <span class="tag">cache</span>
+          <h3>stale / fresh</h3>
+          <p>文件被 <code>apply_patch</code> 或 <code>replace_lines</code> 成功编辑后，旧片段标为 <code>stale</code>；重读后恢复为 <code>fresh</code>。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="risk">
+      <h2>old_text_not_found 证据链</h2>
+      <p class="section-lead">
+        这块内容是回归测试固定的诊断口径：当模型猜错 <code>apply_patch.old_text</code> 时，下一轮必须看到失败文本摘要和可直接复制的候选源码片段。
+      </p>
+      <div class="callout">
+        <article class="panel">
+          <h3>反馈中应保留的字段</h3>
+          <pre><code>{
+  "tool_name": "read_file",
+  "path": "todo_app.py",
+  "content_excerpt": "候选源码片段",
+  "excerpt_reason": "old_text_not_found_candidate"
+}
+{
+  "tool_name": "apply_patch",
+  "path": "todo_app.py",
+  "error": "old_text_not_found",
+  "failed_old_text_excerpt": "失败的 old_text 摘要"
+}</code></pre>
+        </article>
+        <article class="panel">
+          <h3>模型下一轮应如何利用</h3>
+          <ul>
+            <li>从最近 <code>read_file</code> 或 <code>read_file_range</code> 的 <code>content_excerpt</code> 复制真实旧文本。</li>
+            <li>把失败假设写入 <code>working_memory.invalidated_beliefs</code>。</li>
+            <li>避免无解释地重复同一段错误 <code>old_text</code>。</li>
+            <li>连续匹配困难时，优先考虑基于已确认行号的 <code>replace_lines</code>。</li>
+          </ul>
+        </article>
+      </div>
+      <p class="small risk-text" style="margin-top: 12px;">
+        关键诊断词：<code>content_excerpt</code>、<code>failed_old_text_excerpt</code>、<code>old_text_not_found_candidate</code>、候选源码片段、失败的 old_text 摘要。
+      </p>
+    </section>
+
+    <section>
+      <h2>最终验证与收口</h2>
+      <div class="grid-2">
+        <article class="panel verify">
+          <h3>最终 verify</h3>
+          <p>求解 loop 退出后，<code>_run_verify</code> 先生成 <code>verification_diff_snapshot</code>，再调用 <code>build_phase_4_verification</code>。验证结果写入 <code>verification_result</code>。</p>
+        </article>
+        <article class="panel verify">
+          <h3>finalize</h3>
+          <p><code>finalize_summary</code> 记录最终状态、验证是否通过、变更文件、失败工具数、observe 次数、实际求解轮数、模型决策数和 token usage。</p>
+        </article>
+        <article class="panel state">
+          <h3>主 stop reason</h3>
+          <p><code>setup_failed</code> 和 <code>model_error</code> 会提前收口；正常跑到最终验证后，验证通过为 <code>completed</code>，未通过为 <code>verification_failed</code>。</p>
+        </article>
+        <article class="panel state">
+          <h3>诊断细节</h3>
+          <p><code>solve_loop_exit_reason</code> 会进入 <code>stop_reason.details</code>。例如 <code>no_planned_tool_calls</code> 或 <code>max_steps_reached</code> 用于解释求解阶段为什么停止。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Trace 与报告怎么读</h2>
+      <div class="grid-3">
+        <article class="panel trace">
+          <h3>单次 run</h3>
+          <ul>
+            <li><code>trace.jsonl</code>：完整事件流。</li>
+            <li><code>report.md</code>：人类可读报告。</li>
+            <li><code>config_snapshot.json</code>：配置快照。</li>
+            <li><code>live_trace_view.html</code>：实时过程界面。</li>
+          </ul>
+        </article>
+        <article class="panel trace">
+          <h3>关键事件</h3>
+          <ul>
+            <li><code>model_request_prepared</code></li>
+            <li><code>model_raw_response</code></li>
+            <li><code>model_decision</code></li>
+            <li><code>tool_result</code></li>
+            <li><code>initial_guide</code></li>
+            <li><code>context_snapshot_prepared</code></li>
+            <li><code>observe_content</code></li>
+            <li><code>verification_result</code></li>
+          </ul>
+        </article>
+        <article class="panel trace">
+          <h3>eval / comparison</h3>
+          <ul>
+            <li><code>summary.json</code>：聚合指标和 taxonomy。</li>
+            <li><code>summary.md</code>：可读汇总。</li>
+            <li><code>task_deltas</code>：策略对比的任务级差异。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="risk">
+      <h2>代码审查发现：待修复风险</h2>
+      <p class="section-lead">
+        下面是当前代码审查发现的风险，不代表系统已经完成防护。把它们放在链路图里，是为了排查 run 时能直接看到边界。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>风险点</th>
+            <th>影响</th>
+            <th>建议方向</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>敏感文件扫描</td>
+            <td><code>context</code> 和工具会读取 repo 内 UTF-8 文本；如果仓库里有 <code>.env</code>，存在被召回或读取进上下文的风险。</td>
+            <td>给 context scan、<code>search_text</code>、<code>read_file</code> 系列工具增加统一 denylist。</td>
+          </tr>
+          <tr>
+            <td><code>run_command</code></td>
+            <td>字符串命令使用 <code>shell=True</code>，且当前没有超时；模型若返回长跑命令，可能挂住任务。</td>
+            <td>默认拒绝字符串 shell 命令或强制数组命令，并为 subprocess 增加 timeout。</td>
+          </tr>
+          <tr>
+            <td>打包清单</td>
+            <td><code>pyproject.toml</code> 的 <code>py-modules</code> 未包含 <code>runtime_trace</code>、<code>file_structure</code>、<code>live_trace_view</code>，安装后入口可能缺模块。</td>
+            <td>补齐模块清单，或改为更稳妥的 package discovery。</td>
+          </tr>
+          <tr>
+            <td>文档残留</td>
+            <td><code>README.md</code> 仍有旧的 loop 和反馈字段描述，可能误导使用者。</td>
+            <td>后续把 README 与本页的 current run chain 对齐。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <p class="footer-note">
+      离线静态页面，无外部依赖；稳定机器字段保留英文，说明文字使用中文。最后更新：2026-06-22。
+    </p>
+  </main>
+</body>
+</html>
+

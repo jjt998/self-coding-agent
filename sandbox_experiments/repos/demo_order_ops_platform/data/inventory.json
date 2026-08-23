@@ -1,0 +1,26 @@
+{
+  "SKU-RED": {
+    "available": 10,
+    "reserved": 1,
+    "damaged": 0,
+    "reorder_point": 3
+  },
+  "SKU-BLUE": {
+    "available": 20,
+    "reserved": 0,
+    "damaged": 1,
+    "reorder_point": 5
+  },
+  "SKU-GROCERY": {
+    "available": 8,
+    "reserved": 0,
+    "damaged": 0,
+    "reorder_point": 4
+  },
+  "SKU-DIGI": {
+    "available": 999,
+    "reserved": 0,
+    "damaged": 0,
+    "reorder_point": 0
+  }
+}

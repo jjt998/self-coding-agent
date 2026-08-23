@@ -87,7 +87,7 @@ configs/
 
 - 切换 context 策略。
 - 切换 memory 开关。
-- 切换 reflect 触发规则。
+- 切换 observe / context 策略。
 - 调整 step/tool budget。
 - 指定模型 provider。
 
@@ -124,7 +124,7 @@ self-agent eval --task-set eval_tasks/basic
 典型文件：
 
 - `loop.py`：状态机主循环。
-- `state.py`：`ingest`、`analyze`、`plan`、`act`、`observe`、`reflect`、`verify`、`finalize` 状态定义。
+- `state.py`：`ingest`、`analyze`、`plan`、`act`、`observe`、`verify`、`finalize` 状态定义。
 - `runtime.py`：单次 run 的运行时状态。
 - `stop.py`：预算、无进展、stop reason 判断。
 
@@ -269,7 +269,8 @@ MVP 核心工具：
 - `memory_read`
 - `memory_written`
 - `verify_completed`
-- `reflect_completed`
+- `observe_content`
+- `state_result`
 - `state_transitioned`
 - `run_finished`
 

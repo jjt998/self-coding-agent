@@ -1,0 +1,97 @@
+{
+  "tasks": [
+    {
+      "name": "feature_order_risk_hold_workflow",
+      "repo_subdir": "sandbox_experiments/repos/demo_order_ops_platform",
+      "task": "Implement evaluate_order_risk and wire it into place-order. High-risk customers, orders above risk threshold, or blocked SKUs should create an order with status held_for_review and risk_reasons. Normal orders should still reserve inventory.",
+      "task_type": "feature",
+      "workspace_mode": "per_task_sandbox",
+      "sandbox_retention": "always_delete",
+      "verify_commands": [
+        [
+          "python",
+          "order_ops.py",
+          "place-order",
+          "--customer",
+          "C900",
+          "--sku",
+          "SKU-RED",
+          "--qty",
+          "1"
+        ],
+        [
+          "python",
+          "order_ops.py",
+          "place-order",
+          "--customer",
+          "C001",
+          "--sku",
+          "SKU-RED",
+          "--qty",
+          "1"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "high risk order command succeeds",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "high risk order held",
+          "command_index": 1,
+          "contains": "status=held_for_review"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "risk reason displayed",
+          "command_index": 1,
+          "contains": "high_risk_customer"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "normal order still reserves",
+          "command_index": 2,
+          "contains": "status=inventory_reserved"
+        },
+        {
+          "type": "json_file_value_equals",
+          "name": "held order persisted",
+          "path": "data/orders.json",
+          "json_path": "2.status",
+          "expected_value": "held_for_review"
+        },
+        {
+          "type": "json_file_value_equals",
+          "name": "risk reason persisted",
+          "path": "data/orders.json",
+          "json_path": "2.risk_reasons.0",
+          "expected_value": "high_risk_customer"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "risk changed",
+          "path": "order_ops/risk.py"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "orders changed",
+          "path": "order_ops/orders.py"
+        },
+        {
+          "type": "diff_contains_text",
+          "name": "risk evaluator introduced",
+          "contains": "evaluate_order_risk"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 4,
+        "max_step_count": 15
+      }
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "tasks": [
+    {
+      "name": "demo_refactor_task_board_extract_prepared_view_tasks",
+      "task": "对 `task_board/query_engine.py` 做一次行为保持的重构。当前 `render_task_list()`、`render_export_list()` 和 `render_owner_digest()` 都在各自维护一段相近的前置流程：标准化输入、可选 passthrough、过滤、排序，以及为后续输出准备 renderable tasks。这让 list、export 和 owners 三路输出的前置逻辑重复且更难维护。请抽取一个共享 helper 来统一这段“prepare tasks for view”的流水线，并让这三个渲染函数复用它；不要改变 list 的文本输出、export 的 CSV 输出、owners 命令的摘要输出、过滤语义、排序规则或空结果文案。",
+      "task_type": "refactor",
+      "sandbox_retention": "always_delete",
+      "verify_commands": [
+        [
+          "python",
+          "task_board.py",
+          "list",
+          "--owner",
+          "alice",
+          "--status",
+          "todo"
+        ],
+        [
+          "python",
+          "task_board.py",
+          "export",
+          "--owner",
+          "alice",
+          "--status",
+          "todo"
+        ],
+        [
+          "python",
+          "task_board.py",
+          "owners",
+          "--owner",
+          "alice",
+          "--status",
+          "todo"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "list command exits successfully",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "list output stays unchanged",
+          "command_index": 1,
+          "regex": "^1\\. \\[todo\\] Draft status page copy \\| owner=alice \\| priority=1$"
+        },
+        {
+          "type": "command_returncode",
+          "name": "export command exits successfully",
+          "command_index": 2,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "export csv output stays unchanged",
+          "command_index": 2,
+          "regex": "(?s)^id,title,owner,status,archived\\r?\\n1,Draft status page copy,alice,todo,false$"
+        },
+        {
+          "type": "command_returncode",
+          "name": "owners command exits successfully",
+          "command_index": 3,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_matches_regex",
+          "name": "owners digest output stays unchanged",
+          "command_index": 3,
+          "regex": "^alice: 1 task\\(s\\)$"
+        },
+        {
+          "type": "file_contains",
+          "name": "query_engine contains prepare_tasks_for_view helper",
+          "path": "task_board/query_engine.py",
+          "contains": "def prepare_tasks_for_view("
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "query_engine changed",
+          "path": "task_board/query_engine.py"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 3
+      }
+    }
+  ]
+}

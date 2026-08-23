@@ -1,0 +1,25 @@
+{
+  "model": {
+    "provider": "openai_compatible",
+    "name": "deepseek-v4-flash",
+    "base_url": "https://api.deepseek.com",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "timeout_seconds": 30
+  },
+  "runtime": {
+    "max_steps": 2,
+    "trace_level": "standard"
+  },
+  "context": {
+    "strategy": "file_recall_context"
+  },
+  "observe": {
+    "strategy": "after_act_observe"
+  },
+  "memory": {
+    "enabled": true,
+    "weak_conflict_penalty": 3,
+    "summary_max_length": 80
+  }
+}
+

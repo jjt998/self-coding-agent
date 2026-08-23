@@ -1,0 +1,42 @@
+[
+  {
+    "id": 1,
+    "title": "Draft status page copy",
+    "owner": "alice",
+    "priority": 1,
+    "done": false,
+    "archived": false
+  },
+  {
+    "id": 2,
+    "title": "Review API schema",
+    "owner": "alice",
+    "priority": 2,
+    "done": true,
+    "archived": false
+  },
+  {
+    "id": 3,
+    "title": "Clean old screenshots",
+    "owner": "bob",
+    "priority": 3,
+    "done": false,
+    "archived": false
+  },
+  {
+    "id": 4,
+    "title": "Archive migration notes",
+    "owner": "alice",
+    "priority": 4,
+    "done": false,
+    "archived": true
+  },
+  {
+    "id": 5,
+    "title": "Publish onboarding checklist",
+    "owner": "charlie",
+    "priority": 5,
+    "done": true,
+    "archived": false
+  }
+]

@@ -1,0 +1,94 @@
+{
+  "tasks": [
+    {
+      "name": "feature_order_refund_restock_report",
+      "repo_subdir": "sandbox_experiments/repos/demo_order_ops_platform",
+      "task": "Implement partial refund and daily reporting. refund must write refunds.json, update order status to partially_refunded, and restock when policy says so. report daily must print order count, gross sales, refund total, and net sales.",
+      "task_type": "feature",
+      "workspace_mode": "per_task_sandbox",
+      "sandbox_retention": "always_delete",
+      "verify_commands": [
+        [
+          "python",
+          "order_ops.py",
+          "refund",
+          "--order-id",
+          "O1001",
+          "--amount",
+          "25.00",
+          "--reason",
+          "damaged"
+        ],
+        [
+          "python",
+          "order_ops.py",
+          "report",
+          "daily",
+          "--date",
+          "2026-07-03"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "refund succeeds",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "refund output approved",
+          "command_index": 1,
+          "contains": "refund_id=R0001"
+        },
+        {
+          "type": "json_file_value_equals",
+          "name": "order partially refunded",
+          "path": "data/orders.json",
+          "json_path": "0.status",
+          "expected_value": "partially_refunded"
+        },
+        {
+          "type": "json_file_value_equals",
+          "name": "refund amount persisted",
+          "path": "data/refunds.json",
+          "json_path": "0.amount",
+          "expected_value": "25.00"
+        },
+        {
+          "type": "command_returncode",
+          "name": "daily report succeeds",
+          "command_index": 2,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "daily report includes refund total",
+          "command_index": 2,
+          "contains": "refunds=25.00"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "refunds changed",
+          "path": "order_ops/refunds.py"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "reports changed",
+          "path": "order_ops/reports.py"
+        },
+        {
+          "type": "diff_contains_text",
+          "name": "refund helper introduced",
+          "contains": "process_partial_refund"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 4,
+        "max_step_count": 15
+      }
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "tasks": [
+    {
+      "name": "demo_buggy_todo_app_fix_list_status",
+      "task": "修复 todo_app.py 中 list 命令的状态显示 bug。当前 done=false 的任务被错误显示为 [done]，done=true 的任务被错误显示为 [todo]。请让 done=false 显示为 [todo]，done=true 显示为 [done]，并保留 add 命令行为。",
+      "task_type": "bug_fix",
+      "sandbox_retention": "always_delete",
+      "verify_commands": [
+        [
+          "python",
+          "todo_app.py",
+          "list"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "list command exits successfully",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "unfinished task is shown as todo",
+          "command_index": 1,
+          "contains": "1. [todo] Write project notes"
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "finished task is shown as done",
+          "command_index": 1,
+          "contains": "2. [done] Review pull request"
+        },
+        {
+          "type": "command_stdout_not_contains",
+          "name": "unfinished task is not shown as done",
+          "command_index": 1,
+          "not_contains": "1. [done] Write project notes"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "todo app source changed",
+          "path": "todo_app.py"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 1
+      }
+    }
+  ]
+}

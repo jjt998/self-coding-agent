@@ -1,0 +1,47 @@
+{
+  "tasks": [
+    {
+      "name": "demo_todo_app_add_search_command",
+      "task": "在 todo_app.py 中新增 search <keyword> 子命令。search 应读取 tasks.json，并输出标题或描述中包含关键字的任务；关键字匹配大小写不敏感。保留现有 list 和 add 行为。",
+      "task_type": "feature",
+      "verify_commands": [
+        [
+          "python",
+          "todo_app.py",
+          "search",
+          "docs"
+        ]
+      ],
+      "verify_rules": [
+        {
+          "type": "command_returncode",
+          "name": "search command exits successfully",
+          "command_index": 1,
+          "expected_returncode": 0
+        },
+        {
+          "type": "command_stdout_contains",
+          "name": "search finds docs task",
+          "command_index": 1,
+          "contains": "Write project notes"
+        },
+        {
+          "type": "command_stdout_not_contains",
+          "name": "search filters unrelated task",
+          "command_index": 1,
+          "not_contains": "Review pull request"
+        },
+        {
+          "type": "diff_contains_file",
+          "name": "todo app source changed",
+          "path": "todo_app.py"
+        }
+      ],
+      "expectation": {
+        "passed": true,
+        "outcome": "passed_cleanly",
+        "min_tool_call_count": 1
+      }
+    }
+  ]
+}

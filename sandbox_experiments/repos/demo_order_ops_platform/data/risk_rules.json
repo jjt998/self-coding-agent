@@ -1,0 +1,7 @@
+{
+  "max_order_total_without_review": 250.0,
+  "high_risk_status": "held_for_review",
+  "blocked_skus": [
+    "SKU-DIGI-BETA"
+  ]
+}

@@ -32,6 +32,13 @@
 
 第一版 MVP 应优先保证 harness 质量，而不是单纯追求 bug 修复成功率。
 
+补充说明：
+
+- `Phase 8` 已暂定完结。
+- 当前项目已经具备“固定任务集上的策略对比实验外壳”。
+- 但当前还没有完成“真实代码任务求解闭环”。
+- 因此后续开发重点不再是继续堆 comparison 指标，而是先补齐真实任务最小闭环。
+
 ## 3. 已确定且早期不应重开的 MVP 决策
 
 以下决策已经确认，除非实现过程中出现强阻塞，否则早期开发不再重开讨论。
@@ -118,6 +125,10 @@ MVP 不包含专门的 memory 污染对比实验。
 11. Eval task schema 与 batch runner。
 12. Markdown 报告。
 13. 策略开关与对比实验。
+14. 真实任务最小 schema。
+15. 任务级隔离执行环境。
+16. 任务级真实 verify。
+17. 从 stub loop 过渡到真实求解 loop。
 
 ## 5. 阶段拆分
 
@@ -130,7 +141,7 @@ MVP 不包含专门的 memory 污染对比实验。
 交付：
 
 - `pyproject.toml`
-- `src/self_coding_agent/` 包结构
+- `src/` 源码目录结构
 - `tests/`
 - `configs/`
 - `eval_tasks/`
@@ -271,6 +282,43 @@ MVP 不包含专门的 memory 污染对比实验。
 
 - 同一任务集上至少两种策略可比较，并且能输出 delta。
 
+### Phase 9：真实任务最小闭环
+
+目标：
+
+- 让 agent 从“固定 stub 演示链路”进入“真实代码任务求解链路”。
+- 让 eval task 从“任务描述集”升级为“可复现实验任务集”。
+- 让 verify 从“演示型检查”升级为“真实任务完成性验证”。
+- 让批量实验具备任务级隔离，固定采用“每题独立 sandbox 目录”。
+
+交付：
+
+- 真实任务最小 schema
+- sandbox task spec 字段
+- 每题独立 sandbox 目录执行模式
+- setup / verify / pass criteria 字段与执行链路
+- 真实任务 verify runner
+- stub loop 到真实任务 loop 的替换方案
+
+完成定义：
+
+- 单题运行可以在独立 sandbox 目录中执行，不污染其他任务。
+- eval task 可以显式声明准备步骤、验证命令和通过标准。
+- verify 结果来自真实任务检查，而不是 `agent_notes.md` 演示验证。
+- 至少一类真实任务可以跑通“读代码、改代码、验证代码”的最小闭环。
+
+## 5.1 Phase 9 开始前的事实约束
+
+当前代码库里已经确认的约束如下：
+
+- `src/loop.py` 仍以 `_run_stub_state` 为主。
+- `src/tools.py` 仍以固定 `build_phase_3_tool_sequence()` 为主。
+- `src/verify.py` 仍主要验证 `agent_notes.md`、固定工具顺序和演示型 diff。
+- 当前还缺少真实模型/策略决策层本体，尚未接入真正的任务级模型决策、工具选择和步骤推进回路。
+- 当前实验结果可以比较策略差异，但还不能代表真实代码任务求解能力。
+
+因此，`Phase 9` 的主目标不是再扩展新策略，而是先把真实任务执行闭环补齐。
+
 ## 6. 实现过程中的工程规则
 
 ### 6.1 优先使用稳定结构模型
@@ -319,13 +367,26 @@ Trace 最少应记录：
 - verify result
 - stop reason
 
+### 6.5 测试环境规范
+
+本项目在当前 Windows 开发环境中统一使用以下虚拟环境执行测试：
+
+- `D:\jt\ANACONDA\envs_dirs\learn-claude-code`
+
+执行测试时应显式调用该环境的 Python：
+
+- `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m pytest ...`
+- `D:\jt\ANACONDA\envs_dirs\learn-claude-code\python.exe -m compileall src tests`
+
+不要默认使用系统 PATH 中的 `python` / `py`，也不要切到 Codex 内置 Python 作为首选测试环境。若该虚拟环境缺少测试依赖，应在结果中明确说明缺失依赖，而不是静默换用其他 Python。
+
 ## 7. 建议里程碑
 
 ### Milestone A
 
 仓库可以通过：
 
-- `python -m self_coding_agent.cli ...`
+- `python -m cli ...`
 
 启动，并生成：
 
@@ -362,6 +423,23 @@ Trace 最少应记录：
 - average tool calls
 - failure distribution
 
+### Milestone E
+
+仓库可以在“每题独立 sandbox 目录”中运行真实任务，并具备：
+
+- 任务级准备步骤
+- 任务级验证命令
+- 任务级通过标准
+- 可复现实验输入态
+
+### Milestone F
+
+仓库可以在真实任务集上完成：
+
+- 至少一类任务的稳定求解
+- 真实 verify
+- 与现有 comparison / experiment 外壳的对接
+
 ## 8. 第一批应执行的实验
 
 在 MVP 基础设施到位后，优先比较：
@@ -390,6 +468,12 @@ Trace 最少应记录：
 
 - 条件 reflect 是否减少 repeated no-progress loops？
 
+补充说明：
+
+- 上述首批实验已经完成，可作为 `Phase 8` 基线结果保留。
+- 在 `Phase 9` 完成前，不建议继续大量扩展新的策略维度。
+- 更高优先级是构造“真实任务 + sandbox + 真实 verify”的实验底座。
+
 ## 9. 新会话应先做什么
 
 如果未来要在新 AI 会话中继续本项目，建议先做：
@@ -407,12 +491,12 @@ Trace 最少应记录：
 
 ## 10. 当前推荐下一步
 
-在本文件完成后，下一步应进入：
+当前推荐下一步应进入：
 
-- Python 项目脚手架
-- 包目录结构
-- config models
-- trace event models 与 writer
-- CLI entrypoint
+- 真实任务最小 schema
+- 每题独立 sandbox 目录
+- 任务级真实 verify
+- 真实模型/策略决策层本体
+- stub loop 到真实求解 loop 的替换
 
-在这些控制面到位前，不要先跳到高级 agent 行为实现。
+在这些最小闭环到位前，不要误把现有策略对比结果当成真实任务求解实验结论。
