@@ -1,0 +1,8 @@
+{
+  "lastAnalyzedAt": "2026-08-21T06:09:30.381Z",
+  "gitCommitHash": "e6d7cd71d9524bd7581be7ee8389d9b1aaec042b",
+  "version": "1.0.0",
+  "analyzedFiles": 412,
+  "generator": "codex-local-fallback",
+  "note": "Bundled understand-anything plugin scripts could not run because sandbox approval for reading the plugin directory failed."
+}

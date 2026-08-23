@@ -1,0 +1,3016 @@
+{
+  "name": "self-coding-agent",
+  "description": "A local research harness for studying coding-agent loops, model decisions, tool execution, observation, verification, eval batches, and strategy comparisons. Note: this project has over 100 tracked files; scoped analysis can be faster for focused work.",
+  "languages": [
+    "docx",
+    "docx\"",
+    "example",
+    "html",
+    "json",
+    "jsonl",
+    "markdown",
+    "md\"",
+    "python",
+    "text",
+    "toml",
+    "unknown"
+  ],
+  "frameworks": [
+    "pytest"
+  ],
+  "files": [
+    {
+      "path": ".agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 61,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".env.example",
+      "language": "example",
+      "sizeLines": 3,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".gitignore",
+      "language": "unknown",
+      "sizeLines": 16,
+      "fileCategory": "config"
+    },
+    {
+      "path": "AGENTS.md",
+      "language": "markdown",
+      "sizeLines": 281,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "sizeLines": 277,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "agent_notes.md",
+      "language": "markdown",
+      "sizeLines": 5,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "ai-chat/2026-06-11-project-planning-chat-export.md",
+      "language": "markdown",
+      "sizeLines": 609,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "ai-chat/thinking-doc.docx",
+      "language": "docx",
+      "sizeLines": 180,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "configs/default.json",
+      "language": "json",
+      "sizeLines": 57,
+      "fileCategory": "config"
+    },
+    {
+      "path": "configs/high_weak_conflict_penalty.json",
+      "language": "json",
+      "sizeLines": 17,
+      "fileCategory": "config"
+    },
+    {
+      "path": "configs/memory_off.json",
+      "language": "json",
+      "sizeLines": 19,
+      "fileCategory": "config"
+    },
+    {
+      "path": "configs/naive_recent_context.json",
+      "language": "json",
+      "sizeLines": 22,
+      "fileCategory": "config"
+    },
+    {
+      "path": "configs/short_memory_summary.json",
+      "language": "json",
+      "sizeLines": 18,
+      "fileCategory": "config"
+    },
+    {
+      "path": "configs/verify_failure_only_observe.json",
+      "language": "json",
+      "sizeLines": 26,
+      "fileCategory": "config"
+    },
+    {
+      "path": "configs/verify_failure_only_reflect.json",
+      "language": "json",
+      "sizeLines": 26,
+      "fileCategory": "config"
+    },
+    {
+      "path": "dev_process_history/CURRENT_STATUS_2026-06-21_cross_round_done_list.md",
+      "language": "markdown",
+      "sizeLines": 243,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/CURRENT_STATUS_2026-06-21_donelist_loop_end.md",
+      "language": "markdown",
+      "sizeLines": 244,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/CURRENT_STATUS_2026-06-21_phase9x_verify-final-only.md",
+      "language": "markdown",
+      "sizeLines": 239,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/CURRENT_STATUS_2026-06-21_runtime_memory_pollution_v1.md",
+      "language": "markdown",
+      "sizeLines": 238,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/CURRENT_STATUS_2026-06-22_live_trace_view.md",
+      "language": "markdown",
+      "sizeLines": 246,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/CURRENT_STATUS_before_context_comments_2026-06-24.md",
+      "language": "markdown",
+      "sizeLines": 255,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/CURRENT_STATUS_phase9x_before_reread_fresh_ranges_20260622.md",
+      "language": "markdown",
+      "sizeLines": 253,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/CURRENT_STATUS_phase9x_before_working_memory_20260622.md",
+      "language": "markdown",
+      "sizeLines": 251,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/PHASE_PROGRESS_2026-06-21_cross_round_done_list.md",
+      "language": "markdown",
+      "sizeLines": 279,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/PHASE_PROGRESS_2026-06-21_donelist_loop_end.md",
+      "language": "markdown",
+      "sizeLines": 280,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/PHASE_PROGRESS_2026-06-21_runtime_memory_pollution_v1.md",
+      "language": "markdown",
+      "sizeLines": 255,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/PHASE_PROGRESS_2026-06-22_live_trace_view.md",
+      "language": "markdown",
+      "sizeLines": 281,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/PHASE_PROGRESS_before_context_comments_2026-06-24.md",
+      "language": "markdown",
+      "sizeLines": 290,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/PHASE_PROGRESS_phase9x_before_reread_fresh_ranges_20260622.md",
+      "language": "markdown",
+      "sizeLines": 288,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/PHASE_PROGRESS_phase9x_before_working_memory_20260622.md",
+      "language": "markdown",
+      "sizeLines": 286,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase1_pre_scaffold_CURRENT_STATUS_2026-06-12.md",
+      "language": "markdown",
+      "sizeLines": 61,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase1_pre_scaffold_PHASE_PROGRESS_2026-06-12.md",
+      "language": "markdown",
+      "sizeLines": 142,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase2_before_minimal_loop_CURRENT_STATUS_2026-06-12.md",
+      "language": "markdown",
+      "sizeLines": 61,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase2_before_minimal_loop_PHASE_PROGRESS_2026-06-12.md",
+      "language": "markdown",
+      "sizeLines": 143,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase3_before_verification_CURRENT_STATUS_2026-06-12.md",
+      "language": "markdown",
+      "sizeLines": 70,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase3_before_verification_PHASE_PROGRESS_2026-06-12.md",
+      "language": "markdown",
+      "sizeLines": 145,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase4_before_context_CURRENT_STATUS_2026-06-12.md",
+      "language": "markdown",
+      "sizeLines": 78,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase4_before_context_PHASE_PROGRESS_2026-06-12.md",
+      "language": "markdown",
+      "sizeLines": 149,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase5_before_context_stats_CURRENT_STATUS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 97,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase5_before_context_stats_PHASE_PROGRESS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 159,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase5_before_longterm_memory_CURRENT_STATUS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 105,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase5_before_longterm_memory_PHASE_PROGRESS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 163,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase5_before_memory_manager_CURRENT_STATUS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 99,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase5_before_memory_manager_PHASE_PROGRESS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 160,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase5_before_recall_strategy_CURRENT_STATUS_2026-06-12.md",
+      "language": "markdown",
+      "sizeLines": 83,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase5_before_recall_strategy_PHASE_PROGRESS_2026-06-12.md",
+      "language": "markdown",
+      "sizeLines": 152,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase5_before_tasktype_recall_CURRENT_STATUS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 90,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase5_before_tasktype_recall_PHASE_PROGRESS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 156,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_behavior_constraints_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 147,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_behavior_constraints_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 181,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_configurable_summary_length_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 156,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_configurable_summary_length_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 186,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_configurable_weak_penalty_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 154,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_configurable_weak_penalty_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 185,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_conflict_injection_policy_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 149,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_conflict_injection_policy_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 182,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_conflict_severity_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 144,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_conflict_severity_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 179,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_conflict_diagnostics_CURRENT_STATUS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 126,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_conflict_diagnostics_PHASE_PROGRESS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 170,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_evidence_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 132,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_evidence_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 172,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_read_filter_CURRENT_STATUS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 117,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_read_filter_PHASE_PROGRESS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 166,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_readback_CURRENT_STATUS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 112,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_readback_PHASE_PROGRESS_2026-06-13.md",
+      "language": "markdown",
+      "sizeLines": 166,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_summary_compression_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 142,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_summary_compression_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 178,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_trace_events_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 139,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_memory_trace_events_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 176,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_weak_conflict_ranking_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 152,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase6_before_weak_conflict_ranking_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 184,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_derived_rates_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 192,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_derived_rates_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 205,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_diagnostics_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 166,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_diagnostics_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 192,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_expectations_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 173,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_expectations_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 195,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_quant_expectations_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 180,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_quant_expectations_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 200,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_runner_CURRENT_STATUS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 159,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_runner_PHASE_PROGRESS_2026-06-14.md",
+      "language": "markdown",
+      "sizeLines": 187,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_taxonomy_tags_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 186,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase7_before_eval_taxonomy_tags_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 202,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_comparison_failure_deltas_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 218,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_comparison_failure_deltas_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 226,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_comparison_process_metrics_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 214,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_comparison_process_metrics_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 221,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_context_variants_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 204,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_context_variants_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 211,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_experiment_suite_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 53,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_experiment_suite_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 72,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_first_batch_results_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 58,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_first_batch_results_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 71,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_real_task_closure_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 63,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_real_task_closure_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 73,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_reflect_variants_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 208,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_reflect_variants_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 216,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_research_taskset_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 56,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_research_taskset_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 71,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_strategy_compare_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 197,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_strategy_compare_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 207,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_task_level_comparison_deltas_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 223,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_before_task_level_comparison_deltas_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 232,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_completed_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 229,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase8_completed_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 239,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_eval_smoke_failure_diagnostics_CURRENT_STATUS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 186,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_eval_smoke_failure_diagnostics_PHASE_PROGRESS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 202,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_minimal_multiround_loop_CURRENT_STATUS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 107,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_minimal_multiround_loop_PHASE_PROGRESS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 124,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_missing_task_verification_diagnostics_CURRENT_STATUS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 171,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_missing_task_verification_diagnostics_PHASE_PROGRESS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 188,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_model_decision_layer_CURRENT_STATUS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 88,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_model_decision_layer_PHASE_PROGRESS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 112,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_model_interface_hardening_CURRENT_STATUS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 202,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_model_interface_hardening_PHASE_PROGRESS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 217,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_mvp_docs_acceptance_freeze_CURRENT_STATUS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 210,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_mvp_docs_acceptance_freeze_PHASE_PROGRESS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 224,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_openai_compatible_model_adapter_CURRENT_STATUS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 90,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_openai_compatible_model_adapter_PHASE_PROGRESS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 116,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_real_loop_kernel_cleanup_CURRENT_STATUS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 194,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_real_loop_kernel_cleanup_PHASE_PROGRESS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 210,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_real_observe_progress_CURRENT_STATUS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 92,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_real_observe_progress_PHASE_PROGRESS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 119,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_real_state_handlers_CURRENT_STATUS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 157,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_real_state_handlers_PHASE_PROGRESS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 174,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_reflect_feedback_driven_replan_CURRENT_STATUS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 142,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_reflect_feedback_driven_replan_PHASE_PROGRESS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 160,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_reflect_feedback_enforced_replan_CURRENT_STATUS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 178,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_reflect_feedback_enforced_replan_PHASE_PROGRESS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 195,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_remove_stub_verify_fallback_CURRENT_STATUS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 164,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_remove_stub_verify_fallback_PHASE_PROGRESS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 181,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_reprioritize_next_steps_CURRENT_STATUS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 87,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_reprioritize_next_steps_PHASE_PROGRESS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 112,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_sandbox_retention_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 78,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_sandbox_retention_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 100,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_structured_failure_taxonomy_CURRENT_STATUS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 127,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_structured_failure_taxonomy_PHASE_PROGRESS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 145,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_task_schema_sandbox_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 73,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_task_schema_sandbox_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 94,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_task_verify_commands_CURRENT_STATUS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 81,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_task_verify_commands_PHASE_PROGRESS_2026-06-15.md",
+      "language": "markdown",
+      "sizeLines": 104,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_token_usage_diagnostics_CURRENT_STATUS_2026-06-20.md",
+      "language": "markdown",
+      "sizeLines": 238,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_token_usage_diagnostics_PHASE_PROGRESS_2026-06-20.md",
+      "language": "markdown",
+      "sizeLines": 253,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_verify_rules_regex_json_diff_text_CURRENT_STATUS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 149,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_verify_rules_regex_json_diff_text_PHASE_PROGRESS_2026-06-17.md",
+      "language": "markdown",
+      "sizeLines": 167,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_verify_rules_structured_outputs_CURRENT_STATUS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 112,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "dev_process_history/phase9_before_verify_rules_structured_outputs_PHASE_PROGRESS_2026-06-16.md",
+      "language": "markdown",
+      "sizeLines": 130,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "language": "markdown",
+      "sizeLines": 845,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/CURRENT_STATUS.md",
+      "language": "markdown",
+      "sizeLines": 256,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/DECISIONS.md",
+      "language": "markdown",
+      "sizeLines": 227,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/DEVELOPMENT_PLAYBOOK.md",
+      "language": "markdown",
+      "sizeLines": 503,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/DIRECTORY_GUIDE.md",
+      "language": "markdown",
+      "sizeLines": 398,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/HARNESS_IMPROVEMENT_LOG.md",
+      "language": "markdown",
+      "sizeLines": 113,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/MONTH_PLAN.md",
+      "language": "markdown",
+      "sizeLines": 176,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/MVP2_HITL_TOOL_POLICY_DESIGN.md",
+      "language": "markdown",
+      "sizeLines": 485,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/MVP_ACCEPTANCE.md",
+      "language": "markdown",
+      "sizeLines": 85,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/PHASE_PROGRESS.md",
+      "language": "markdown",
+      "sizeLines": 293,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/PRD.md",
+      "language": "markdown",
+      "sizeLines": 269,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/RUN_CHAIN.html",
+      "language": "html",
+      "sizeLines": 789,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "docs/SESSION_ENTRY.md",
+      "language": "markdown",
+      "sizeLines": 50,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/TASK_GENERATION_GUIDE.md",
+      "language": "markdown",
+      "sizeLines": 311,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/USAGE_GUIDE.md",
+      "language": "markdown",
+      "sizeLines": 541,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/chat.txt",
+      "language": "text",
+      "sizeLines": 47,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/course_project_spec_self_coding_agent.docx",
+      "language": "docx",
+      "sizeLines": 608,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "\"docs/\\344\\273\\243\\347\\240\\201\\345\\217\\257\\350\\257\\273\\346\\200\\247\\350\\247\\204\\350\\214\\203.md\"",
+      "language": "md\"",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "\"docs/\\347\\250\\213\\345\\272\\217\\350\\256\\276\\350\\256\\241\\346\\226\\271\\346\\263\\225\\345\\255\\246\\350\\257\\276\\347\\250\\213\\350\\257\\264\\346\\230\\216\\344\\271\\2462026.docx\"",
+      "language": "docx\"",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "eval_tasks/.gitkeep",
+      "language": "unknown",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "eval_tasks/sample_batch.json",
+      "language": "json",
+      "sizeLines": 156,
+      "fileCategory": "config"
+    },
+    {
+      "path": "experiment_suites/first_batch.json",
+      "language": "json",
+      "sizeLines": 23,
+      "fileCategory": "config"
+    },
+    {
+      "path": "pyproject.toml",
+      "language": "toml",
+      "sizeLines": 26,
+      "fileCategory": "config"
+    },
+    {
+      "path": "pytest_tmp/.gitkeep",
+      "language": "unknown",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "requirements.txt",
+      "language": "text",
+      "sizeLines": 7,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/README.md",
+      "language": "markdown",
+      "sizeLines": 66,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/notes/.gitkeep",
+      "language": "unknown",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 21,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board.py",
+      "language": "python",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 473,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/service.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/README.md",
+      "language": "markdown",
+      "sizeLines": 13,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/task_board.py",
+      "language": "python",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 473,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/task_board/service.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board/tasks.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 13,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board.py",
+      "language": "python",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 498,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/service.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 51,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 13,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board.py",
+      "language": "python",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 500,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/service.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 51,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/README.md",
+      "language": "markdown",
+      "sizeLines": 13,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board.py",
+      "language": "python",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 500,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/service.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/tasks.json",
+      "language": "json",
+      "sizeLines": 51,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 13,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board.py",
+      "language": "python",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 472,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/service.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/README.md",
+      "language": "markdown",
+      "sizeLines": 13,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board.py",
+      "language": "python",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 473,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/service.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_false_lead/tasks.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 14,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board.py",
+      "language": "python",
+      "sizeLines": 62,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 543,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/service.py",
+      "language": "python",
+      "sizeLines": 27,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/README.md",
+      "language": "markdown",
+      "sizeLines": 14,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board.py",
+      "language": "python",
+      "sizeLines": 62,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 546,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/service.py",
+      "language": "python",
+      "sizeLines": 27,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_task_board_similar_function/tasks.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_todo_app/.agent_sandboxes/run-20260619-140710-ffa68ca3/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_todo_app/.agent_sandboxes/run-20260619-140710-ffa68ca3/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_todo_app/.agent_sandboxes/run-20260619-140710-ffa68ca3/repo/todo_app.py",
+      "language": "python",
+      "sizeLines": 84,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_todo_app/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_buggy_todo_app/todo_app.py",
+      "language": "python",
+      "sizeLines": 84,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/data/coupons.json",
+      "language": "json",
+      "sizeLines": 46,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/data/customers.json",
+      "language": "json",
+      "sizeLines": 24,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/data/inventory.json",
+      "language": "json",
+      "sizeLines": 27,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/data/orders.json",
+      "language": "json",
+      "sizeLines": 35,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/data/products.json",
+      "language": "json",
+      "sizeLines": 35,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/data/refunds.json",
+      "language": "json",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/data/risk_rules.json",
+      "language": "json",
+      "sizeLines": 8,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/order_ops.py",
+      "language": "python",
+      "sizeLines": 47,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/order_ops/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/order_ops/inventory.py",
+      "language": "python",
+      "sizeLines": 58,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/order_ops/orders.py",
+      "language": "python",
+      "sizeLines": 1213,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/order_ops/pricing.py",
+      "language": "python",
+      "sizeLines": 791,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/order_ops/refunds.py",
+      "language": "python",
+      "sizeLines": 1115,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/order_ops/reports.py",
+      "language": "python",
+      "sizeLines": 992,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/order_ops/risk.py",
+      "language": "python",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_order_ops_platform/order_ops/storage.py",
+      "language": "python",
+      "sizeLines": 47,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_export/README.md",
+      "language": "markdown",
+      "sizeLines": 14,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_export/task_board.py",
+      "language": "python",
+      "sizeLines": 62,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 546,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/service.py",
+      "language": "python",
+      "sizeLines": 27,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_export/tasks.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_filters/.agent_sandboxes/run-20260620-205456-bd25694e/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_filters/README.md",
+      "language": "markdown",
+      "sizeLines": 13,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board.py",
+      "language": "python",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 492,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/service.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_filters/tasks.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/README.md",
+      "language": "markdown",
+      "sizeLines": 16,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board.py",
+      "language": "python",
+      "sizeLines": 101,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 636,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/service.py",
+      "language": "python",
+      "sizeLines": 116,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/tasks.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_views/README.md",
+      "language": "markdown",
+      "sizeLines": 15,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_views/task_board.py",
+      "language": "python",
+      "sizeLines": 79,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/filters.py",
+      "language": "python",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/query_engine.py",
+      "language": "python",
+      "sizeLines": 591,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/render.py",
+      "language": "python",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/service.py",
+      "language": "python",
+      "sizeLines": 38,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/storage.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_task_board_views/tasks.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-202502-c2f1b222/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-202502-c2f1b222/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 9,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-202502-c2f1b222/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 21,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-202502-c2f1b222/repo/todo_app.py",
+      "language": "python",
+      "sizeLines": 90,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-204901-74ca8b94/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-204901-74ca8b94/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 9,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-204901-74ca8b94/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-204901-74ca8b94/repo/todo_app.py",
+      "language": "python",
+      "sizeLines": 94,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_todo_app_helpers/README.md",
+      "language": "markdown",
+      "sizeLines": 9,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_todo_app_helpers/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_refactor_todo_app_helpers/todo_app.py",
+      "language": "python",
+      "sizeLines": 84,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-142517-45511f0e/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 28,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-142517-45511f0e/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-142517-45511f0e/repo/todo_app.py",
+      "language": "python",
+      "sizeLines": 84,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-144059-c677cb83/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 28,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-144059-c677cb83/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-144059-c677cb83/repo/todo_app.py",
+      "language": "python",
+      "sizeLines": 84,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-155525-12419f63/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-155525-12419f63/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 28,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-155525-12419f63/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 14,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-155525-12419f63/repo/todo_app.py",
+      "language": "python",
+      "sizeLines": 96,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-194315-cf2e5817/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-194315-cf2e5817/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 28,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-194315-cf2e5817/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-194315-cf2e5817/repo/todo_app.py",
+      "language": "python",
+      "sizeLines": 102,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-195324-f1979d61/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-195324-f1979d61/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 28,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-195324-f1979d61/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-195324-f1979d61/repo/todo_app.py",
+      "language": "python",
+      "sizeLines": 102,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-202144-80e2758e/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-202144-80e2758e/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 28,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-202144-80e2758e/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-202144-80e2758e/repo/todo_app.py",
+      "language": "python",
+      "sizeLines": 102,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-161412-b381963e/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-161412-b381963e/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 28,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-161412-b381963e/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-161412-b381963e/repo/todo_app.py",
+      "language": "python",
+      "sizeLines": 102,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-172323-fb6aea7f/repo/.agent_memory/long_term_memory.jsonl",
+      "language": "jsonl",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-172323-fb6aea7f/repo/README.md",
+      "language": "markdown",
+      "sizeLines": 28,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-172323-fb6aea7f/repo/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-172323-fb6aea7f/repo/todo_app.py",
+      "language": "python",
+      "sizeLines": 102,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/README.md",
+      "language": "markdown",
+      "sizeLines": 28,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/tasks.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/repos/demo_todo_app/todo_app.py",
+      "language": "python",
+      "sizeLines": 84,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/tasks/.gitkeep",
+      "language": "unknown",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_bugfix_task_board_batch.json",
+      "language": "json",
+      "sizeLines": 128,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_bugfix_task_board_dual_fix_batch.json",
+      "language": "json",
+      "sizeLines": 91,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_bugfix_task_board_false_lead_batch.json",
+      "language": "json",
+      "sizeLines": 120,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_bugfix_task_board_similar_function_batch.json",
+      "language": "json",
+      "sizeLines": 84,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_bugfix_todo_app_batch.json",
+      "language": "json",
+      "sizeLines": 53,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_order_ops_feature_coupon_stack_rules.json",
+      "language": "json",
+      "sizeLines": 116,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_order_ops_feature_inventory_reservation.json",
+      "language": "json",
+      "sizeLines": 113,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_order_ops_feature_refund_restock_report.json",
+      "language": "json",
+      "sizeLines": 95,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_order_ops_feature_risk_hold_workflow.json",
+      "language": "json",
+      "sizeLines": 97,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_refactor_task_board_export_batch.json",
+      "language": "json",
+      "sizeLines": 72,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_refactor_task_board_filters_batch.json",
+      "language": "json",
+      "sizeLines": 85,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_refactor_task_board_service_pipeline_batch.json",
+      "language": "json",
+      "sizeLines": 116,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_refactor_task_board_views_batch.json",
+      "language": "json",
+      "sizeLines": 94,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_refactor_todo_app_helpers_batch.json",
+      "language": "json",
+      "sizeLines": 104,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_todo_app_batch.json",
+      "language": "json",
+      "sizeLines": 48,
+      "fileCategory": "config"
+    },
+    {
+      "path": "sandbox_experiments/tasks/demo_todo_app_complete_task_batch.json",
+      "language": "json",
+      "sizeLines": 72,
+      "fileCategory": "config"
+    },
+    {
+      "path": "skills/requirements-to-delivery-planning/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 145,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "skills/requirements-to-delivery-planning/references/document-set.md",
+      "language": "markdown",
+      "sizeLines": 80,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/cli.py",
+      "language": "python",
+      "sizeLines": 143,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/config.py",
+      "language": "python",
+      "sizeLines": 97,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/context.py",
+      "language": "python",
+      "sizeLines": 562,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/env_loader.py",
+      "language": "python",
+      "sizeLines": 42,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/eval_runner.py",
+      "language": "python",
+      "sizeLines": 1587,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/experiment_runner.py",
+      "language": "python",
+      "sizeLines": 188,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/file_structure.py",
+      "language": "python",
+      "sizeLines": 81,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/hitl.py",
+      "language": "python",
+      "sizeLines": 229,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/live_trace_view.py",
+      "language": "python",
+      "sizeLines": 946,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/loop.py",
+      "language": "python",
+      "sizeLines": 2080,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/memory.py",
+      "language": "python",
+      "sizeLines": 504,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/model.py",
+      "language": "python",
+      "sizeLines": 1116,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/outcome_summary.py",
+      "language": "python",
+      "sizeLines": 421,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/runner.py",
+      "language": "python",
+      "sizeLines": 1615,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/runtime_trace.py",
+      "language": "python",
+      "sizeLines": 113,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/tools.py",
+      "language": "python",
+      "sizeLines": 497,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/verify.py",
+      "language": "python",
+      "sizeLines": 879,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/conftest.py",
+      "language": "python",
+      "sizeLines": 80,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_cli.py",
+      "language": "python",
+      "sizeLines": 1407,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_context.py",
+      "language": "python",
+      "sizeLines": 96,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_env_loader.py",
+      "language": "python",
+      "sizeLines": 48,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_eval.py",
+      "language": "python",
+      "sizeLines": 893,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_eval_phase8_comparison.py",
+      "language": "python",
+      "sizeLines": 316,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_experiment_runner.py",
+      "language": "python",
+      "sizeLines": 179,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_hitl.py",
+      "language": "python",
+      "sizeLines": 176,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_live_trace_view.py",
+      "language": "python",
+      "sizeLines": 60,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_loop.py",
+      "language": "python",
+      "sizeLines": 2499,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_model.py",
+      "language": "python",
+      "sizeLines": 893,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_mvp_acceptance_docs.py",
+      "language": "python",
+      "sizeLines": 88,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_tools.py",
+      "language": "python",
+      "sizeLines": 286,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_verify.py",
+      "language": "python",
+      "sizeLines": 657,
+      "fileCategory": "code"
+    }
+  ],
+  "totalFiles": 412,
+  "filteredByIgnore": 0,
+  "estimatedComplexity": "complex",
+  "importMap": {
+    ".agent_memory/long_term_memory.jsonl": [],
+    ".env.example": [],
+    ".gitignore": [],
+    "AGENTS.md": [],
+    "README.md": [],
+    "agent_notes.md": [],
+    "ai-chat/2026-06-11-project-planning-chat-export.md": [],
+    "ai-chat/thinking-doc.docx": [],
+    "configs/default.json": [],
+    "configs/high_weak_conflict_penalty.json": [],
+    "configs/memory_off.json": [],
+    "configs/naive_recent_context.json": [],
+    "configs/short_memory_summary.json": [],
+    "configs/verify_failure_only_observe.json": [],
+    "configs/verify_failure_only_reflect.json": [],
+    "dev_process_history/CURRENT_STATUS_2026-06-21_cross_round_done_list.md": [],
+    "dev_process_history/CURRENT_STATUS_2026-06-21_donelist_loop_end.md": [],
+    "dev_process_history/CURRENT_STATUS_2026-06-21_phase9x_verify-final-only.md": [],
+    "dev_process_history/CURRENT_STATUS_2026-06-21_runtime_memory_pollution_v1.md": [],
+    "dev_process_history/CURRENT_STATUS_2026-06-22_live_trace_view.md": [],
+    "dev_process_history/CURRENT_STATUS_before_context_comments_2026-06-24.md": [],
+    "dev_process_history/CURRENT_STATUS_phase9x_before_reread_fresh_ranges_20260622.md": [],
+    "dev_process_history/CURRENT_STATUS_phase9x_before_working_memory_20260622.md": [],
+    "dev_process_history/PHASE_PROGRESS_2026-06-21_cross_round_done_list.md": [],
+    "dev_process_history/PHASE_PROGRESS_2026-06-21_donelist_loop_end.md": [],
+    "dev_process_history/PHASE_PROGRESS_2026-06-21_runtime_memory_pollution_v1.md": [],
+    "dev_process_history/PHASE_PROGRESS_2026-06-22_live_trace_view.md": [],
+    "dev_process_history/PHASE_PROGRESS_before_context_comments_2026-06-24.md": [],
+    "dev_process_history/PHASE_PROGRESS_phase9x_before_reread_fresh_ranges_20260622.md": [],
+    "dev_process_history/PHASE_PROGRESS_phase9x_before_working_memory_20260622.md": [],
+    "dev_process_history/phase1_pre_scaffold_CURRENT_STATUS_2026-06-12.md": [],
+    "dev_process_history/phase1_pre_scaffold_PHASE_PROGRESS_2026-06-12.md": [],
+    "dev_process_history/phase2_before_minimal_loop_CURRENT_STATUS_2026-06-12.md": [],
+    "dev_process_history/phase2_before_minimal_loop_PHASE_PROGRESS_2026-06-12.md": [],
+    "dev_process_history/phase3_before_verification_CURRENT_STATUS_2026-06-12.md": [],
+    "dev_process_history/phase3_before_verification_PHASE_PROGRESS_2026-06-12.md": [],
+    "dev_process_history/phase4_before_context_CURRENT_STATUS_2026-06-12.md": [],
+    "dev_process_history/phase4_before_context_PHASE_PROGRESS_2026-06-12.md": [],
+    "dev_process_history/phase5_before_context_stats_CURRENT_STATUS_2026-06-13.md": [],
+    "dev_process_history/phase5_before_context_stats_PHASE_PROGRESS_2026-06-13.md": [],
+    "dev_process_history/phase5_before_longterm_memory_CURRENT_STATUS_2026-06-13.md": [],
+    "dev_process_history/phase5_before_longterm_memory_PHASE_PROGRESS_2026-06-13.md": [],
+    "dev_process_history/phase5_before_memory_manager_CURRENT_STATUS_2026-06-13.md": [],
+    "dev_process_history/phase5_before_memory_manager_PHASE_PROGRESS_2026-06-13.md": [],
+    "dev_process_history/phase5_before_recall_strategy_CURRENT_STATUS_2026-06-12.md": [],
+    "dev_process_history/phase5_before_recall_strategy_PHASE_PROGRESS_2026-06-12.md": [],
+    "dev_process_history/phase5_before_tasktype_recall_CURRENT_STATUS_2026-06-13.md": [],
+    "dev_process_history/phase5_before_tasktype_recall_PHASE_PROGRESS_2026-06-13.md": [],
+    "dev_process_history/phase6_before_behavior_constraints_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_behavior_constraints_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_configurable_summary_length_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_configurable_summary_length_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_configurable_weak_penalty_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_configurable_weak_penalty_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_conflict_injection_policy_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_conflict_injection_policy_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_conflict_severity_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_conflict_severity_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_memory_conflict_diagnostics_CURRENT_STATUS_2026-06-13.md": [],
+    "dev_process_history/phase6_before_memory_conflict_diagnostics_PHASE_PROGRESS_2026-06-13.md": [],
+    "dev_process_history/phase6_before_memory_evidence_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_memory_evidence_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_memory_read_filter_CURRENT_STATUS_2026-06-13.md": [],
+    "dev_process_history/phase6_before_memory_read_filter_PHASE_PROGRESS_2026-06-13.md": [],
+    "dev_process_history/phase6_before_memory_readback_CURRENT_STATUS_2026-06-13.md": [],
+    "dev_process_history/phase6_before_memory_readback_PHASE_PROGRESS_2026-06-13.md": [],
+    "dev_process_history/phase6_before_memory_summary_compression_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_memory_summary_compression_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_memory_trace_events_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_memory_trace_events_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_weak_conflict_ranking_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase6_before_weak_conflict_ranking_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase7_before_eval_derived_rates_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase7_before_eval_derived_rates_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase7_before_eval_diagnostics_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase7_before_eval_diagnostics_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase7_before_eval_expectations_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase7_before_eval_expectations_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase7_before_eval_quant_expectations_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase7_before_eval_quant_expectations_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase7_before_eval_runner_CURRENT_STATUS_2026-06-14.md": [],
+    "dev_process_history/phase7_before_eval_runner_PHASE_PROGRESS_2026-06-14.md": [],
+    "dev_process_history/phase7_before_eval_taxonomy_tags_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase7_before_eval_taxonomy_tags_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_comparison_failure_deltas_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_comparison_failure_deltas_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_comparison_process_metrics_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_comparison_process_metrics_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_context_variants_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_context_variants_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_experiment_suite_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_experiment_suite_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_first_batch_results_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_first_batch_results_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_real_task_closure_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_real_task_closure_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_reflect_variants_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_reflect_variants_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_research_taskset_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_research_taskset_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_strategy_compare_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_strategy_compare_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_task_level_comparison_deltas_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase8_before_task_level_comparison_deltas_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase8_completed_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase8_completed_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase9_before_eval_smoke_failure_diagnostics_CURRENT_STATUS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_eval_smoke_failure_diagnostics_PHASE_PROGRESS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_minimal_multiround_loop_CURRENT_STATUS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_minimal_multiround_loop_PHASE_PROGRESS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_missing_task_verification_diagnostics_CURRENT_STATUS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_missing_task_verification_diagnostics_PHASE_PROGRESS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_model_decision_layer_CURRENT_STATUS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_model_decision_layer_PHASE_PROGRESS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_model_interface_hardening_CURRENT_STATUS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_model_interface_hardening_PHASE_PROGRESS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_mvp_docs_acceptance_freeze_CURRENT_STATUS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_mvp_docs_acceptance_freeze_PHASE_PROGRESS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_openai_compatible_model_adapter_CURRENT_STATUS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_openai_compatible_model_adapter_PHASE_PROGRESS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_real_loop_kernel_cleanup_CURRENT_STATUS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_real_loop_kernel_cleanup_PHASE_PROGRESS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_real_observe_progress_CURRENT_STATUS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_real_observe_progress_PHASE_PROGRESS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_real_state_handlers_CURRENT_STATUS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_real_state_handlers_PHASE_PROGRESS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_reflect_feedback_driven_replan_CURRENT_STATUS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_reflect_feedback_driven_replan_PHASE_PROGRESS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_reflect_feedback_enforced_replan_CURRENT_STATUS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_reflect_feedback_enforced_replan_PHASE_PROGRESS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_remove_stub_verify_fallback_CURRENT_STATUS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_remove_stub_verify_fallback_PHASE_PROGRESS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_reprioritize_next_steps_CURRENT_STATUS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_reprioritize_next_steps_PHASE_PROGRESS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_sandbox_retention_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase9_before_sandbox_retention_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase9_before_structured_failure_taxonomy_CURRENT_STATUS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_structured_failure_taxonomy_PHASE_PROGRESS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_task_schema_sandbox_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase9_before_task_schema_sandbox_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase9_before_task_verify_commands_CURRENT_STATUS_2026-06-15.md": [],
+    "dev_process_history/phase9_before_task_verify_commands_PHASE_PROGRESS_2026-06-15.md": [],
+    "dev_process_history/phase9_before_token_usage_diagnostics_CURRENT_STATUS_2026-06-20.md": [],
+    "dev_process_history/phase9_before_token_usage_diagnostics_PHASE_PROGRESS_2026-06-20.md": [],
+    "dev_process_history/phase9_before_verify_rules_regex_json_diff_text_CURRENT_STATUS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_verify_rules_regex_json_diff_text_PHASE_PROGRESS_2026-06-17.md": [],
+    "dev_process_history/phase9_before_verify_rules_structured_outputs_CURRENT_STATUS_2026-06-16.md": [],
+    "dev_process_history/phase9_before_verify_rules_structured_outputs_PHASE_PROGRESS_2026-06-16.md": [],
+    "docs/ARCHITECTURE.md": [],
+    "docs/CURRENT_STATUS.md": [],
+    "docs/DECISIONS.md": [],
+    "docs/DEVELOPMENT_PLAYBOOK.md": [],
+    "docs/DIRECTORY_GUIDE.md": [],
+    "docs/HARNESS_IMPROVEMENT_LOG.md": [],
+    "docs/MONTH_PLAN.md": [],
+    "docs/MVP2_HITL_TOOL_POLICY_DESIGN.md": [],
+    "docs/MVP_ACCEPTANCE.md": [],
+    "docs/PHASE_PROGRESS.md": [],
+    "docs/PRD.md": [],
+    "docs/RUN_CHAIN.html": [],
+    "docs/SESSION_ENTRY.md": [],
+    "docs/TASK_GENERATION_GUIDE.md": [],
+    "docs/USAGE_GUIDE.md": [],
+    "docs/chat.txt": [],
+    "docs/course_project_spec_self_coding_agent.docx": [],
+    "\"docs/\\344\\273\\243\\347\\240\\201\\345\\217\\257\\350\\257\\273\\346\\200\\247\\350\\247\\204\\350\\214\\203.md\"": [],
+    "\"docs/\\347\\250\\213\\345\\272\\217\\350\\256\\276\\350\\256\\241\\346\\226\\271\\346\\263\\225\\345\\255\\246\\350\\257\\276\\347\\250\\213\\350\\257\\264\\346\\230\\216\\344\\271\\2462026.docx\"": [],
+    "eval_tasks/.gitkeep": [],
+    "eval_tasks/sample_batch.json": [],
+    "experiment_suites/first_batch.json": [],
+    "pyproject.toml": [],
+    "pytest_tmp/.gitkeep": [],
+    "requirements.txt": [],
+    "sandbox_experiments/README.md": [],
+    "sandbox_experiments/notes/.gitkeep": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/README.md": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/.agent_sandboxes/run-20260620-172501-0576d568/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/README.md": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/task_board.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board/tasks.json": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/README.md": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260620-182338-48a6c14c/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/README.md": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/.agent_sandboxes/run-20260622-175159-36fadb0a/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/README.md": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_dual_fix/tasks.json": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/README.md": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/.agent_sandboxes/run-20260620-182456-a177476a/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/README.md": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_false_lead/tasks.json": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/README.md": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/.agent_sandboxes/run-20260620-182251-a615e844/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/README.md": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_buggy_task_board_similar_function/tasks.json": [],
+    "sandbox_experiments/repos/demo_buggy_todo_app/.agent_sandboxes/run-20260619-140710-ffa68ca3/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_buggy_todo_app/.agent_sandboxes/run-20260619-140710-ffa68ca3/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_buggy_todo_app/.agent_sandboxes/run-20260619-140710-ffa68ca3/repo/todo_app.py": [],
+    "sandbox_experiments/repos/demo_buggy_todo_app/tasks.json": [],
+    "sandbox_experiments/repos/demo_buggy_todo_app/todo_app.py": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/data/coupons.json": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/data/customers.json": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/data/inventory.json": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/data/orders.json": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/data/products.json": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/data/refunds.json": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/data/risk_rules.json": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/order_ops.py": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/order_ops/__init__.py": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/order_ops/inventory.py": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/order_ops/orders.py": [
+      "sandbox_experiments/repos/demo_order_ops_platform/order_ops/pricing.py"
+    ],
+    "sandbox_experiments/repos/demo_order_ops_platform/order_ops/pricing.py": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/order_ops/refunds.py": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/order_ops/reports.py": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/order_ops/risk.py": [],
+    "sandbox_experiments/repos/demo_order_ops_platform/order_ops/storage.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_export/README.md": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_export/task_board.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_export/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_export/tasks.json": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_filters/.agent_sandboxes/run-20260620-205456-bd25694e/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_filters/README.md": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_filters/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_filters/tasks.json": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/README.md": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_service_pipeline/tasks.json": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_views/README.md": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_views/task_board.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/__init__.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/filters.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/query_engine.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/render.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/service.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_views/task_board/storage.py": [],
+    "sandbox_experiments/repos/demo_refactor_task_board_views/tasks.json": [],
+    "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-202502-c2f1b222/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-202502-c2f1b222/repo/README.md": [],
+    "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-202502-c2f1b222/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-202502-c2f1b222/repo/todo_app.py": [],
+    "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-204901-74ca8b94/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-204901-74ca8b94/repo/README.md": [],
+    "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-204901-74ca8b94/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_refactor_todo_app_helpers/.agent_sandboxes/run-20260620-204901-74ca8b94/repo/todo_app.py": [],
+    "sandbox_experiments/repos/demo_refactor_todo_app_helpers/README.md": [],
+    "sandbox_experiments/repos/demo_refactor_todo_app_helpers/tasks.json": [],
+    "sandbox_experiments/repos/demo_refactor_todo_app_helpers/todo_app.py": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-142517-45511f0e/repo/README.md": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-142517-45511f0e/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-142517-45511f0e/repo/todo_app.py": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-144059-c677cb83/repo/README.md": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-144059-c677cb83/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-144059-c677cb83/repo/todo_app.py": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-155525-12419f63/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-155525-12419f63/repo/README.md": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-155525-12419f63/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-155525-12419f63/repo/todo_app.py": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-194315-cf2e5817/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-194315-cf2e5817/repo/README.md": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-194315-cf2e5817/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-194315-cf2e5817/repo/todo_app.py": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-195324-f1979d61/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-195324-f1979d61/repo/README.md": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-195324-f1979d61/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-195324-f1979d61/repo/todo_app.py": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-202144-80e2758e/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-202144-80e2758e/repo/README.md": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-202144-80e2758e/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260619-202144-80e2758e/repo/todo_app.py": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-161412-b381963e/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-161412-b381963e/repo/README.md": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-161412-b381963e/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-161412-b381963e/repo/todo_app.py": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-172323-fb6aea7f/repo/.agent_memory/long_term_memory.jsonl": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-172323-fb6aea7f/repo/README.md": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-172323-fb6aea7f/repo/tasks.json": [],
+    "sandbox_experiments/repos/demo_todo_app/.agent_sandboxes/run-20260620-172323-fb6aea7f/repo/todo_app.py": [],
+    "sandbox_experiments/repos/demo_todo_app/README.md": [],
+    "sandbox_experiments/repos/demo_todo_app/tasks.json": [],
+    "sandbox_experiments/repos/demo_todo_app/todo_app.py": [],
+    "sandbox_experiments/tasks/.gitkeep": [],
+    "sandbox_experiments/tasks/demo_bugfix_task_board_batch.json": [],
+    "sandbox_experiments/tasks/demo_bugfix_task_board_dual_fix_batch.json": [],
+    "sandbox_experiments/tasks/demo_bugfix_task_board_false_lead_batch.json": [],
+    "sandbox_experiments/tasks/demo_bugfix_task_board_similar_function_batch.json": [],
+    "sandbox_experiments/tasks/demo_bugfix_todo_app_batch.json": [],
+    "sandbox_experiments/tasks/demo_order_ops_feature_coupon_stack_rules.json": [],
+    "sandbox_experiments/tasks/demo_order_ops_feature_inventory_reservation.json": [],
+    "sandbox_experiments/tasks/demo_order_ops_feature_refund_restock_report.json": [],
+    "sandbox_experiments/tasks/demo_order_ops_feature_risk_hold_workflow.json": [],
+    "sandbox_experiments/tasks/demo_refactor_task_board_export_batch.json": [],
+    "sandbox_experiments/tasks/demo_refactor_task_board_filters_batch.json": [],
+    "sandbox_experiments/tasks/demo_refactor_task_board_service_pipeline_batch.json": [],
+    "sandbox_experiments/tasks/demo_refactor_task_board_views_batch.json": [],
+    "sandbox_experiments/tasks/demo_refactor_todo_app_helpers_batch.json": [],
+    "sandbox_experiments/tasks/demo_todo_app_batch.json": [],
+    "sandbox_experiments/tasks/demo_todo_app_complete_task_batch.json": [],
+    "skills/requirements-to-delivery-planning/SKILL.md": [],
+    "skills/requirements-to-delivery-planning/references/document-set.md": [],
+    "src/cli.py": [
+      "src/config.py",
+      "src/env_loader.py",
+      "src/eval_runner.py",
+      "src/experiment_runner.py",
+      "src/runner.py"
+    ],
+    "src/config.py": [],
+    "src/context.py": [
+      "src/file_structure.py"
+    ],
+    "src/env_loader.py": [],
+    "src/eval_runner.py": [
+      "src/config.py",
+      "src/outcome_summary.py",
+      "src/runner.py"
+    ],
+    "src/experiment_runner.py": [
+      "src/eval_runner.py"
+    ],
+    "src/file_structure.py": [],
+    "src/hitl.py": [],
+    "src/live_trace_view.py": [],
+    "src/loop.py": [
+      "src/config.py",
+      "src/context.py",
+      "src/hitl.py",
+      "src/memory.py",
+      "src/model.py",
+      "src/outcome_summary.py",
+      "src/runtime_trace.py",
+      "src/tools.py",
+      "src/verify.py"
+    ],
+    "src/memory.py": [],
+    "src/model.py": [
+      "src/context.py",
+      "src/env_loader.py"
+    ],
+    "src/outcome_summary.py": [
+      "src/config.py",
+      "src/model.py"
+    ],
+    "src/runner.py": [
+      "src/config.py",
+      "src/hitl.py",
+      "src/live_trace_view.py",
+      "src/loop.py",
+      "src/memory.py",
+      "src/outcome_summary.py",
+      "src/runtime_trace.py",
+      "src/tools.py"
+    ],
+    "src/runtime_trace.py": [],
+    "src/tools.py": [
+      "src/file_structure.py"
+    ],
+    "src/verify.py": [
+      "src/config.py",
+      "src/tools.py"
+    ],
+    "tests/conftest.py": [],
+    "tests/test_cli.py": [
+      "src/config.py",
+      "src/runner.py"
+    ],
+    "tests/test_context.py": [
+      "src/context.py"
+    ],
+    "tests/test_env_loader.py": [
+      "src/env_loader.py"
+    ],
+    "tests/test_eval.py": [
+      "src/eval_runner.py"
+    ],
+    "tests/test_eval_phase8_comparison.py": [
+      "src/eval_runner.py"
+    ],
+    "tests/test_experiment_runner.py": [
+      "src/experiment_runner.py"
+    ],
+    "tests/test_hitl.py": [
+      "src/config.py",
+      "src/context.py",
+      "src/hitl.py",
+      "src/runner.py"
+    ],
+    "tests/test_live_trace_view.py": [
+      "src/live_trace_view.py"
+    ],
+    "tests/test_loop.py": [
+      "src/config.py",
+      "src/loop.py",
+      "src/model.py",
+      "src/runtime_trace.py",
+      "src/verify.py"
+    ],
+    "tests/test_model.py": [
+      "src/context.py",
+      "src/memory.py",
+      "src/model.py"
+    ],
+    "tests/test_mvp_acceptance_docs.py": [],
+    "tests/test_tools.py": [
+      "src/tools.py"
+    ],
+    "tests/test_verify.py": [
+      "src/config.py",
+      "src/tools.py",
+      "src/verify.py"
+    ]
+  },
+  "stats": {
+    "byCategory": {
+      "config": 76,
+      "code": 152,
+      "docs": 183,
+      "markup": 1
+    },
+    "byLanguage": {
+      "jsonl": 15,
+      "example": 1,
+      "unknown": 5,
+      "markdown": 179,
+      "docx": 2,
+      "json": 59,
+      "html": 1,
+      "text": 2,
+      "md\"": 1,
+      "docx\"": 1,
+      "toml": 1,
+      "python": 145
+    }
+  }
+}
